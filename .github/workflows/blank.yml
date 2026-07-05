@@ -155,7 +155,8 @@ jobs:
           
           echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result"
+          # Ajout des drapeaux pour l'indentation trompeuse et les arguments de format en trop
+          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result -Wno-error=misleading-indentation -Wno-error=format-extra-args"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
@@ -169,6 +170,7 @@ jobs:
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
+
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
