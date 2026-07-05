@@ -172,17 +172,25 @@ jobs:
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
-          # Ajout de DTC=dtc pour forcer l'usage du binaire système stable d'Ubuntu et empêcher le Ségfault
+          # 1. On compile d'abord l'Image seule (cela génère aussi le DTC interne)
           if [ "${TARGET_ARCH}" = "arm64" ]; then
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc Image
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
           else
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc zImage
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
           fi
-          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc modules
+
+          # 2. STRATÉGIE : On remplace le binaire DTC interne défectueux par celui d'Ubuntu
+          echo "🔄 Remplacement du DTC interne par la version système stable..."
+          mkdir -p $BUILD_DIR/scripts/dtc
+          cp -f /usr/bin/dtc $BUILD_DIR/scripts/dtc/dtc
+          chmod +x $BUILD_DIR/scripts/dtc/dtc
+
+          # 3. On compile les dtbs et les modules normalement sans casser les variables du Makefile
+          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
+          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
+   
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
