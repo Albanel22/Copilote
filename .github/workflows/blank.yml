@@ -1,36 +1,219 @@
-# This is a basic workflow to help you get started with Actions
+name: Kernel CI — build & package
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "main" ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'Kernel version (tag/branch/commit) — ex: 4.19.325'
+        required: false
+        default: '4.19.325'
+      kernel_path:
+        description: 'Path in repo to kernel source (relative) — ex: kernel'
+        required: false
+        default: '.'
+      device:
+        description: 'Device codename (informational)'
+        required: false
+        default: 'motorola_one_5g_ace'
+      lineage:
+        description: 'LineageOS target (informational)'
+        required: false
+        default: 'lineage-23.2'
+      arch:
+        description: 'Target arch (arm64 or arm)'
+        required: false
+        default: 'arm64'
+      defconfig:
+        description: 'Kernel defconfig name (ex: vendor_defconfig or msm_defconfig). If empty, tries defconfig'
+        required: false
+        default: ''
+      cross_toolchain_url:
+        description: 'Direct archive URL of cross toolchain (optional). If empty, relies on system toolchain.'
+        required: false
+        default: ''
+      use_ccache:
+        description: 'Use ccache to speed repeated builds'
+        required: false
+        default: 'true'
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    env:
+      BUILD_DIR: out
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Set up variables
+        id: vars
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          echo "KERNEL_VERSION=${{ github.event.inputs.kernel_version }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_PATH=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
+          echo "ARCH=${{ github.event.inputs.arch }}" >> $GITHUB_OUTPUT
+          echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
+          echo "CROSS_TOOLCHAIN_URL=${{ github.event.inputs.cross_toolchain_url }}" >> $GITHUB_OUTPUT
+          echo "USE_CCACHE=${{ github.event.inputs.use_ccache }}" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git
+
+      - name: Prepare cross toolchain (optional)
+        if: steps.vars.outputs.CROSS_TOOLCHAIN_URL != ''
+        run: |
+          mkdir -p /opt/cross-toolchain
+          cd /opt/cross-toolchain
+          echo "Downloading toolchain from ${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}"
+          wget -q -O toolchain.tar.xz "${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}"
+          tar -xf toolchain.tar.xz --strip-components=1
+          ls -la /opt/cross-toolchain/bin | sed -n '1,200p'
+        shell: bash
+
+      - name: Setup environment variables
+        run: |
+          export ARCH=${{ steps.vars.outputs.ARCH }}
+          # Default CROSS_COMPILE for arm64 toolchains (override if needed)
+          if [ -n "${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}" ]; then
+            # common prefix names: aarch64-linux-gnu- or arm-eabi-
+            if ls /opt/cross-toolchain/bin/*aarch64-linux-gnu-* >/dev/null 2>&1; then
+              export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
+            else
+              # try generic gcc prefix
+              export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
+            fi
+          else
+            # rely on distro-installed cross-compiler if present (user may adjust)
+            if [ "${{ steps.vars.outputs.ARCH }}" = "arm64" ]; then
+              export CROSS_COMPILE=aarch64-linux-gnu-
+            else
+              export CROSS_COMPILE=arm-linux-gnueabi-
+            fi
+          fi
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$CROSS_COMPILE" >> $GITHUB_ENV
+          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+          echo "KERNEL_PATH=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_ENV
+
+      - name: Optionally enable ccache
+        if: steps.vars.outputs.USE_CCACHE == 'true'
+        run: |
+          echo "Enabling ccache"
+          export CCACHE_DIR=$HOME/.ccache
+          export PATH="/usr/lib/ccache:$PATH"
+          ccache -M 5G || true
+          echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
+          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
+
+      - name: Show toolchain + versions
+        run: |
+          echo "ARCH=$ARCH"
+          echo "CROSS_COMPILE=$CROSS_COMPILE"
+          ${CROSS_COMPILE}gcc --version || true
+          ${CROSS_COMPILE}ld --version || true
+          uname -a
+        shell: bash
+
+      - name: Prepare kernel tree
+        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        run: |
+          pwd
+          echo "Kernel version target: ${{ steps.vars.outputs.KERNEL_VERSION }}"
+          # If kernel_version corresponds to a tag/branch in the kernel tree, try to checkout it
+          if git rev-parse --verify --quiet "${{ steps.vars.outputs.KERNEL_VERSION }}" >/dev/null; then
+            echo "Checking out ${ { steps.vars.outputs.KERNEL_VERSION } } in kernel tree"
+            git checkout "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
+          fi
+          ls -la
+        shell: bash
+
+      - name: Configure kernel
+        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p $BUILD_DIR
+          if [ -n "${{ steps.vars.outputs.DEFCONFIG }}" ]; then
+            echo "Using defconfig: ${{ steps.vars.outputs.DEFCONFIG }}"
+            make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE ${{ steps.vars.outputs.DEFCONFIG }}
+          else
+            # try to discover a defconfig (vendor or msm) - fallback to defconfig
+            if [ -f arch/$ARCH/configs/vendor_defconfig ]; then
+              echo "Found vendor_defconfig"
+              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE vendor_defconfig
+            elif [ -f arch/$ARCH/configs/msm_defconfig ]; then
+              echo "Found msm_defconfig"
+              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE msm_defconfig
+            else
+              echo "No specific defconfig found, running defconfig"
+              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
+            fi
+          fi
+        shell: bash
+
+      - name: Build kernel (Image, dtbs, modules)
+        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          JOBS=$(nproc)
+          echo "Building with $JOBS jobs..."
+          # Build Image / zImage / Image.gz depending on arch
+          if [ "$ARCH" = "arm64" ]; then
+            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE Image
+            # dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
+          else
+            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE zImage
+            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
+          fi
+          # Modules
+          make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules
+        timeout-minutes: 60
+        shell: bash
+
+      - name: Package modules
+        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp_modules
+          make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
+          tar -C tmp_modules -czf modules.tar.gz .
+        shell: bash
+
+      - name: Collect artifacts
+        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        run: |
+          mkdir -p artifacts
+          # copy likely outputs (adjust paths if your tree differs)
+          if [ "$ARCH" = "arm64" ]; then
+            cp -v $BUILD_DIR/arch/arm64/boot/Image artifacts/ 2>/dev/null || true
+            cp -v $BUILD_DIR/arch/arm64/boot/dts/*/*.dtb artifacts/ 2>/dev/null || true
+          else
+            cp -v $BUILD_DIR/arch/arm/boot/zImage artifacts/ 2>/dev/null || true
+            cp -v $BUILD_DIR/arch/arm/boot/dts/*/*.dtb artifacts/ 2>/dev/null || true
+          fi
+          cp -v modules.tar.gz artifacts/ || true
+          # save full build log (stdout/stderr captured earlier if you want)
+          echo "Build completed. Listing artifacts:"
+          ls -la artifacts || true
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-artifacts-${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/artifacts
+
+      - name: Upload build log (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metadata-${{ github.run_id }}
+          path: |
+            ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/$BUILD_DIR/.config
+            ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/$BUILD_DIR/.version  || true
