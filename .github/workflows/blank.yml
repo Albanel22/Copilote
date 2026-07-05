@@ -1,4 +1,4 @@
-for: Kernel CI — build & package
+name: Kernel CI — build & package
 
 on:
   push:
@@ -66,7 +66,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev
-          # Installation du compilateur croisé indispensable pour ARM64
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Clone kernel repo unless kernel_path in workspace already has Makefile
@@ -137,14 +136,12 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          # On force les variables en dur ici pour éviter tout oubli d'environnement
           TARGET_ARCH="${{ github.event.inputs.arch }}"
           TARGET_ARCH="${TARGET_ARCH:-arm64}"
           TARGET_DEFCONFIG="${{ github.event.inputs.defconfig }}"
           TARGET_DEFCONFIG="${TARGET_DEFCONFIG:-vendor/lito-perf_defconfig}"
           
           echo "Configuring kernel for ARCH=${TARGET_ARCH} with ${TARGET_DEFCONFIG}..."
-          
           make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- ${TARGET_DEFCONFIG}
         shell: bash
 
@@ -177,8 +174,11 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
+          TARGET_ARCH="${{ github.event.inputs.arch }}"
+          TARGET_ARCH="${TARGET_ARCH:-arm64}"
+          
           mkdir -p tmp_modules
-          make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
+          make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
           tar -C tmp_modules -czf modules.tar.gz .
         shell: bash
 
@@ -226,5 +226,3 @@ jobs:
           path: |
             artifacts
             ${{ env.KERNEL_PATH }}/out/.config
-
-for
