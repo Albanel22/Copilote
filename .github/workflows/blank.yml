@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       kernel_version:
-        description: 'Kernel version (tag/branch/commit) — ex: 4.19.325'
+        description: 'Kernel version (tag/branch/commit) — ex: 3d1977c452283605fde69bbfc4e039b1a30916b7'
         required: false
-        default: '4.19.325'
+        default: '3d1977c452283605fde69bbfc4e039b1a30916b7'
       kernel_path:
         description: 'Path in repo to kernel source (relative) — ex: kernel'
         required: false
@@ -31,9 +31,9 @@ on:
         required: false
         default: 'arm64'
       defconfig:
-        description: 'Kernel defconfig name (ex: vendor_defconfig or msm_defconfig). If empty, tries defconfig'
+        description: 'Kernel defconfig name (ex: vendor/kona-perf_defconfig)'
         required: false
-        default: ''
+        default: 'vendor/kona-perf_defconfig'
       cross_toolchain_url:
         description: 'Direct archive URL of cross toolchain (optional). If empty, relies on system toolchain.'
         required: false
@@ -64,6 +64,7 @@ jobs:
           echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
           echo "CROSS_TOOLCHAIN_URL=${{ github.event.inputs.cross_toolchain_url }}" >> $GITHUB_OUTPUT
           echo "USE_CCACHE=${{ github.event.inputs.use_ccache }}" >> $GITHUB_OUTPUT
+          echo "DEVICE=${{ github.event.inputs.device }}" >> $GITHUB_OUTPUT
 
       - name: Install build dependencies
         run: |
@@ -74,12 +75,10 @@ jobs:
         if: steps.vars.outputs.KERNEL_REPO_URL != ''
         run: |
           set -euo pipefail
-          echo "Cloning kernel repo: ${KERNEL_REPO_URL}"
-          # clone into kernel_src at workspace root
+          echo "Cloning kernel repo: ${{ steps.vars.outputs.KERNEL_REPO_URL }}"
           KERNEL_SRC_DIR="${GITHUB_WORKSPACE}/kernel_src"
           rm -rf "$KERNEL_SRC_DIR"
           git clone --depth=1 "${{ steps.vars.outputs.KERNEL_REPO_URL }}" "$KERNEL_SRC_DIR"
-          # if a specific kernel_version was provided and exists in that repo, try to fetch it
           if [ -n "${{ steps.vars.outputs.KERNEL_VERSION }}" ]; then
             cd "$KERNEL_SRC_DIR"
             if git rev-parse --verify --quiet "${{ steps.vars.outputs.KERNEL_VERSION }}" >/dev/null; then
@@ -87,7 +86,6 @@ jobs:
               git checkout --detach "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
             fi
           fi
-          # export the path found
           echo "KERNEL_PATH=${KERNEL_SRC_DIR}" >> $GITHUB_OUTPUT
         shell: bash
 
@@ -96,14 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           # Priority: cloned kernel (KERNEL_PATH from previous step) > kernel_path input > repo root
-          if [ -n "${{ steps.vars.outputs.KERNEL_REPO_URL }}" ]; then
-            if [ -n "${{ steps.vars.outputs.KERNEL_PATH }}" ]; then
-              echo "Using cloned kernel path: ${{ steps.vars.outputs.KERNEL_PATH }}"
-              echo "KERNEL_PATH_FINAL=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
-              exit 0
-            fi
+          if [ -n "${{ steps.vars.outputs.KERNEL_REPO_URL }}" ] && [ -n "${{ steps.vars.outputs.KERNEL_PATH }}" ]; then
+            echo "Using cloned kernel path: ${{ steps.vars.outputs.KERNEL_PATH }}"
+            echo "KERNEL_PATH_FINAL=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
+            exit 0
           fi
-          # otherwise use kernel_path input (relative to workspace)
           KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
           if [ -z "$KP" ] || [ "$KP" = "." ]; then
             KP="${GITHUB_WORKSPACE}"
@@ -113,13 +108,15 @@ jobs:
           echo "Using kernel path: $KP"
           echo "KERNEL_PATH_FINAL=$KP" >> $GITHUB_OUTPUT
 
-      - name: Set up env from detected path
+      - name: Set env from detected path
         run: |
           echo "KERNEL_PATH=${{ steps.detect.outputs.KERNEL_PATH_FINAL }}" >> $GITHUB_ENV
           echo "ARCH=${{ steps.vars.outputs.ARCH }}" >> $GITHUB_ENV
           echo "DEFCONFIG=${{ steps.vars.outputs.DEFCONFIG }}" >> $GITHUB_ENV
           echo "CROSS_TOOLCHAIN_URL=${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}" >> $GITHUB_ENV
           echo "USE_CCACHE=${{ steps.vars.outputs.USE_CCACHE }}" >> $GITHUB_ENV
+          echo "DEVICE=${{ steps.vars.outputs.DEVICE }}" >> $GITHUB_ENV
+          echo "KERNEL_VERSION=${{ steps.vars.outputs.KERNEL_VERSION }}" >> $GITHUB_ENV
 
       - name: Prepare cross toolchain (optional)
         if: env.CROSS_TOOLCHAIN_URL != ''
@@ -246,6 +243,19 @@ jobs:
           cp -v modules.tar.gz artifacts/ || true
           echo "Build completed. Listing artifacts:"
           ls -la artifacts || true
+        shell: bash
+
+      - name: Run packaging script if present
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -f .github/workflows/commands.sh ]; then
+            echo "Found .github/workflows/commands.sh — running it"
+            chmod +x .github/workflows/commands.sh
+            .github/workflows/commands.sh
+          else
+            echo "No .github/workflows/commands.sh found — skipping packaging script"
+          fi
         shell: bash
 
       - name: Upload artifacts
