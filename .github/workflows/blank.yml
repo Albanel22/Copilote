@@ -9,7 +9,8 @@ on:
       boot_stock_url:
         description: 'Lien direct URL du boot.img officiel (ex: LineageOS)'
         required: false
-        default: 'https://mirrorbits.lineageos.org/full/kiev/20260702/boot.img' # Exemple temporaire
+        default: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
+
       kernel_repo_url:
         description: 'Optional: git URL of kernel source to clone'
         required: false
