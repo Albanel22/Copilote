@@ -156,21 +156,23 @@ jobs:
           TARGET_ARCH="${{ github.event.inputs.arch }}"
           TARGET_ARCH="${TARGET_ARCH:-arm64}"
           
-          echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs (ignoring strict format errors)..."
+          echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          # KCFLAGS permet de forcer le compilateur à ignorer les erreurs de format et de variables inutilisées
-          EXTRA_FLAGS='KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=frame-larger-than="'
+          # On exporte proprement les variables d'atténuation sans toucher à la ligne make
+          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=frame-larger-than"
+          export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
           if [ "${TARGET_ARCH}" = "arm64" ]; then
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- $EXTRA_FLAGS Image
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- $EXTRA_FLAGS dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
           else
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- $EXTRA_FLAGS zImage
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- $EXTRA_FLAGS dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
           fi
-          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- $EXTRA_FLAGS modules
+          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
+
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
