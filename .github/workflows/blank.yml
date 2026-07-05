@@ -113,7 +113,11 @@ jobs:
       - name: Debug clone & Makefile presence
         run: |
           set -euo pipefail
-          KPATH="${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH:-${GITHUB_WORKSPACE}}}"
+          # Read the output (may be empty) then fallback in bash if empty
+          KPATH="${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH }}"
+          if [ -z "$KPATH" ]; then
+            KPATH="${GITHUB_WORKSPACE}"
+          fi
           echo "KERNEL_CLONED_PATH=${KPATH}"
           echo "Exists: $( [ -d "$KPATH" ] && echo yes || echo no )"
           echo "Listing top entries:"
