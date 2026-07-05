@@ -53,14 +53,14 @@ jobs:
       - name: Set inputs
         id: vars
         run: |
-          echo "KERNEL_REPO_URL=${{ github.event.inputs.kernel_repo_url }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_VERSION=${{ github.event.inputs.kernel_version }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_PATH_INPUT=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
-          echo "ARCH=${{ github.event.inputs.arch }}" >> $GITHUB_OUTPUT
-          echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
-          echo "CROSS_TOOLCHAIN_URL=${{ github.event.inputs.cross_toolchain_url }}" >> $GITHUB_OUTPUT
-          echo "USE_CCACHE=${{ github.event.inputs.use_ccache }}" >> $GITHUB_OUTPUT
-          echo "DEVICE=${{ github.event.inputs.device }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_REPO_URL=${IN_KERNEL_REPO_URL}" >> $GITHUB_OUTPUT 
+          echo "KERNEL_VERSION=${IN_KERNEL_VERSION}" >> $GITHUB_OUTPUT 
+          echo "KERNEL_PATH_INPUT=${IN_KERNEL_PATH}" >> $GITHUB_OUTPUT 
+          echo "ARCH=${IN_ARCH}" >> $GITHUB_OUTPUT 
+          echo "DEFCONFIG=${IN_DEFCONFIG}" >> $GITHUB_OUTPUT 
+          echo "CROSS_TOOLCHAIN_URL=${IN_CROSS_TOOLCHAIN_URL}" >> $GITHUB_OUTPUT 
+          echo "USE_CCACHE=${IN_USE_CCACHE}" >> $GITHUB_OUTPUT 
+          echo "DEVICE=${IN_DEVICE}" >> $GITHUB_OUTPUT
 
       - name: Install deps
         run: |
