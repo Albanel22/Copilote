@@ -65,7 +65,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev
+          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev device-tree-compiler
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Clone kernel repo unless kernel_path in workspace already has Makefile
@@ -172,14 +172,15 @@ jobs:
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
+          # Ajout de DTC=dtc pour forcer l'usage du binaire système stable d'Ubuntu et empêcher le Ségfault
           if [ "${TARGET_ARCH}" = "arm64" ]; then
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc Image
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc dtbs
           else
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc zImage
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc dtbs
           fi
-          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
+          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- DTC=dtc modules
         timeout-minutes: 120
         shell: bash
 
@@ -208,14 +209,11 @@ jobs:
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
-          # Téléchargement d'un binaire magiskboot statique pour Linux x86_64
           wget -q https://github.com/magisk-modules-alt-repo/magiskboot-binaries/raw/main/binaries/linux/x86_64/magiskboot
           chmod +x magiskboot
           
-          # Extraction du boot.img stock
           ./magiskboot unpack boot.img
           
-          # Remplacement du fichier kernel par notre Image fraîchement compilée
           KROOT="${{ env.KERNEL_PATH }}"
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
             cp -v "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" kernel
@@ -223,10 +221,7 @@ jobs:
             cp -v "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" kernel
           fi
           
-          # Reconstruction du boot.img modifié
           ./magiskboot repack boot.img new-boot.img
-          
-          # On déplace le résultat pour le packaging final
           mv new-boot.img ../boot.img
           echo "✅ Nouveau boot.img créé avec succès !"
         shell: bash
@@ -241,7 +236,6 @@ jobs:
           mkdir -p "$FLASH_DIR"
           KROOT="${{ env.KERNEL_PATH }}"
           
-          # On ajoute notre boot.img personnalisé s'il a été généré
           if [ -f "boot.img" ]; then
             cp "boot.img" "$FLASH_DIR/boot.img"
           fi
