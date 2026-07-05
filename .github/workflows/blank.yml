@@ -168,12 +168,12 @@ jobs:
           
           echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          # Ajout de -Wno-error=missing-attributes pour les techpacks audio et rmnet data
-          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result -Wno-error=misleading-indentation -Wno-error=format-extra-args -Wno-error=enum-int-mismatch -Wno-error=unused-value -Wno-error=bool-compare -Wno-error=missing-attributes"
+          # Ajout de -Wno-error=duplicate-decl-specifier pour le double const dans l'audio Qualcomm
+          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result -Wno-error=misleading-indentation -Wno-error=format-extra-args -Wno-error=enum-int-mismatch -Wno-error=unused-value -Wno-error=bool-compare -Wno-error=missing-attributes -Wno-error=duplicate-decl-specifier"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
-          # 1. On compile d'abord l'Image seule (génère aussi le DTC interne)
+          # 1. On compile d'abord l'Image seule
           if [ "${TARGET_ARCH}" = "arm64" ]; then
             make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
           else
@@ -191,9 +191,7 @@ jobs:
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
-
-   
-
+  
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
