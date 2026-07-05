@@ -219,8 +219,11 @@ jobs:
           cd repack
           
           echo "📥 Téléchargement sécurisé de magiskboot..."
-          curl -fLo magiskboot "https://raw.githubusercontent.com/magisk-modules-alt-repo/magiskboot-binaries/main/binaries/linux/x86_64/magiskboot"
+          curl -fLo magiskboot.tar.gz "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+          unzip -j magiskboot.tar.gz "lib/x86_64/libmagiskboot.so" -d .
+          mv libmagiskboot.so magiskboot
           chmod +x magiskboot
+
           
           ./magiskboot unpack boot.img
           
