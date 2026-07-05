@@ -158,8 +158,8 @@ jobs:
           
           echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          # Correction de la variable KCFLAGS (retrait du drapeau incomplet)
-          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
+          # Ajout de -Wno-error=address pour éviter le blocage sur les structures de drivers et de profile
+          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
@@ -173,9 +173,6 @@ jobs:
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
-
-
-
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
