@@ -14,7 +14,7 @@ env:
   KERNEL_PATH: kernel_src
   BUILD_DIR: out
   ARCH: arm64
-  DEFCONFIG: kiev_defconfig
+  DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
 
 jobs:
@@ -24,8 +24,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Initialize Workflow Variables
         id: vars
@@ -53,7 +51,8 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          git clone https://github.com/the-dise/android_kernel_motorola_sm7225.git --depth=1 ${{ env.KERNEL_PATH }}
+          # Clonage de la branche lineage-23.2
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -77,8 +76,12 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           
-          # 1. Configuration initiale
-          make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
+          # 1. Configuration initiale (recherche automatique dans vendor/)
+          if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
+            make O=${{ env.BUILD_DIR }} vendor/${{ env.DEFCONFIG }}
+          else
+            make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
+          fi
           
           # 2. Compilation des DTB matériels
           make O=${{ env.BUILD_DIR }} -j$(nproc) dtbs
