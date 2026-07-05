@@ -31,9 +31,9 @@ on:
         required: false
         default: 'arm64'
       defconfig:
-        description: 'Kernel defconfig name (ex: vendor/kona-perf_defconfig)'
+        description: 'Kernel defconfig name (ex: vendor/lito-perf_defconfig)'
         required: false
-        default: 'vendor/kona-perf_defconfig'
+        default: 'vendor/lito-perf_defconfig'
       cross_toolchain_url:
         description: 'Direct archive URL of cross toolchain (optional). If empty, relies on system toolchain.'
         required: false
@@ -90,16 +90,18 @@ jobs:
           echo "KERNEL_PATH=${KERNEL_SRC_DIR}" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Determine kernel path (input or cloned)
+      - name: Determine kernel path (input, cloned or auto)
         id: detect
         run: |
           set -euo pipefail
-          # If clone produced a KERNEL_PATH, prefer it
-          if [ -n "${{ steps.clone_kernel.outputs.KERNEL_PATH }}" ]; then
-            echo "Using cloned kernel path: ${{ steps.clone_kernel.outputs.KERNEL_PATH }}"
-            echo "KERNEL_PATH_FINAL=${{ steps.clone_kernel.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
+          # Prefer cloned dir if present
+          CLONED="${GITHUB_WORKSPACE}/kernel_src"
+          if [ -d "$CLONED" ]; then
+            echo "Using cloned kernel path: $CLONED"
+            echo "KERNEL_PATH_FINAL=$CLONED" >> $GITHUB_OUTPUT
             exit 0
           fi
+          # Otherwise use explicit input or workspace root
           KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
           if [ -z "$KP" ] || [ "$KP" = "." ]; then
             KP="${GITHUB_WORKSPACE}"
