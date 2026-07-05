@@ -3,7 +3,6 @@ name: Kernel CI — build & package
 on:
   push:
     branches: [ main, master ]
-  pull_request:
   workflow_dispatch:
     inputs:
       boot_stock_url:
@@ -11,199 +10,89 @@ on:
         required: false
         default: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
-      kernel_repo_url:
-        description: 'Optional: git URL of kernel source to clone'
-        required: false
-        default: 'https://github.com/LineageOS/android_kernel_motorola_sm8250'
-      kernel_version:
-        description: 'Kernel version (tag/branch/commit) to checkout (optional)'
-        required: false
-        default: ''
-      kernel_path:
-        description: 'Relative path to kernel root inside workspace if already present.'
-        required: false
-        default: 'kernel_src'
-      arch:
-        description: 'Target arch (arm64 or arm)'
-        required: false
-        default: 'arm64'
-      defconfig:
-        description: 'Kernel defconfig target'
-        required: false
-        default: 'vendor/lito-perf_defconfig'
-      device:
-        description: 'Device codename'
-        required: false
-        default: 'motorola_one_5g_ace'
+env:
+  KERNEL_PATH: kernel_src
+  BUILD_DIR: out
+  ARCH: arm64
+  DEFCONFIG: kiev_defconfig
+  CCACHE_SIZE: 5G
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      BUILD_DIR: out
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set inputs
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Initialize Workflow Variables
         id: vars
         run: |
-          echo "BOOT_URL=${{ github.event.inputs.boot_stock_url }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_REPO_URL=${{ github.event.inputs.kernel_repo_url }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_VERSION=${{ github.event.inputs.kernel_version }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_PATH_INPUT=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
-          echo "ARCH=${{ github.event.inputs.arch }}" >> $GITHUB_OUTPUT
-          echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
-          echo "DEVICE=${{ github.event.inputs.device }}" >> $GITHUB_OUTPUT
+          # Priorité à l'URL manuelle, sinon utilise la version par défaut du 28 juin
+          INPUT_URL="${{ github.event.inputs.boot_stock_url }}"
+          if [ -z "$INPUT_URL" ]; then
+            INPUT_URL="https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img"
+          fi
+          echo "BOOT_URL=${INPUT_URL}" >> $GITHUB_OUTPUT
+        shell: bash
 
-      - name: Install deps
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev device-tree-compiler
-          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libtinfo5 libncurses5-dev alterator-fbi zip unzip curl git
+        image: ubuntu-latest
 
-      - name: Download Stock Boot Image if URL l
+      - name: Download Stock Boot Image if URL provided
         run: |
           set -euo pipefail
           URL_BOOT="${{ steps.vars.outputs.BOOT_URL }}"
-          if [ -n "$URL_BOOT" ]; then
-            echo "📥 Téléchargement du boot.img stock depuis : $URL_BOOT"
-            curl -fLo boot-stock.img "$URL_BOOT" || { echo "⚠️ Lien mort ou invalide pour le boot.img"; exit 1; }
-          elif [ -f "boot-stock.img" ]; then
-            echo "✅ boot-stock.img trouvé localement dans le dépôt."
-          else
-            echo "ℹ️ Aucun boot-stock.img fourni."
-          fi
+          echo "📥 Téléchargement du boot.img stock depuis : $URL_BOOT"
+          curl -fLo boot-stock.img "$URL_BOOT" || { echo "⚠️ Lien mort ou invalide pour le boot.img"; exit 1; }
         shell: bash
 
-
-      - name: Clone kernel repo unless kernel_path in workspace already has Makefile
-        id: clone_kernel
+      - name: Clone Kernel Source
         run: |
-          set -euo pipefail
-          DEFAULT_CLONE_URL='https://github.com/LineageOS/android_kernel_motorola_sm8250'
-          KERNEL_SRC="${GITHUB_WORKSPACE}/kernel_src"
-          KP_INPUT="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
-          INPUT_URL="${{ steps.vars.outputs.KERNEL_REPO_URL }}"
+          git clone https://github.com/the-dise/android_kernel_motorola_sm7225.git --depth=1 ${{ env.KERNEL_PATH }}
 
-          if [ -n "$KP_INPUT" ] && [ "$KP_INPUT" != "." ] && [ -f "${GITHUB_WORKSPACE}/$KP_INPUT/Makefile" ]; then
-            echo "Makefile found at workspace path ${KP_INPUT} — skipping clone."
-            echo "KERNEL_CLONED_PATH=${GITHUB_WORKSPACE}/$KP_INPUT" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-kernel
+          restore-keys: |
+            ${{ runner.os }}-ccache-
 
-          if [ -n "$INPUT_URL" ]; then
-            CLONE_URL="$INPUT_URL"
-          else
-            CLONE_URL="$DEFAULT_CLONE_URL"
-          fi
-
-          echo "Cloning kernel repo: $CLONE_URL -> $KERNEL_SRC"
-          rm -rf "$KERNEL_SRC"
-          
-          if [ -n "${{ secrets.KERNEL_TOKEN }}" ]; then
-            KERNEL_TOKEN="${{ secrets.KERNEL_TOKEN }}"
-            CLONE_URL="https://x-access-token:${KERNEL_TOKEN}@${CLONE_URL#https://}"
-          fi
-          
-          git clone --depth=1 "$CLONE_URL" "$KERNEL_SRC"
-          if [ -n "${{ steps.vars.outputs.KERNEL_VERSION }}" ]; then
-            cd "$KERNEL_SRC"
-            git fetch --depth=1 origin "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
-            git checkout "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
-          fi
-          echo "KERNEL_CLONED_PATH=$KERNEL_SRC" >> $GITHUB_OUTPUT
-        shell: bash
-
-      - name: Determine kernel path
-        id: detect
+      - name: Configure ccache Size
         run: |
-          set -euo pipefail
-          if [ -n "${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH }}" ]; then
-            echo "KERNEL_PATH_FINAL=${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH }}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
-          if [ -z "$KP" ] || [ "$KP" = "." ]; then
-            KP="${GITHUB_WORKSPACE}"
-          else
-            KP="${GITHUB_WORKSPACE}/$KP"
-          fi
-          echo "KERNEL_PATH_FINAL=$KP" >> $GITHUB_OUTPUT
-        shell: bash
+          mkdir -p ~/.cache/ccache
+          echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
 
-      - name: Export environment
-        run: |
-          echo "KERNEL_PATH=${{ steps.detect.outputs.KERNEL_PATH_FINAL }}" >> $GITHUB_ENV
-          echo "ARCH=${{ steps.vars.outputs.ARCH }}" >> $GITHUB_ENV
-          echo "DEFCONFIG=${{ steps.vars.outputs.DEFCONFIG }}" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "DEVICE=${{ steps.vars.outputs.DEVICE }}" >> $GITHUB_ENV
-          echo "KERNEL_VERSION=${{ steps.vars.outputs.KERNEL_VERSION }}" >> $GITHUB_ENV
-
-      - name: Fix Motorola Display Duplicate Static Bug
+      - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          FILE="techpack/display/msm/dsi/dsi_display_mot_ext.c"
-          if [ -f "$FILE" ]; then
-            echo "Fixing duplicate static keyword in $FILE..."
-            sed -i 's/static static/static/g' "$FILE"
-          else
-            echo "File $FILE not found, skipping patch."
-          fi
-        shell: bash
-
-      - name: Configure kernel
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euo pipefail
-          TARGET_ARCH="${{ github.event.inputs.arch }}"
-          TARGET_ARCH="${TARGET_ARCH:-arm64}"
-          TARGET_DEFCONFIG="${{ github.event.inputs.defconfig }}"
-          TARGET_DEFCONFIG="${TARGET_DEFCONFIG:-vendor/lito-perf_defconfig}"
-          make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- ${TARGET_DEFCONFIG}
-        shell: bash
-
-      - name: Build kernel (Image, dtbs, modules)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euo pipefail
-          JOBS=$(nproc)
-          TARGET_ARCH="${{ github.event.inputs.arch }}"
-          TARGET_ARCH="${TARGET_ARCH:-arm64}"
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
           
-          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result -Wno-error=misleading-indentation -Wno-error=format-extra-args -Wno-error=enum-int-mismatch -Wno-error=unused-value -Wno-error=bool-compare -Wno-error=missing-attributes -Wno-error=duplicate-decl-specifier -Wno-error=maybe-uninitialized"
-          export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
-          export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
+          # 1. Configuration initiale
+          make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
           
-          if [ "${TARGET_ARCH}" = "arm64" ]; then
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
-          else
-            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
-          fi
-
-          echo "🔄 Remplacement du DTC interne par la version système stable..."
-          mkdir -p $BUILD_DIR/scripts/dtc
-          cp -f /usr/bin/dtc $BUILD_DIR/scripts/dtc/dtc
-          chmod +x $BUILD_DIR/scripts/dtc/dtc
-
-          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
-          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
-        timeout-minutes: 120
-        shell: bash
+          # 2. Compilation des DTB matériels
+          make O=${{ env.BUILD_DIR }} -j$(nproc) dtbs
+          
+          # 3. Compilation du Noyau principal et des Modules annexes
+          make O=${{ env.BUILD_DIR }} -j$(nproc)
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          TARGET_ARCH="${{ github.event.inputs.arch }}"
-          TARGET_ARCH="${TARGET_ARCH:-arm64}"
           mkdir -p tmp_modules
-          make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
-          tar -C tmp_modules -czf modules.tar.gz .
+          make O=${{ env.BUILD_DIR }} INSTALL_MOD_PATH=../tmp_modules modules_install
+          cd ../tmp_modules
+          tar -czf ../modules.tar.gz .
         shell: bash
 
       - name: Repack Boot Image with Magiskboot
@@ -211,20 +100,19 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f "boot-stock.img" ]; then
-            echo "⚠️ boot-stock.img absent. Étape d'injection sautée."
-            exit 0
+            echo "⚠️ boot-stock.img absent. Étape d'injection annulée."
+            exit 1
           fi
           
           echo "🔥 boot-stock.img détecté ! Préparation de l'injection..."
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
-          echo "📥 Téléchargement sécurisé de magiskboot..."
-          curl -fLo magiskboot.tar.gz "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-          unzip -j magiskboot.tar.gz "lib/x86_64/libmagiskboot.so" -d .
+          echo "📥 Téléchargement sécurisé de magiskboot via l'APK officielle..."
+          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
-
           
           ./magiskboot unpack boot.img
           
@@ -240,50 +128,28 @@ jobs:
           echo "✅ Nouveau boot.img créé avec succès !"
         shell: bash
 
-
-      - name: Built-in packaging (create flashable zip)
-        working-directory: ${{ github.workspace }}
+      - name: Organize Final Output Artifacts
         run: |
-          set -euo pipefail
-          ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifacts"
-          FLASH_DIR="${ARTIFACT_DIR}/flash"
-          rm -rf "$FLASH_DIR" "$ARTIFACT_DIR"
-          mkdir -p "$FLASH_DIR"
-          KROOT="${{ env.KERNEL_PATH }}"
+          mkdir -p final_output/dtbs
           
+          # On déplace le boot.img réinjecté s'il existe, sinon le kernel brut
           if [ -f "boot.img" ]; then
-            cp "boot.img" "$FLASH_DIR/boot.img"
+            mv boot.img final_output/boot.img
+            echo "📦 boot.img réinjecté ajouté au package final."
           fi
           
-          if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
-            cp "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" "$FLASH_DIR/kernel.img" || true
+          if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            cp "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
           fi
           
-          mkdir -p "$FLASH_DIR/dtbs"
-          shopt -s nullglob
-          for f in "$KROOT/$BUILD_DIR"/arch/*/boot/dts/**/*.dtb "$KROOT/$BUILD_DIR"/arch/*/boot/dts/*.dtb; do
-            cp -v "$f" "$FLASH_DIR/dtbs/" || true
-          done
-          shopt -u nullglob
-          
-          if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" ]; then
-            cp "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" "$FLASH_DIR/dtbo.img" || true
+          if [ -f "modules.tar.gz" ]; then
+            mv modules.tar.gz final_output/
           fi
           
-          if [ -f "$KROOT/modules.tar.gz" ]; then
-            cp "$KROOT/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
-          fi
-          
-          ZIP="${ARTIFACT_DIR}/kernel-${{ github.event.inputs.device }}-latest.zip"
-          pushd "$FLASH_DIR" >/dev/null
-          zip -r -y "$ZIP" . || true
-          popd >/dev/null
-        shell: bash
+          find ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/${{ env.ARCH }}/boot/dts/ -name "*.dtb" -exec cp {} final_output/dtbs/ \;
 
-      - name: Upload artifacts
+      - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-artifacts-${{ github.run_id }}
-          path: |
-            artifacts
-            ${{ env.KERNEL_PATH }}/out/.config
+          name: kernel-motorola_one_5g_ace-latest
+          path: final_output/
