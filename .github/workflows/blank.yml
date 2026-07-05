@@ -1,4 +1,3 @@
-# Kernel CI — build & package (with Makefile checks & debug)
 name: Kernel CI — build & package
 
 on:
@@ -68,16 +67,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config
 
-      - name: Optionally clone kernel repo (auth if secret KERNEL_TOKEN set)
+      - name: Clone kernel repo unless kernel_path in workspace already has Makefile
         id: clone_kernel
-        if: steps.vars.outputs.KERNEL_REPO_URL != ''
         run: |
           set -euo pipefail
-          echo "Cloning kernel repo: ${{ steps.vars.outputs.KERNEL_REPO_URL }}"
+          DEFAULT_CLONE_URL='https://github.com/LineageOS/android_kernel_motorola_sm8250'
           KERNEL_SRC="${GITHUB_WORKSPACE}/kernel_src"
+          KP_INPUT="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
+          INPUT_URL="${{ steps.vars.outputs.KERNEL_REPO_URL }}"
+
+          # If user pointed kernel_path inside workspace and there is a Makefile there, skip clone
+          if [ -n "$KP_INPUT" ] && [ "$KP_INPUT" != "." ] && [ -f "${GITHUB_WORKSPACE}/$KP_INPUT/Makefile" ]; then
+            echo "Makefile found at workspace path ${KP_INPUT} — skipping clone."
+            echo "KERNEL_CLONED_PATH=${GITHUB_WORKSPACE}/$KP_INPUT" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Choose source URL: prefer input, else fallback to default
+          if [ -n "$INPUT_URL" ]; then
+            CLONE_URL="$INPUT_URL"
+          else
+            CLONE_URL="$DEFAULT_CLONE_URL"
+            echo "No kernel_repo_url input — using default: $CLONE_URL"
+          fi
+
+          echo "Cloning kernel repo: $CLONE_URL -> $KERNEL_SRC"
           rm -rf "$KERNEL_SRC"
-          CLONE_URL="${{ steps.vars.outputs.KERNEL_REPO_URL }}"
-          # If secret KERNEL_TOKEN is set, use authenticated https URL
+          # If secret is set, use token for authenticated clone
           if [ -n "${{ secrets.KERNEL_TOKEN }}" ]; then
             KERNEL_TOKEN="${{ secrets.KERNEL_TOKEN }}"
             CLONE_URL="https://x-access-token:${KERNEL_TOKEN}@${CLONE_URL#https://}"
@@ -95,22 +111,20 @@ jobs:
         shell: bash
 
       - name: Debug clone & Makefile presence
-        if: steps.clone_kernel.outputs.KERNEL_CLONED_PATH != ''
         run: |
           set -euo pipefail
-          KERNEL_SRC="${GITHUB_WORKSPACE}/kernel_src"
-          echo "kernel_src directory exists: $( [ -d "$KERNEL_SRC" ] && echo yes || echo no )"
-          echo "Listing kernel_src top entries:"
-          ls -la "$KERNEL_SRC" | sed -n '1,200p' || true
-          echo "Top-level Makefile present: $( [ -f "$KERNEL_SRC/Makefile" ] && echo yes || echo no )"
-          if [ -f "$KERNEL_SRC/Makefile" ]; then
-            echo "Head of $KERNEL_SRC/Makefile (first 40 lines):"
-            head -n 40 "$KERNEL_SRC/Makefile" || true
+          KPATH="${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH:-${GITHUB_WORKSPACE}}}"
+          echo "KERNEL_CLONED_PATH=${KPATH}"
+          echo "Exists: $( [ -d "$KPATH" ] && echo yes || echo no )"
+          echo "Listing top entries:"
+          ls -la "$KPATH" | sed -n '1,200p' || true
+          echo "Top-level Makefile present: $( [ -f "$KPATH/Makefile" ] && echo yes || echo no )"
+          if [ -f "$KPATH/Makefile" ]; then
+            head -n 40 "$KPATH/Makefile" || true
           fi
-          echo "arch/arm64/Makefile present: $( [ -f "$KERNEL_SRC/arch/arm64/Makefile" ] && echo yes || echo no )"
-          if [ -f "$KERNEL_SRC/arch/arm64/Makefile" ]; then
-            echo "Head of arch/arm64/Makefile (first 20 lines):"
-            head -n 20 "$KERNEL_SRC/arch/arm64/Makefile" || true
+          echo "arch/${{ steps.vars.outputs.ARCH }}/Makefile present: $( [ -f "$KPATH/arch/${{ steps.vars.outputs.ARCH }}/Makefile" ] && echo yes || echo no )"
+          if [ -f "$KPATH/arch/${{ steps.vars.outputs.ARCH }}/Makefile" ]; then
+            head -n 20 "$KPATH/arch/${{ steps.vars.outputs.ARCH }}/Makefile" || true
           fi
         shell: bash
 
@@ -118,20 +132,12 @@ jobs:
         id: detect
         run: |
           set -euo pipefail
-          CLONED="${GITHUB_WORKSPACE}/kernel_src"
-          # Prefer cloned repo if present
-          if [ -d "$CLONED" ]; then
-            echo "KERNEL_PATH_FINAL=$CLONED" >> $GITHUB_OUTPUT
-            echo "Detected=cloned" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          # If clone step produced an output path use it
+          # prefer the cloned path from previous step
           if [ -n "${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH }}" ]; then
             echo "KERNEL_PATH_FINAL=${{ steps.clone_kernel.outputs.KERNEL_CLONED_PATH }}" >> $GITHUB_OUTPUT
             echo "Detected=clone_output" >> $GITHUB_OUTPUT
             exit 0
           fi
-          # Otherwise use input or workspace
           KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
           if [ -z "$KP" ] || [ "$KP" = "." ]; then
             KP="${GITHUB_WORKSPACE}"
@@ -152,39 +158,6 @@ jobs:
           echo "DEVICE=${{ steps.vars.outputs.DEVICE }}" >> $GITHUB_ENV
           echo "KERNEL_VERSION=${{ steps.vars.outputs.KERNEL_VERSION }}" >> $GITHUB_ENV
 
-      - name: Prepare cross toolchain (optional)
-        if: env.CROSS_TOOLCHAIN_URL != ''
-        run: |
-          set -euo pipefail
-          mkdir -p /opt/cross-toolchain
-          cd /opt/cross-toolchain
-          wget -q -O toolchain.tar.xz "${CROSS_TOOLCHAIN_URL}"
-          tar -xf toolchain.tar.xz --strip-components=1
-          ls -la /opt/cross-toolchain/bin | sed -n '1,200p'
-        shell: bash
-
-      - name: Setup CROSS_COMPILE / ccache
-        run: |
-          set -euo pipefail
-          if [ -n "${CROSS_TOOLCHAIN_URL}" ]; then
-            echo "CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
-          else
-            if [ "${ARCH}" = "arm64" ]; then
-              echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-            else
-              echo "CROSS_COMPILE=arm-linux-gnueabi-" >> $GITHUB_ENV
-            fi
-          fi
-          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-          if [ "${USE_CCACHE}" = "true" ]; then
-            sudo apt-get install -y ccache || true
-            export CCACHE_DIR=$HOME/.ccache
-            ccache -M 5G || true
-            echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
-            echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
-          fi
-        shell: bash
-
       - name: Show kernel path & Makefile check
         run: |
           echo "KERNEL_PATH=$KERNEL_PATH"
@@ -199,7 +172,6 @@ jobs:
           fi
           echo "Also check arch/${ARCH}/Makefile: $( [ -f "$KERNEL_PATH/arch/${ARCH}/Makefile" ] && echo yes || echo no )"
           if [ -f "$KERNEL_PATH/arch/${ARCH}/Makefile" ]; then
-            echo "arch/${ARCH}/Makefile head:"
             head -n 20 "$KERNEL_PATH/arch/${ARCH}/Makefile" || true
           fi
         shell: bash
@@ -268,13 +240,11 @@ jobs:
           rm -rf "$FLASH_DIR" "$ARTIFACT_DIR"
           mkdir -p "$FLASH_DIR"
           KROOT="${KERNEL_PATH}"
-          # kernel image
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" "$FLASH_DIR/kernel.img" || true
           elif [ -f "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" "$FLASH_DIR/kernel.img" || true
           fi
-          # dtbs
           mkdir -p "$FLASH_DIR/dtbs"
           shopt -s nullglob
           for f in "$KROOT/$BUILD_DIR"/arch/*/boot/dts/**/*.dtb "$KROOT/$BUILD_DIR"/arch/*/boot/dts/*.dtb "$KROOT/artifacts"/*.dtb; do
@@ -282,17 +252,14 @@ jobs:
             cp -v "$f" "$FLASH_DIR/dtbs/" || true
           done
           shopt -u nullglob
-          # dtbo
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" "$FLASH_DIR/dtbo.img" || true
           fi
-          # modules
           if [ -f "$KROOT/modules.tar.gz" ]; then
             cp "$KROOT/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
           elif [ -f "$KROOT/$BUILD_DIR/modules.tar.gz" ]; then
             cp "$KROOT/$BUILD_DIR/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
           fi
-          # README (safe printf)
           printf '%s\n' \
             "This package contains kernel image, dtbs, optional dtbo and modules." \
             "To repack into a boot.img you need a compatible ramdisk (stock ramdisk.img or boot.img):" \
