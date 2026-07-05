@@ -14,6 +14,10 @@ on:
         description: 'Path in repo to kernel source (relative) — ex: kernel'
         required: false
         default: '.'
+      kernel_repo_url:
+        description: 'Optional: git URL of kernel source to clone (ex: https://github.com/LineageOS/android_kernel_motorola_sm8250)'
+        required: false
+        default: ''
       device:
         description: 'Device codename (informational)'
         required: false
@@ -45,7 +49,7 @@ jobs:
     env:
       BUILD_DIR: out
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -54,7 +58,8 @@ jobs:
         id: vars
         run: |
           echo "KERNEL_VERSION=${{ github.event.inputs.kernel_version }}" >> $GITHUB_OUTPUT
-          echo "KERNEL_PATH=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_PATH_INPUT=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
+          echo "KERNEL_REPO_URL=${{ github.event.inputs.kernel_repo_url }}" >> $GITHUB_OUTPUT
           echo "ARCH=${{ github.event.inputs.arch }}" >> $GITHUB_OUTPUT
           echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
           echo "CROSS_TOOLCHAIN_URL=${{ github.event.inputs.cross_toolchain_url }}" >> $GITHUB_OUTPUT
@@ -65,40 +70,88 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git
 
+      - name: Optionally clone kernel repo (if kernel_repo_url provided)
+        if: steps.vars.outputs.KERNEL_REPO_URL != ''
+        run: |
+          set -euo pipefail
+          echo "Cloning kernel repo: ${KERNEL_REPO_URL}"
+          # clone into kernel_src at workspace root
+          KERNEL_SRC_DIR="${GITHUB_WORKSPACE}/kernel_src"
+          rm -rf "$KERNEL_SRC_DIR"
+          git clone --depth=1 "${{ steps.vars.outputs.KERNEL_REPO_URL }}" "$KERNEL_SRC_DIR"
+          # if a specific kernel_version was provided and exists in that repo, try to fetch it
+          if [ -n "${{ steps.vars.outputs.KERNEL_VERSION }}" ]; then
+            cd "$KERNEL_SRC_DIR"
+            if git rev-parse --verify --quiet "${{ steps.vars.outputs.KERNEL_VERSION }}" >/dev/null; then
+              git fetch --depth=1 origin "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
+              git checkout --detach "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
+            fi
+          fi
+          # export the path found
+          echo "KERNEL_PATH=${KERNEL_SRC_DIR}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Determine kernel path (input or cloned)
+        id: detect
+        run: |
+          set -euo pipefail
+          # Priority: cloned kernel (KERNEL_PATH from previous step) > kernel_path input > repo root
+          if [ -n "${{ steps.vars.outputs.KERNEL_REPO_URL }}" ]; then
+            if [ -n "${{ steps.vars.outputs.KERNEL_PATH }}" ]; then
+              echo "Using cloned kernel path: ${{ steps.vars.outputs.KERNEL_PATH }}"
+              echo "KERNEL_PATH_FINAL=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          # otherwise use kernel_path input (relative to workspace)
+          KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
+          if [ -z "$KP" ] || [ "$KP" = "." ]; then
+            KP="${GITHUB_WORKSPACE}"
+          else
+            KP="${GITHUB_WORKSPACE}/$KP"
+          fi
+          echo "Using kernel path: $KP"
+          echo "KERNEL_PATH_FINAL=$KP" >> $GITHUB_OUTPUT
+
+      - name: Set up env from detected path
+        run: |
+          echo "KERNEL_PATH=${{ steps.detect.outputs.KERNEL_PATH_FINAL }}" >> $GITHUB_ENV
+          echo "ARCH=${{ steps.vars.outputs.ARCH }}" >> $GITHUB_ENV
+          echo "DEFCONFIG=${{ steps.vars.outputs.DEFCONFIG }}" >> $GITHUB_ENV
+          echo "CROSS_TOOLCHAIN_URL=${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}" >> $GITHUB_ENV
+          echo "USE_CCACHE=${{ steps.vars.outputs.USE_CCACHE }}" >> $GITHUB_ENV
+
       - name: Prepare cross toolchain (optional)
-        if: steps.vars.outputs.CROSS_TOOLCHAIN_URL != ''
+        if: env.CROSS_TOOLCHAIN_URL != ''
         run: |
           mkdir -p /opt/cross-toolchain
           cd /opt/cross-toolchain
-          echo "Downloading toolchain from ${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}"
-          wget -q -O toolchain.tar.xz "${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}"
+          echo "Downloading toolchain from ${CROSS_TOOLCHAIN_URL}"
+          wget -q -O toolchain.tar.xz "${CROSS_TOOLCHAIN_URL}"
           tar -xf toolchain.tar.xz --strip-components=1
           ls -la /opt/cross-toolchain/bin | sed -n '1,200p'
         shell: bash
 
-      - name: Setup environment variables
+      - name: Setup CROSS_COMPILE and environment
         run: |
-          export ARCH=${{ steps.vars.outputs.ARCH }}
-          if [ -n "${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}" ]; then
+          if [ -n "${CROSS_TOOLCHAIN_URL}" ]; then
             if ls /opt/cross-toolchain/bin/*aarch64-linux-gnu-* >/dev/null 2>&1; then
               export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
             else
               export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
             fi
           else
-            if [ "${{ steps.vars.outputs.ARCH }}" = "arm64" ]; then
+            if [ "${ARCH}" = "arm64" ]; then
               export CROSS_COMPILE=aarch64-linux-gnu-
             else
               export CROSS_COMPILE=arm-linux-gnueabi-
             fi
           fi
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$CROSS_COMPILE" >> $GITHUB_ENV
           echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-          echo "KERNEL_PATH=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_ENV
 
       - name: Optionally enable ccache
-        if: steps.vars.outputs.USE_CCACHE == 'true'
+        if: env.USE_CCACHE == 'true'
         run: |
           echo "Enabling ccache"
           export CCACHE_DIR=$HOME/.ccache
@@ -107,42 +160,25 @@ jobs:
           echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
           echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
 
-      - name: Show toolchain + versions
+      - name: Show detected kernel path and files
         run: |
-          echo "ARCH=$ARCH"
-          echo "CROSS_COMPILE=$CROSS_COMPILE"
-          ${CROSS_COMPILE}gcc --version || true
-          ${CROSS_COMPILE}ld --version || true
-          uname -a
-        shell: bash
-
-      - name: Prepare kernel tree
-        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
-        run: |
-          pwd
-          echo "Kernel version target: ${{ steps.vars.outputs.KERNEL_VERSION }}"
-          if git rev-parse --verify --quiet "${{ steps.vars.outputs.KERNEL_VERSION }}" >/dev/null; then
-            echo "Checking out ${{ steps.vars.outputs.KERNEL_VERSION }} in kernel tree"
-            git checkout "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
-          fi
-          ls -la
-        shell: bash
+          echo "KERNEL_PATH=$KERNEL_PATH"
+          ls -la "$KERNEL_PATH" || true
 
       - name: Configure kernel (guarded)
-        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          cd "${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}" || { echo "Kernel path not found: ${{ steps.vars.outputs.KERNEL_PATH }}"; ls -la "${{ github.workspace }}" || true; exit 1; }
+          cd "${{ env.KERNEL_PATH }}" || { echo "Kernel path not found: ${{ env.KERNEL_PATH }}"; ls -la "${GITHUB_WORKSPACE}" || true; exit 1; }
 
-          # Check for top-level Makefile
           if [ ! -f Makefile ]; then
             echo "ERROR: No top-level Makefile found in kernel path: $(pwd)"
             echo "Contents:"; ls -la || true
-            echo "Please set kernel_path to the kernel root (where the top-level Makefile lives)."
+            echo "Please set kernel_path to the kernel root (where the top-level Makefile lives) or provide a correct kernel_repo_url."
             exit 1
           fi
 
-          CONFIG_DIR="arch/${{ steps.vars.outputs.ARCH }}/configs"
+          CONFIG_DIR="arch/${ARCH}/configs"
           echo "Listing ${CONFIG_DIR}:"
           if [ -d "$CONFIG_DIR" ]; then
             ls -1 "$CONFIG_DIR" | sed -n '1,200p' || true
@@ -150,19 +186,19 @@ jobs:
             echo "No configs directory at $CONFIG_DIR"
           fi
 
-          if [ -n "${{ steps.vars.outputs.DEFCONFIG }}" ]; then
-            echo "Using provided defconfig: ${{ steps.vars.outputs.DEFCONFIG }}"
-            make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE ${{ steps.vars.outputs.DEFCONFIG }}
+          if [ -n "${DEFCONFIG}" ]; then
+            echo "Using provided defconfig: ${DEFCONFIG}"
+            make O=$BUILD_DIR ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} ${DEFCONFIG}
           else
             if [ -f "$CONFIG_DIR/vendor_defconfig" ]; then
               echo "Using vendor_defconfig"
-              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE vendor_defconfig
+              make O=$BUILD_DIR ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} vendor_defconfig
             elif [ -f "$CONFIG_DIR/msm_defconfig" ]; then
               echo "Using msm_defconfig"
-              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE msm_defconfig
+              make O=$BUILD_DIR ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} msm_defconfig
             elif [ -f "$CONFIG_DIR/defconfig" ]; then
               echo "Using defconfig"
-              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE defconfig
+              make O=$BUILD_DIR ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
             else
               echo "ERROR: No defconfig found. Please provide a defconfig name via the workflow input 'defconfig' or add a defconfig to the kernel tree."
               exit 1
@@ -171,7 +207,7 @@ jobs:
         shell: bash
 
       - name: Build kernel (Image, dtbs, modules)
-        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
           JOBS=$(nproc)
@@ -188,7 +224,7 @@ jobs:
         shell: bash
 
       - name: Package modules
-        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
           mkdir -p tmp_modules
@@ -197,7 +233,7 @@ jobs:
         shell: bash
 
       - name: Collect artifacts
-        working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           mkdir -p artifacts
           if [ "$ARCH" = "arm64" ]; then
@@ -216,13 +252,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kernel-artifacts-${{ github.run_id }}
-          path: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/artifacts
+          path: ${{ env.KERNEL_PATH }}/artifacts
 
-      - name: Upload build log (optional)
+      - name: Upload build metadata (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-metadata-${{ github.run_id }}
           path: |
-            ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/$BUILD_DIR/.config
-            ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}/$BUILD_DIR/.version  || true
+            ${{ env.KERNEL_PATH }}/$BUILD_DIR/.config
+            ${{ env.KERNEL_PATH }}/$BUILD_DIR/.version  || true
