@@ -7,17 +7,17 @@ on:
   workflow_dispatch:
     inputs:
       kernel_repo_url:
-        description: 'Optional: git URL of kernel source to clone (ex: https://github.com/LineageOS/android_kernel_motorola_sm8250)'
+        description: 'Optional: git URL of kernel source to clone'
         required: false
-        default: ''
+        default: 'https://github.com/LineageOS/android_kernel_motorola_sm8250'
       kernel_version:
         description: 'Kernel version (tag/branch/commit) to checkout in kernel repo (optional)'
         required: false
         default: ''
       kernel_path:
-        description: 'If kernel is inside this repo, relative path to kernel root (where top-level Makefile lives). Defaults to repo root.'
+        description: 'If kernel is inside this repo, relative path to kernel root. Defaults to kernel_src (cloned repo).'
         required: false
-        default: '.'
+        default: 'kernel_src'
       arch:
         description: 'Target arch (arm64 or arm)'
         required: false
@@ -76,10 +76,8 @@ jobs:
           KERNEL_SRC="${GITHUB_WORKSPACE}/kernel_src"
           rm -rf "$KERNEL_SRC"
           CLONE_URL="${{ steps.vars.outputs.KERNEL_REPO_URL }}"
-          # If secret KERNEL_TOKEN is set, use authenticated https URL
           if [ -n "${{ secrets.KERNEL_TOKEN }}" ]; then
             KERNEL_TOKEN="${{ secrets.KERNEL_TOKEN }}"
-            # strip leading https:// from CLONE_URL and prepend token
             CLONE_URL="https://x-access-token:${KERNEL_TOKEN}@${CLONE_URL#https://}"
             echo "Using authenticated clone URL"
           fi
@@ -144,11 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${CROSS_TOOLCHAIN_URL}" ]; then
-            if ls /opt/cross-toolchain/bin/*aarch64-linux-gnu-* >/dev/null 2>&1; then
-              echo "CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
-            else
-              echo "CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
-            fi
+            echo "CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
           else
             if [ "${ARCH}" = "arm64" ]; then
               echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
@@ -158,7 +152,6 @@ jobs:
           fi
           echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
           if [ "${USE_CCACHE}" = "true" ]; then
-            echo "Enabling ccache"
             sudo apt-get install -y ccache || true
             export CCACHE_DIR=$HOME/.ccache
             ccache -M 5G || true
@@ -243,13 +236,11 @@ jobs:
           rm -rf "$FLASH_DIR" "$ARTIFACT_DIR"
           mkdir -p "$FLASH_DIR"
           KROOT="${KERNEL_PATH}"
-          # find kernel image
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" "$FLASH_DIR/kernel.img" || true
           elif [ -f "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" "$FLASH_DIR/kernel.img" || true
           fi
-          # dtbs
           mkdir -p "$FLASH_DIR/dtbs"
           shopt -s nullglob
           for f in "$KROOT/$BUILD_DIR"/arch/*/boot/dts/**/*.dtb "$KROOT/$BUILD_DIR"/arch/*/boot/dts/*.dtb "$KROOT/artifacts"/*.dtb; do
@@ -257,30 +248,25 @@ jobs:
             cp -v "$f" "$FLASH_DIR/dtbs/" || true
           done
           shopt -u nullglob
-          # dtbo
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm64/boot/dtbo.img" "$FLASH_DIR/dtbo.img" || true
           fi
-          # modules
           if [ -f "$KROOT/modules.tar.gz" ]; then
             cp "$KROOT/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
           elif [ -f "$KROOT/$BUILD_DIR/modules.tar.gz" ]; then
             cp "$KROOT/$BUILD_DIR/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
           fi
-          # fallback copy from build tree artifacts
           if [ -d "$KROOT/$BUILD_DIR" ]; then
             cp -v "$KROOT/$BUILD_DIR/arch/${ARCH}/boot/"* "$ARTIFACT_DIR/" 2>/dev/null || true
           fi
-          # README (use printf to avoid heredoc/YAML parsing issues)
           printf '%s\n' \
             "This package contains kernel image, dtbs, optional dtbo and modules." \
             "To repack into a boot.img you need a compatible ramdisk (stock ramdisk.img or boot.img):" \
-            '  mkbootimg --kernel kernel.img --ramdisk stock-ramdisk.img --cmdline "<cmdline>" --base <base> -o new-boot.img' \
+            '  mkbootimg --kernel kernel.img --ramdisk stock-ramdisk.img --cmdline \"<cmdline>\" --base <base> -o new-boot.img' \
             "Then flash with:" \
             "  fastboot flash boot new-boot.img" \
             "Be careful: use correct cmdline/base/pagesize for your device." \
             > "$FLASH_DIR/README_REPACK_AND_FLASH.txt"
-          # create zip
           ZIP="${ARTIFACT_DIR}/kernel-${DEVICE}-${KERNEL_VERSION:-latest}.zip"
           pushd "$FLASH_DIR" >/dev/null
           zip -r -y "$ZIP" . || true
