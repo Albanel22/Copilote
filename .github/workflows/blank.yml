@@ -79,17 +79,13 @@ jobs:
       - name: Setup environment variables
         run: |
           export ARCH=${{ steps.vars.outputs.ARCH }}
-          # Default CROSS_COMPILE for arm64 toolchains (override if needed)
           if [ -n "${{ steps.vars.outputs.CROSS_TOOLCHAIN_URL }}" ]; then
-            # common prefix names: aarch64-linux-gnu- or arm-eabi-
             if ls /opt/cross-toolchain/bin/*aarch64-linux-gnu-* >/dev/null 2>&1; then
               export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
             else
-              # try generic gcc prefix
               export CROSS_COMPILE=/opt/cross-toolchain/bin/aarch64-linux-gnu-
             fi
           else
-            # rely on distro-installed cross-compiler if present (user may adjust)
             if [ "${{ steps.vars.outputs.ARCH }}" = "arm64" ]; then
               export CROSS_COMPILE=aarch64-linux-gnu-
             else
@@ -125,33 +121,51 @@ jobs:
         run: |
           pwd
           echo "Kernel version target: ${{ steps.vars.outputs.KERNEL_VERSION }}"
-          # If kernel_version corresponds to a tag/branch in the kernel tree, try to checkout it
           if git rev-parse --verify --quiet "${{ steps.vars.outputs.KERNEL_VERSION }}" >/dev/null; then
-            echo "Checking out ${ { steps.vars.outputs.KERNEL_VERSION } } in kernel tree"
+            echo "Checking out ${{ steps.vars.outputs.KERNEL_VERSION }} in kernel tree"
             git checkout "${{ steps.vars.outputs.KERNEL_VERSION }}" || true
           fi
           ls -la
         shell: bash
 
-      - name: Configure kernel
+      - name: Configure kernel (guarded)
         working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          mkdir -p $BUILD_DIR
-          if [ -n "${{ steps.vars.outputs.DEFCONFIG }}" ]; then
-            echo "Using defconfig: ${{ steps.vars.outputs.DEFCONFIG }}"
-            make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE ${{ steps.vars.outputs.DEFCONFIG }}
+          cd "${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}" || { echo "Kernel path not found: ${{ steps.vars.outputs.KERNEL_PATH }}"; ls -la "${{ github.workspace }}" || true; exit 1; }
+
+          # Check for top-level Makefile
+          if [ ! -f Makefile ]; then
+            echo "ERROR: No top-level Makefile found in kernel path: $(pwd)"
+            echo "Contents:"; ls -la || true
+            echo "Please set kernel_path to the kernel root (where the top-level Makefile lives)."
+            exit 1
+          fi
+
+          CONFIG_DIR="arch/${{ steps.vars.outputs.ARCH }}/configs"
+          echo "Listing ${CONFIG_DIR}:"
+          if [ -d "$CONFIG_DIR" ]; then
+            ls -1 "$CONFIG_DIR" | sed -n '1,200p' || true
           else
-            # try to discover a defconfig (vendor or msm) - fallback to defconfig
-            if [ -f arch/$ARCH/configs/vendor_defconfig ]; then
-              echo "Found vendor_defconfig"
-              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE vendor_defconfig
-            elif [ -f arch/$ARCH/configs/msm_defconfig ]; then
-              echo "Found msm_defconfig"
-              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE msm_defconfig
+            echo "No configs directory at $CONFIG_DIR"
+          fi
+
+          if [ -n "${{ steps.vars.outputs.DEFCONFIG }}" ]; then
+            echo "Using provided defconfig: ${{ steps.vars.outputs.DEFCONFIG }}"
+            make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE ${{ steps.vars.outputs.DEFCONFIG }}
+          else
+            if [ -f "$CONFIG_DIR/vendor_defconfig" ]; then
+              echo "Using vendor_defconfig"
+              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE vendor_defconfig
+            elif [ -f "$CONFIG_DIR/msm_defconfig" ]; then
+              echo "Using msm_defconfig"
+              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE msm_defconfig
+            elif [ -f "$CONFIG_DIR/defconfig" ]; then
+              echo "Using defconfig"
+              make O=$BUILD_DIR ARCH=${{ steps.vars.outputs.ARCH }} CROSS_COMPILE=$CROSS_COMPILE defconfig
             else
-              echo "No specific defconfig found, running defconfig"
-              make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
+              echo "ERROR: No defconfig found. Please provide a defconfig name via the workflow input 'defconfig' or add a defconfig to the kernel tree."
+              exit 1
             fi
           fi
         shell: bash
@@ -162,16 +176,13 @@ jobs:
           set -euo pipefail
           JOBS=$(nproc)
           echo "Building with $JOBS jobs..."
-          # Build Image / zImage / Image.gz depending on arch
           if [ "$ARCH" = "arm64" ]; then
             make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE Image
-            # dtbs
             make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
           else
             make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE zImage
             make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
           fi
-          # Modules
           make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules
         timeout-minutes: 60
         shell: bash
@@ -189,7 +200,6 @@ jobs:
         working-directory: ${{ github.workspace }}/${{ steps.vars.outputs.KERNEL_PATH }}
         run: |
           mkdir -p artifacts
-          # copy likely outputs (adjust paths if your tree differs)
           if [ "$ARCH" = "arm64" ]; then
             cp -v $BUILD_DIR/arch/arm64/boot/Image artifacts/ 2>/dev/null || true
             cp -v $BUILD_DIR/arch/arm64/boot/dts/*/*.dtb artifacts/ 2>/dev/null || true
@@ -198,7 +208,6 @@ jobs:
             cp -v $BUILD_DIR/arch/arm/boot/dts/*/*.dtb artifacts/ 2>/dev/null || true
           fi
           cp -v modules.tar.gz artifacts/ || true
-          # save full build log (stdout/stderr captured earlier if you want)
           echo "Build completed. Listing artifacts:"
           ls -la artifacts || true
         shell: bash
