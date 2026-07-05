@@ -158,8 +158,8 @@ jobs:
           
           echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          # Désactive les erreurs de format et de types pour le noyau ET pour les outils hôtes (DTC, etc.)
-          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=frame-larger-than -Wno-error=format-security -Wno-error=incompatible-pointer-types"
+          # Correction de la variable KCFLAGS (retrait du drapeau incomplet)
+          export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
@@ -173,6 +173,7 @@ jobs:
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
+
 
 
 
