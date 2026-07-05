@@ -72,6 +72,7 @@ jobs:
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git
 
       - name: Optionally clone kernel repo (if kernel_repo_url provided)
+        id: clone_kernel
         if: steps.vars.outputs.KERNEL_REPO_URL != ''
         run: |
           set -euo pipefail
@@ -93,10 +94,10 @@ jobs:
         id: detect
         run: |
           set -euo pipefail
-          # Priority: cloned kernel (KERNEL_PATH from previous step) > kernel_path input > repo root
-          if [ -n "${{ steps.vars.outputs.KERNEL_REPO_URL }}" ] && [ -n "${{ steps.vars.outputs.KERNEL_PATH }}" ]; then
-            echo "Using cloned kernel path: ${{ steps.vars.outputs.KERNEL_PATH }}"
-            echo "KERNEL_PATH_FINAL=${{ steps.vars.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
+          # If clone produced a KERNEL_PATH, prefer it
+          if [ -n "${{ steps.clone_kernel.outputs.KERNEL_PATH }}" ]; then
+            echo "Using cloned kernel path: ${{ steps.clone_kernel.outputs.KERNEL_PATH }}"
+            echo "KERNEL_PATH_FINAL=${{ steps.clone_kernel.outputs.KERNEL_PATH }}" >> $GITHUB_OUTPUT
             exit 0
           fi
           KP="${{ steps.vars.outputs.KERNEL_PATH_INPUT }}"
@@ -107,6 +108,7 @@ jobs:
           fi
           echo "Using kernel path: $KP"
           echo "KERNEL_PATH_FINAL=$KP" >> $GITHUB_OUTPUT
+        shell: bash
 
       - name: Set env from detected path
         run: |
@@ -229,6 +231,19 @@ jobs:
           tar -C tmp_modules -czf modules.tar.gz .
         shell: bash
 
+      - name: Run packaging script if present
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -f .github/workflows/commands.sh ]; then
+            echo "Found .github/workflows/commands.sh — running it"
+            chmod +x .github/workflows/commands.sh
+            .github/workflows/commands.sh
+          else
+            echo "No .github/workflows/commands.sh found — skipping packaging script"
+          fi
+        shell: bash
+
       - name: Collect artifacts
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -243,19 +258,6 @@ jobs:
           cp -v modules.tar.gz artifacts/ || true
           echo "Build completed. Listing artifacts:"
           ls -la artifacts || true
-        shell: bash
-
-      - name: Run packaging script if present
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          if [ -f .github/workflows/commands.sh ]; then
-            echo "Found .github/workflows/commands.sh — running it"
-            chmod +x .github/workflows/commands.sh
-            .github/workflows/commands.sh
-          else
-            echo "No .github/workflows/commands.sh found — skipping packaging script"
-          fi
         shell: bash
 
       - name: Upload artifacts
