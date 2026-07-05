@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      boot_stock_url:
+        description: 'Lien direct URL du boot.img officiel (ex: LineageOS)'
+        required: false
+        default: 'https://mirrorbits.lineageos.org/full/kiev/20260702/boot.img' # Exemple temporaire
       kernel_repo_url:
         description: 'Optional: git URL of kernel source to clone'
         required: false
@@ -26,14 +30,6 @@ on:
         description: 'Kernel defconfig target'
         required: false
         default: 'vendor/lito-perf_defconfig'
-      cross_toolchain_url:
-        description: 'Optional URL to a cross toolchain archive (tar.xz).'
-        required: false
-        default: ''
-      use_ccache:
-        description: 'Use ccache (true/false)'
-        required: false
-        default: 'true'
       device:
         description: 'Device codename'
         required: false
@@ -53,13 +49,12 @@ jobs:
       - name: Set inputs
         id: vars
         run: |
+          echo "BOOT_URL=${{ github.event.inputs.boot_stock_url }}" >> $GITHUB_OUTPUT
           echo "KERNEL_REPO_URL=${{ github.event.inputs.kernel_repo_url }}" >> $GITHUB_OUTPUT
           echo "KERNEL_VERSION=${{ github.event.inputs.kernel_version }}" >> $GITHUB_OUTPUT
           echo "KERNEL_PATH_INPUT=${{ github.event.inputs.kernel_path }}" >> $GITHUB_OUTPUT
           echo "ARCH=${{ github.event.inputs.arch }}" >> $GITHUB_OUTPUT
           echo "DEFCONFIG=${{ github.event.inputs.defconfig }}" >> $GITHUB_OUTPUT
-          echo "CROSS_TOOLCHAIN_URL=${{ github.event.inputs.cross_toolchain_url }}" >> $GITHUB_OUTPUT
-          echo "USE_CCACHE=${{ github.event.inputs.use_ccache }}" >> $GITHUB_OUTPUT
           echo "DEVICE=${{ github.event.inputs.device }}" >> $GITHUB_OUTPUT
 
       - name: Install deps
@@ -67,6 +62,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev device-tree-compiler
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Download Stock Boot Image if URL provided
+        run: |
+          set -euo pipefail
+          URL_BOOT="${{ steps.vars.outputs.BOOT_URL }}"
+          if [ -n "$URL_BOOT" ]; then
+            echo "📥 Téléchargement du boot.img stock depuis : $URL_BOOT"
+            wget -O boot-stock.img "$URL_BOOT" || echo "⚠️ Impossible de télécharger le boot.img"
+          elif [ -f "boot-stock.img" ]; then
+            echo "✅ boot-stock.img trouvé localement dans le dépôt."
+          else
+            echo "ℹ️ Aucun boot-stock.img fourni."
+          fi
+        shell: bash
 
       - name: Clone kernel repo unless kernel_path in workspace already has Makefile
         id: clone_kernel
@@ -153,8 +162,6 @@ jobs:
           TARGET_ARCH="${TARGET_ARCH:-arm64}"
           TARGET_DEFCONFIG="${{ github.event.inputs.defconfig }}"
           TARGET_DEFCONFIG="${TARGET_DEFCONFIG:-vendor/lito-perf_defconfig}"
-          
-          echo "Configuring kernel for ARCH=${TARGET_ARCH} with ${TARGET_DEFCONFIG}..."
           make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- ${TARGET_DEFCONFIG}
         shell: bash
 
@@ -166,39 +173,32 @@ jobs:
           TARGET_ARCH="${{ github.event.inputs.arch }}"
           TARGET_ARCH="${TARGET_ARCH:-arm64}"
           
-          echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
-          
-          # Ajout de -Wno-error=maybe-uninitialized pour la variable du pilote audio lito.c
           export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result -Wno-error=misleading-indentation -Wno-error=format-extra-args -Wno-error=enum-int-mismatch -Wno-error=unused-value -Wno-error=bool-compare -Wno-error=missing-attributes -Wno-error=duplicate-decl-specifier -Wno-error=maybe-uninitialized"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
           
-          # 1. On compile d'abord l'Image seule
           if [ "${TARGET_ARCH}" = "arm64" ]; then
             make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
           else
             make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
           fi
 
-          # 2. Remplacement du DTC interne défectueux par la version stable d'Ubuntu
           echo "🔄 Remplacement du DTC interne par la version système stable..."
           mkdir -p $BUILD_DIR/scripts/dtc
           cp -f /usr/bin/dtc $BUILD_DIR/scripts/dtc/dtc
           chmod +x $BUILD_DIR/scripts/dtc/dtc
 
-          # 3. On compile les dtbs et les modules
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
           make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
-  
+
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
           TARGET_ARCH="${{ github.event.inputs.arch }}"
           TARGET_ARCH="${TARGET_ARCH:-arm64}"
-          
           mkdir -p tmp_modules
           make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
           tar -C tmp_modules -czf modules.tar.gz .
@@ -209,11 +209,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f "boot-stock.img" ]; then
-            echo "⚠️ boot-stock.img absent à la racine du dépôt. Étape d'injection sautée."
+            echo "⚠️ boot-stock.img absent. Étape d'injection sautée."
             exit 0
           fi
           
-          echo "🔥 boot-stock.img détecté ! Préparation de l'injection du nouveau noyau..."
+          echo "🔥 boot-stock.img détecté ! Préparation de l'injection..."
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
@@ -250,8 +250,6 @@ jobs:
           
           if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
             cp "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" "$FLASH_DIR/kernel.img" || true
-          elif [ -f "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" ]; then
-            cp "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" "$FLASH_DIR/kernel.img" || true
           fi
           
           mkdir -p "$FLASH_DIR/dtbs"
