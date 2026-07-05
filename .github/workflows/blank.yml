@@ -158,7 +158,6 @@ jobs:
           
           echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
           
-          # Ajout des drapeaux pour ignorer les parenthèses et les résultats inutilisés (pilote MHI)
           export KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types -Wno-error=address -Wno-error=parentheses -Wno-error=unused-result"
           export HOSTCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=format-security -Wno-error=incompatible-pointer-types"
           export CFLAGS_MODULE="-Wno-error=format -Wno-error=unused-variable"
@@ -174,13 +173,12 @@ jobs:
         timeout-minutes: 120
         shell: bash
 
-
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
           mkdir -p tmp_modules
-          make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
+          make O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH=$PWD/tmp_modules || true
           tar -C tmp_modules -czf modules.tar.gz .
         shell: bash
 
@@ -215,7 +213,7 @@ jobs:
             cp "$KROOT/modules.tar.gz" "$FLASH_DIR/modules.tar.gz" || true
           fi
           
-          ZIP="${ARTIFACT_DIR}/kernel-${{ env.DEVICE }}-latest.zip"
+          ZIP="${ARTIFACT_DIR}/kernel-${{ github.event.inputs.device }}-latest.zip"
           pushd "$FLASH_DIR" >/dev/null
           zip -r -y "$ZIP" . || true
           popd >/dev/null
@@ -227,5 +225,5 @@ jobs:
           name: kernel-artifacts-${{ github.run_id }}
           path: |
             artifacts
-            ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/.config
-for
+            ${{ env.KERNEL_PATH }}/out/.config
+
