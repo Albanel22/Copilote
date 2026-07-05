@@ -1,0 +1,50 @@
+# Generic CI workflow for Albanel/Copilote
+# Modifiez ce fichier pour ajouter les commandes spécifiques à votre projet.
+# Ce workflow s'exécute sur push, pull_request et peut être déclenché manuellement via "Run workflow".
+name: Generic Command Runner
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      commands:
+        description: 'Commands to run (overrides default)'
+        required: false
+        default: ''
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run commands
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Prefer commands provided via workflow_dispatch input
+          if [ -n "${{ github.event.inputs.commands }}" ]; then
+            echo "Running commands from workflow_dispatch input"
+            eval "${{ github.event.inputs.commands }}"
+
+          # Or run a project-specific script if present
+          elif [ -f .github/workflows/commands.sh ]; then
+            echo "Running .github/workflows/commands.sh"
+            chmod +x .github/workflows/commands.sh
+            .github/workflows/commands.sh
+
+          # Otherwise run the default placeholder commands
+          else
+            echo "Running default commands"
+            echo "Hello from Albanel/Copilote CI"
+            # Ajoutez ici vos commandes par défaut, par ex:
+            # npm install
+            # npm test
+            # make build
+            echo "Build step placeholder"
+            echo "Test step placeholder"
+          fi
