@@ -63,19 +63,20 @@ jobs:
           sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc wget ccache git zip unzip pkg-config libelf-dev device-tree-compiler
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Download Stock Boot Image if URL provided
+      - name: Download Stock Boot Image if URL l
         run: |
           set -euo pipefail
           URL_BOOT="${{ steps.vars.outputs.BOOT_URL }}"
           if [ -n "$URL_BOOT" ]; then
             echo "📥 Téléchargement du boot.img stock depuis : $URL_BOOT"
-            wget -O boot-stock.img "$URL_BOOT" || echo "⚠️ Impossible de télécharger le boot.img"
+            curl -fLo boot-stock.img "$URL_BOOT" || { echo "⚠️ Lien mort ou invalide pour le boot.img"; exit 1; }
           elif [ -f "boot-stock.img" ]; then
             echo "✅ boot-stock.img trouvé localement dans le dépôt."
           else
             echo "ℹ️ Aucun boot-stock.img fourni."
           fi
         shell: bash
+
 
       - name: Clone kernel repo unless kernel_path in workspace already has Makefile
         id: clone_kernel
@@ -217,7 +218,8 @@ jobs:
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
-          wget -q https://github.com/magisk-modules-alt-repo/magiskboot-binaries/raw/main/binaries/linux/x86_64/magiskboot
+          echo "📥 Téléchargement sécurisé de magiskboot..."
+          curl -fLo magiskboot "https://raw.githubusercontent.com/magisk-modules-alt-repo/magiskboot-binaries/main/binaries/linux/x86_64/magiskboot"
           chmod +x magiskboot
           
           ./magiskboot unpack boot.img
@@ -233,6 +235,7 @@ jobs:
           mv new-boot.img ../boot.img
           echo "✅ Nouveau boot.img créé avec succès !"
         shell: bash
+
 
       - name: Built-in packaging (create flashable zip)
         working-directory: ${{ github.workspace }}
