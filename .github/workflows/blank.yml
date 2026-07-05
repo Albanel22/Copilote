@@ -137,24 +137,39 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-          make O=$BUILD_DIR ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} ${DEFCONFIG}
+          # On force les variables en dur ici pour éviter tout oubli d'environnement
+          TARGET_ARCH="${{ github.event.inputs.arch }}"
+          TARGET_ARCH="${TARGET_ARCH:-arm64}"
+          TARGET_DEFCONFIG="${{ github.event.inputs.defconfig }}"
+          TARGET_DEFCONFIG="${TARGET_DEFCONFIG:-vendor/lito-perf_defconfig}"
+          
+          echo "Configuring kernel for ARCH=${TARGET_ARCH} with ${TARGET_DEFCONFIG}..."
+          
+          make O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- ${TARGET_DEFCONFIG}
         shell: bash
+
 
       - name: Build kernel (Image, dtbs, modules)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
           JOBS=$(nproc)
-          if [ "${ARCH}" = "arm64" ]; then
-            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE Image
-            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
+          TARGET_ARCH="${{ github.event.inputs.arch }}"
+          TARGET_ARCH="${TARGET_ARCH:-arm64}"
+          
+          echo "Starting build for ARCH=${TARGET_ARCH} with $JOBS jobs..."
+          
+          if [ "${TARGET_ARCH}" = "arm64" ]; then
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- Image
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
           else
-            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE zImage
-            make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- zImage
+            make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- dtbs
           fi
-          make -j$JOBS O=$BUILD_DIR ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules
+          make -j$JOBS O=$BUILD_DIR ARCH=${TARGET_ARCH} CROSS_COMPILE=aarch64-linux-gnu- modules
         timeout-minutes: 120
         shell: bash
+ 
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
