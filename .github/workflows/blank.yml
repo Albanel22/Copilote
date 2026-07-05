@@ -40,7 +40,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libtinfo5 libncurses5-dev alterator-fbi zip unzip curl git
-        image: ubuntu-latest
 
       - name: Download Stock Boot Image if URL provided
         run: |
