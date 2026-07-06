@@ -24,7 +24,8 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld zip unzip curl git
+          # Ajout de device-tree-compiler pour avoir un outil 'dtc' système stable
+          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
 
       - name: Download Stock Boot Image
         run: |
@@ -59,7 +60,6 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           
-          # Variables indispensables pour empêcher GCC de compiler du arm64 en x86
           export CC=clang
           export LD=ld.lld
           export AR=llvm-ar
@@ -76,8 +76,8 @@ jobs:
             make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          # 2. Compilation des DTB matériels
-          make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) dtbs
+          # 2. Compilation des DTB avec le DTC externe (DTC_EXT=dtc) pour éviter le SegFault
+          make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc -j$(nproc) dtbs
           
           # 3. Compilation du Noyau principal et des Modules annexes
           make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
