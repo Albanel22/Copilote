@@ -37,28 +37,23 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Force Built-in Touchscreen Drivers & Bus (Option A)
+      - name: Configure Kernel Drivers as Modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Configuration agressive du matériel tactile Motorola..."
+          echo "🛠️ Configuration des pilotes tactiles en modules (.ko) pour le Ramdisk..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          echo "CONFIG_SPI=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SPI_MASTER=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_I2C=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_I2C_CHARDEV=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_NOVATEK_NVT_TS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_FOCALTECH=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_REGULATOR=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_REGULATOR_FIXED_VOLTAGE=y" >> "$TARGET_CONFIG"
+          # On s'assure que tout est compilé en modules externes standard
+          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=y/CONFIG_INPUT_TOUCHSCREEN=m/g' "$TARGET_CONFIG"
+          echo "CONFIG_INPUT_TOUCHSCREEN=m" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=m" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH=m" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=m" >> "$TARGET_CONFIG"
           
-          echo "✅ Bus matériels et pilotes tactiles injectés au cœur du noyau."
+          echo "✅ Configuration des modules prête."
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -92,16 +87,11 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "🚀 Étape 2 : Compilation ciblée de l'image de base (Image)..."
+          echo "🚀 Étape 2 : Compilation du noyau (Image)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
-          echo "🚀 Étape 3 : Compilation ciblée des modules restant..."
+          echo "🚀 Étape 3 : Compilation des modules tactiles et audio..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
-          
-          echo "🚀 Étape 4 : Compilation RESTRICTIVE ET FORCÉE du DTB/DTBO pour LITO (kiev)..."
-          # Au lieu de 'make dtbs' général, on pointe directement vers les cibles Qualcomm de ton SoC
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) arch/arm64/boot/dts/vendor/qcom/lito.dtb || echo "⚠️ Échec lito.dtb standard, on tente la structure alternative"
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs-dtbo || echo "⚠️ Compilation secondaire des overlays terminée."
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
@@ -121,7 +111,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Repack Boot Image with Magiskboot, Custom DTB & DTBO
+      - name: Repack Boot Image & Inject Modules into Ramdisk
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -133,52 +123,41 @@ jobs:
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
+          # 1. Extraction du boot d'origine
           ./magiskboot unpack boot.img
           
+          # 2. Remplacement du noyau brut
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           
-          COMPILED_DTB=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*lito*.dtb" -print -quit)
-          if [ -f "$COMPILED_DTB" ]; then
-            echo "🔄 Remplacement du DTB d'origine par notre lito.dtb tout neuf..."
-            cp -v "$COMPILED_DTB" dtb
-          else
-            echo "⚠️ lito.dtb introuvable."
-          fi
+          # 3. Extraction et injection des modules dans le Ramdisk
+          mkdir -p ramdisk_dir
+          cd ramdisk_dir
+          cp ../ramdisk .
+          ../../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/magiskboot cpio ramdisk extract || true
           
-          COMPILED_DTBO=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtbo" -print -quit)
-          if [ -f "$COMPILED_DTBO" ]; then
-            echo "🔥 Remplacement du dtbo par notre version compilée..."
-            if [ -f "recovery_dtbo" ]; then
-              cp -v "$COMPILED_DTBO" recovery_dtbo
-            elif [ -f "dtbo" ]; then
-              cp -v "$COMPILED_DTBO" dtbo
-            else
-              cp -v "$COMPILED_DTBO" dtbo 2>/dev/null || true
-            fi
-          else
-            echo "⚠️ Aucun fichier .dtbo compilé trouvé."
-          fi
+          echo "📥 Injection des nouveaux modules tactiles (.ko) dans le dossier du Ramdisk..."
+          # On cherche tous les modules compilés (.ko) et on les copie à la racine du ramdisk ou dans lib/modules
+          mkdir -p lib/modules
+          find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} lib/modules/ \;
+          find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
           
+          # On reconstruit l'archive cpio du ramdisk
+          find . | cpio -o -H newc > ../ramdisk
+          cd ..
+          
+          # 4. Rempaquetage final
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img "${{ github.workspace }}/boot.img"
         shell: bash
 
       - name: Organize Final Output Artifacts
         run: |
-          mkdir -p final_output/dtbs
+          mkdir -p final_output
           mv "${{ github.workspace }}/boot.img" final_output/boot.img
-          
-          if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
-            cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
-          fi
-          
           if [ -f "${{ github.workspace }}/modules.tar.gz" ]; then
             mv "${{ github.workspace }}/modules.tar.gz" final_output/
           fi
-          
-          find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtb" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
-          find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtbo" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
           
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
