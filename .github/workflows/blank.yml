@@ -46,20 +46,15 @@ jobs:
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # 1. Activation des bus de communication indispensables
           echo "CONFIG_SPI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SPI_MASTER=y" >> "$TARGET_CONFIG"
           echo "CONFIG_I2C=y" >> "$TARGET_CONFIG"
           echo "CONFIG_I2C_CHARDEV=y" >> "$TARGET_CONFIG"
-          
-          # 2. Intégration totale des pilotes tactiles (Génériques + Novatek + Focaltech/Goodix)
           echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_NOVATEK_NVT_TS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_FOCALTECH=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          
-          # 3. Forcer la gestion de l'alimentation de l'écran par le noyau
           echo "CONFIG_REGULATOR=y" >> "$TARGET_CONFIG"
           echo "CONFIG_REGULATOR_FIXED_VOLTAGE=y" >> "$TARGET_CONFIG"
           
@@ -124,7 +119,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Repack Boot Image with Magiskboot
+      - name: Repack Boot Image with Magiskboot, Custom DTB & DTBO
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -136,14 +131,37 @@ jobs:
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
+          # Extraction du boot de référence du 28 juin 2026
           ./magiskboot unpack boot.img
           
+          # 1. Remplacement de l'Image Noyau
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          if [ ! -f "$ABS_IMAGE_ARM64" ]; then
-            ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image"
+          cp -v "$ABS_IMAGE_ARM64" kernel
+          
+          # 2. Remplacement du DTB principal
+          COMPILED_DTB=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "lito.dtb" -print -quit)
+          if [ -f "$COMPILED_DTB" ]; then
+            echo "🔄 Remplacement du DTB d'origine par notre lito.dtb tout neuf..."
+            cp -v "$COMPILED_DTB" dtb
           fi
           
-          cp -v "$ABS_IMAGE_ARM64" kernel
+          # 3. FIX DU TACTILE : Remplacement du DTBO (Les calques matériels écran/tactile de Motorola)
+          COMPILED_DTBO=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtbo" -print -quit)
+          if [ -f "$COMPILED_DTBO" ]; then
+            echo "🔥 LA LIGNE MAGIQUE : Remplacement du recovery_dtbo/dtbo par notre version compilée..."
+            # Magiskboot extrait souvent le DTBO sous le nom 'recovery_dtbo' ou 'dtbo' selon la structure du boot.img header v2
+            if [ -f "recovery_dtbo" ]; then
+              cp -v "$COMPILED_DTBO" recovery_dtbo
+            elif [ -f "dtbo" ]; then
+              cp -v "$COMPILED_DTBO" dtbo
+            else
+              echo "ℹ️ Pas de partition DTBO séparée trouvée par magiskboot, injection directe dans le second bloc."
+              cp -v "$COMPILED_DTBO" dtbo 2>/dev/null || true
+            fi
+          else
+            echo "⚠️ Aucun fichier .dtbo compilé trouvé."
+          fi
+          
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img "${{ github.workspace }}/boot.img"
         shell: bash
