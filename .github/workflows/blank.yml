@@ -37,6 +37,27 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
+      - name: Force Built-in Touchscreen Drivers (Option A)
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Modification de la configuration pour intégrer le tactile en dur..."
+          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
+          if [ ! -f "$TARGET_CONFIG" ]; then
+            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
+          fi
+          
+          # On cherche les lignes de pilotes tactiles configurées en modules (=m) et on les passe en dur (=y)
+          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=m/CONFIG_INPUT_TOUCHSCREEN=y/g' "$TARGET_CONFIG"
+          sed -i 's/CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=m/CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y/g' "$TARGET_CONFIG"
+          sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH=m/CONFIG_TOUCHSCREEN_FOCALTECH=y/g' "$TARGET_CONFIG"
+          sed -i 's/CONFIG_TOUCHSCREEN_GOODIX_BRL=m/CONFIG_TOUCHSCREEN_GOODIX_BRL=y/g' "$TARGET_CONFIG"
+          
+          # Sécurité : Si elles n'existent pas, on les force à la fin du fichier
+          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Fichier de configuration modifié avec succès."
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -72,17 +93,16 @@ jobs:
           echo "🚀 Étape 2 : Compilation ciblée de l'image de base (Image)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
-          echo "🚀 Étape 3 : Compilation ciblée des modules..."
+          echo "🚀 Étape 3 : Compilation ciblée des modules restant..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
           
           echo "🚀 Étape 4 : Compilation restrictive des DTB/DTBO de la plateforme..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs || echo "⚠️ Des DTB secondaires ont échoué, mais on continue avec les DTB générés pour notre puce."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs || echo "⚠️ Des DTB secondaires ont échoué, mais on continue."
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          # Utilisation d'un chemin absolu pour éviter les pertes de dossier racine
           MOD_PATH="${{ github.workspace }}/tmp_modules"
           mkdir -p "$MOD_PATH"
           
@@ -92,7 +112,6 @@ jobs:
           if [ -d "lib" ]; then
             tar -czf ${{ github.workspace }}/modules.tar.gz .
           else
-            echo "⚠️ Aucun module trouvé au chemin spécifié, création d'un backup vide."
             echo "placeholder" > ${{ github.workspace }}/empty_module
             tar -czf ${{ github.workspace }}/modules.tar.gz ${{ github.workspace }}/empty_module
           fi
@@ -102,23 +121,12 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          if [ ! -f "boot-stock.img" ]; then
-            echo "❌ Erreur : boot-stock.img introuvable."
-            exit 1
-          fi
-          
-          echo "🔥 boot-stock.img détecté ! Préparation de l'injection..."
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
-          echo "📥 Téléchargement de magiskboot natif Linux x86_64..."
-          curl -fLo magiskboot "https://github.com/sshanying/magiskboot-linux/releases/latest/download/magiskboot" || \
-          {
-            echo "🔄 Repli vers la méthode APK officielle..."
-            curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-            unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
-            mv libmagiskboot.so magiskboot
-          }
+          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
+          mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
           ./magiskboot unpack boot.img
@@ -128,41 +136,18 @@ jobs:
             ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image"
           fi
           
-          if [ -f "$ABS_IMAGE_ARM64" ]; then
-            echo "🔄 Remplacement du kernel d'origine par le nouveau..."
-            cp -v "$ABS_IMAGE_ARM64" kernel
-          else
-            echo "❌ Erreur critique : Le fichier Image compilé reste introuvable."
-            exit 1
-          fi
-          
+          cp -v "$ABS_IMAGE_ARM64" kernel
           ./magiskboot repack boot.img new-boot.img
-          
-          if [ -f "new-boot.img" ]; then
-            mv new-boot.img "${{ github.workspace }}/boot.img"
-            echo "✅ Nouveau boot.img généré !"
-          else
-            echo "❌ Erreur critique : Échec de création du fichier par magiskboot."
-            exit 1
-          fi
+          mv new-boot.img "${{ github.workspace }}/boot.img"
         shell: bash
 
       - name: Organize Final Output Artifacts
         run: |
           mkdir -p final_output/dtbs
-          
-          if [ -f "${{ github.workspace }}/boot.img" ]; then
-            mv "${{ github.workspace }}/boot.img" final_output/boot.img
-            echo "📦 boot.img finalisé ajouté au package !"
-          else
-            echo "❌ Erreur finale : boot.img manquant."
-            exit 1
-          fi
+          mv "${{ github.workspace }}/boot.img" final_output/boot.img
           
           if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
-          elif [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image" ]; then
-            cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image" final_output/kernel.img
           fi
           
           if [ -f "${{ github.workspace }}/modules.tar.gz" ]; then
