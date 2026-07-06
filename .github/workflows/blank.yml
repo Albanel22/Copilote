@@ -3,12 +3,7 @@ name: Kernel CI — build & package
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:
-    inputs:
-      boot_stock_url:
-        description: 'Lien direct URL du boot.img officiel (ex: LineageOS)'
-        required: false
-        default: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
+  workflow_dispatch: # Permet de lancer le build manuellement depuis l'interface GitHub Actions
 
 env:
   KERNEL_PATH: kernel_src
@@ -16,6 +11,8 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
+  # URL officielle gravée dans le marbre pour éviter les erreurs de saisie
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
   build:
@@ -25,33 +22,21 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Initialize Workflow Variables
-        id: vars
-        run: |
-          # Priorité à l'URL manuelle, sinon utilise la version par défaut du 28 juin
-          INPUT_URL="${{ github.event.inputs.boot_stock_url }}"
-          if [ -z "$INPUT_URL" ]; then
-            INPUT_URL="https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img"
-          fi
-          echo "BOOT_URL=${INPUT_URL}" >> $GITHUB_OUTPUT
-        shell: bash
-
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev zip unzip curl git
 
-      - name: Download Stock Boot Image if URL provided
+      - name: Download Stock Boot Image
         run: |
           set -euo pipefail
-          URL_BOOT="${{ steps.vars.outputs.BOOT_URL }}"
-          echo "📥 Téléchargement du boot.img stock depuis : $URL_BOOT"
-          curl -fLo boot-stock.img "$URL_BOOT" || { echo "⚠️ Lien mort ou invalide pour le boot.img"; exit 1; }
+          echo "📥 Téléchargement du boot.img stock officiel depuis : ${{ env.BOOT_URL }}"
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
         shell: bash
 
       - name: Clone Kernel Source
         run: |
-          # Clonage de la branche lineage-23.2
+          # Clonage strict et direct de ton lien officiel LineageOS 23.2
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
       - name: Setup ccache
@@ -76,17 +61,13 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           
-          # 1. Configuration initiale (recherche automatique dans vendor/)
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} vendor/${{ env.DEFCONFIG }}
           else
             make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
           fi
           
-          # 2. Compilation des DTB matériels
           make O=${{ env.BUILD_DIR }} -j$(nproc) dtbs
-          
-          # 3. Compilation du Noyau principal et des Modules annexes
           make O=${{ env.BUILD_DIR }} -j$(nproc)
 
       - name: Install & package modules
@@ -104,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f "boot-stock.img" ]; then
-            echo "⚠️ boot-stock.img absent. Étape d'injection annulée."
+            echo "❌ Erreur : boot-stock.img introuvable."
             exit 1
           fi
           
@@ -112,45 +93,62 @@ jobs:
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
           
-          echo "📥 Téléchargement sécurisé de magiskboot via l'APK officielle..."
-          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
-          mv libmagiskboot.so magiskboot
+          echo "📥 Téléchargement de magiskboot natif Linux x86_64..."
+          curl -fLo magiskboot "https://github.com/sshanying/magiskboot-linux/releases/latest/download/magiskboot" || \
+          {
+            echo "🔄 Repli vers la méthode APK officielle..."
+            curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+            unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
+            mv libmagiskboot.so magiskboot
+          }
           chmod +x magiskboot
           
+          echo "🗜️ Désassemblage du boot.img d'origine..."
           ./magiskboot unpack boot.img
           
-          KROOT="${{ env.KERNEL_PATH }}"
-          if [ -f "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" ]; then
-            cp -v "$KROOT/$BUILD_DIR/arch/arm64/boot/Image" kernel
-          elif [ -f "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" ]; then
-            cp -v "$KROOT/$BUILD_DIR/arch/arm/boot/zImage" kernel
+          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          
+          if [ -f "$ABS_IMAGE_ARM64" ]; then
+            echo "🔄 Remplacement du kernel d'origine par le nouveau..."
+            cp -v "$ABS_IMAGE_ARM64" kernel
+          else
+            echo "❌ Erreur critique : Le fichier Image compilé est introuvable."
+            exit 1
           fi
           
+          echo "🛠️ Réassemblage du nouveau boot.img..."
           ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../boot.img
-          echo "✅ Nouveau boot.img créé avec succès !"
+          
+          if [ -f "new-boot.img" ]; then
+            mv new-boot.img "${{ github.workspace }}/boot.img"
+            echo "✅ Nouveau boot.img généré !"
+          else
+            echo "❌ Erreur critique : Échec de création du fichier par magiskboot."
+            exit 1
+          fi
         shell: bash
 
       - name: Organize Final Output Artifacts
         run: |
           mkdir -p final_output/dtbs
           
-          # On déplace le boot.img réinjecté s'il existe, sinon le kernel brut
-          if [ -f "boot.img" ]; then
-            mv boot.img final_output/boot.img
-            echo "📦 boot.img réinjecté ajouté au package final."
+          if [ -f "${{ github.workspace }}/boot.img" ]; then
+            mv "${{ github.workspace }}/boot.img" final_output/boot.img
+            echo "📦 boot.img finalisé ajouté au package !"
+          else
+            echo "❌ Erreur finale : boot.img manquant."
+            exit 1
           fi
           
-          if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
-            cp "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
+          if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
           fi
           
           if [ -f "modules.tar.gz" ]; then
             mv modules.tar.gz final_output/
           fi
           
-          find ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/${{ env.ARCH }}/boot/dts/ -name "*.dtb" -exec cp {} final_output/dtbs/ \;
+          find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/${{ env.ARCH }}/boot/dts/ -name "*.dtb" -exec cp {} final_output/dtbs/ \;
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
