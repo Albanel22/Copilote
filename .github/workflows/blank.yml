@@ -46,7 +46,6 @@ jobs:
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # On s'assure que tout est compilé en modules externes standard
           sed -i 's/CONFIG_INPUT_TOUCHSCREEN=y/CONFIG_INPUT_TOUCHSCREEN=m/g' "$TARGET_CONFIG"
           echo "CONFIG_INPUT_TOUCHSCREEN=m" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=m" >> "$TARGET_CONFIG"
@@ -130,21 +129,33 @@ jobs:
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           
-          # 3. Extraction et injection des modules dans le Ramdisk
-          mkdir -p ramdisk_dir
-          cd ramdisk_dir
-          cp ../ramdisk .
-          ../../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/magiskboot cpio ramdisk extract || true
+          # 3. Extraction intelligente du ramdisk (Magiskboot l'extrait souvent sous le nom 'ramdisk.cpio')
+          RAMDISK_FILE=$(find . -name "ramdisk*" -print -quit)
           
-          echo "📥 Injection des nouveaux modules tactiles (.ko) dans le dossier du Ramdisk..."
-          # On cherche tous les modules compilés (.ko) et on les copie à la racine du ramdisk ou dans lib/modules
-          mkdir -p lib/modules
-          find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} lib/modules/ \;
-          find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
-          
-          # On reconstruit l'archive cpio du ramdisk
-          find . | cpio -o -H newc > ../ramdisk
-          cd ..
+          if [ -n "$RAMDISK_FILE" ]; then
+            echo "📦 Ramdisk détecté : $RAMDISK_FILE. Modification en cours..."
+            mkdir -p ramdisk_dir && cd ramdisk_dir
+            
+            # On extrait le contenu du cpio de Magisk
+            ../magiskboot cpio ../$RAMDISK_FILE extract || true
+            
+            echo "📥 Injection des nouveaux modules tactiles (.ko)..."
+            mkdir -p lib/modules
+            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} lib/modules/ \;
+            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
+            
+            # On repack le ramdisk au propre avec magiskboot cpio
+            find . | cpio -o -H newc > ../$RAMDISK_FILE || true
+            cd ..
+          else
+            echo "⚠️ Aucun ramdisk autonome extrait, injection via méthode directe magiskboot..."
+            mkdir -p dummy_mod && cd dummy_mod
+            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
+            for ko in *.ko; do
+              ../magiskboot cpio ../ramdisk.cpio "add 0644 lib/modules/$ko $ko" || true
+            done
+            cd ..
+          fi
           
           # 4. Rempaquetage final
           ./magiskboot repack boot.img new-boot.img
