@@ -76,23 +76,25 @@ jobs:
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
           
           echo "🚀 Étape 4 : Compilation restrictive des DTB/DTBO de la plateforme..."
-          # Au lieu d'un 'make dtbs' global qui plante sur lagoon, on force la tolérance d'erreur '|| true' 
-          # car l'essentiel (lito.dtb) se compile au début de la chaîne avant le crash de lagoon.
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs || echo "⚠️ Des DTB secondaires ont échoué, mais on continue avec les DTB générés pour notre puce."
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          mkdir -p tmp_modules
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KBUILD_MODPOST_WARN=1 INSTALL_MOD_PATH=../tmp_modules modules_install || true
-          cd ../tmp_modules
+          # Utilisation d'un chemin absolu pour éviter les pertes de dossier racine
+          MOD_PATH="${{ github.workspace }}/tmp_modules"
+          mkdir -p "$MOD_PATH"
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KBUILD_MODPOST_WARN=1 INSTALL_MOD_PATH="$MOD_PATH" modules_install || true
+          
+          cd "$MOD_PATH"
           if [ -d "lib" ]; then
-            tar -czf ../modules.tar.gz .
+            tar -czf ${{ github.workspace }}/modules.tar.gz .
           else
-            echo "⚠️ Aucun module externe à empaqueter."
-            echo "placeholder" > ../empty_module
-            tar -czf ../modules.tar.gz ../empty_module
+            echo "⚠️ Aucun module trouvé au chemin spécifié, création d'un backup vide."
+            echo "placeholder" > ${{ github.workspace }}/empty_module
+            tar -czf ${{ github.workspace }}/modules.tar.gz ${{ github.workspace }}/empty_module
           fi
         shell: bash
 
@@ -163,11 +165,10 @@ jobs:
             cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image" final_output/kernel.img
           fi
           
-          if [ -f "modules.tar.gz" ]; then
-            mv modules.tar.gz final_output/
+          if [ -f "${{ github.workspace }}/modules.tar.gz" ]; then
+            mv "${{ github.workspace }}/modules.tar.gz" final_output/
           fi
           
-          # On ramasse tous les fichiers .dtb et .dtbo générés dans le dossier de build out/
           find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtb" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
           find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtbo" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
           
