@@ -60,10 +60,7 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          # Anti-OOM (Out Of Memory) : Drapeaux critiques pour économiser la RAM de GitHub Actions
-          export KCFLAGS="-Wno-error -g0"
-          export LDFLAGS="--threads=1 --no-keep-memory"
+          export KCFLAGS="-Wno-error"
           
           echo "🛠️ Étape 1 : Génération de la configuration..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
@@ -72,8 +69,14 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "🚀 Étape 2 : Lancement de la compilation globale bridée en RAM..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" LDFLAGS="$LDFLAGS" -j$(nproc)
+          echo "🚀 Étape 2 : Compilation ciblée de l'image de base (Image)..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          
+          echo "🚀 Étape 3 : Compilation ciblée des modules..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
+          
+          echo "🚀 Étape 4 : Compilation ciblée des DTB (DTC externe)..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
@@ -165,7 +168,7 @@ jobs:
           find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/ -name "*.dtb" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
           
       - name: Upload Finished Packaged Assets
-        uses: actions/upload-artifact@v4
+        uses: Actions/upload-artifact@v4
         with:
           name: kernel-motorola_one_5g_ace-latest
           path: final_output/
