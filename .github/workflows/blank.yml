@@ -37,26 +37,33 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Force Built-in Touchscreen Drivers (Option A)
+      - name: Force Built-in Touchscreen Drivers & Bus (Option A)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Modification de la configuration pour intégrer le tactile en dur..."
+          echo "🛠️ Configuration agressive du matériel tactile Motorola..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # On cherche les lignes de pilotes tactiles configurées en modules (=m) et on les passe en dur (=y)
-          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=m/CONFIG_INPUT_TOUCHSCREEN=y/g' "$TARGET_CONFIG"
-          sed -i 's/CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=m/CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y/g' "$TARGET_CONFIG"
-          sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH=m/CONFIG_TOUCHSCREEN_FOCALTECH=y/g' "$TARGET_CONFIG"
-          sed -i 's/CONFIG_TOUCHSCREEN_GOODIX_BRL=m/CONFIG_TOUCHSCREEN_GOODIX_BRL=y/g' "$TARGET_CONFIG"
+          # 1. Activation des bus de communication indispensables
+          echo "CONFIG_SPI=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_SPI_MASTER=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_I2C=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_I2C_CHARDEV=y" >> "$TARGET_CONFIG"
           
-          # Sécurité : Si elles n'existent pas, on les force à la fin du fichier
+          # 2. Intégration totale des pilotes tactiles (Génériques + Novatek + Focaltech/Goodix)
           echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_NOVATEK_NVT_TS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Fichier de configuration modifié avec succès."
+          # 3. Forcer la gestion de l'alimentation de l'écran par le noyau
+          echo "CONFIG_REGULATOR=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_REGULATOR_FIXED_VOLTAGE=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Bus matériels et pilotes tactiles injectés au cœur du noyau."
 
       - name: Setup ccache
         uses: actions/cache@v4
