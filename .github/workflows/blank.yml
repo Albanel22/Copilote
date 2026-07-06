@@ -98,8 +98,10 @@ jobs:
           echo "🚀 Étape 3 : Compilation ciblée des modules restant..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
           
-          echo "🚀 Étape 4 : Compilation restrictive des DTB/DTBO de la plateforme..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs || echo "⚠️ Des DTB secondaires ont échoué, mais on continue."
+          echo "🚀 Étape 4 : Compilation RESTRICTIVE ET FORCÉE du DTB/DTBO pour LITO (kiev)..."
+          # Au lieu de 'make dtbs' général, on pointe directement vers les cibles Qualcomm de ton SoC
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) arch/arm64/boot/dts/vendor/qcom/lito.dtb || echo "⚠️ Échec lito.dtb standard, on tente la structure alternative"
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc) dtbs-dtbo || echo "⚠️ Compilation secondaire des overlays terminée."
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
@@ -131,31 +133,27 @@ jobs:
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # Extraction du boot de référence du 28 juin 2026
           ./magiskboot unpack boot.img
           
-          # 1. Remplacement de l'Image Noyau
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           
-          # 2. Remplacement du DTB principal
-          COMPILED_DTB=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "lito.dtb" -print -quit)
+          COMPILED_DTB=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*lito*.dtb" -print -quit)
           if [ -f "$COMPILED_DTB" ]; then
             echo "🔄 Remplacement du DTB d'origine par notre lito.dtb tout neuf..."
             cp -v "$COMPILED_DTB" dtb
+          else
+            echo "⚠️ lito.dtb introuvable."
           fi
           
-          # 3. FIX DU TACTILE : Remplacement du DTBO (Les calques matériels écran/tactile de Motorola)
           COMPILED_DTBO=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/ -name "*.dtbo" -print -quit)
           if [ -f "$COMPILED_DTBO" ]; then
-            echo "🔥 LA LIGNE MAGIQUE : Remplacement du recovery_dtbo/dtbo par notre version compilée..."
-            # Magiskboot extrait souvent le DTBO sous le nom 'recovery_dtbo' ou 'dtbo' selon la structure du boot.img header v2
+            echo "🔥 Remplacement du dtbo par notre version compilée..."
             if [ -f "recovery_dtbo" ]; then
               cp -v "$COMPILED_DTBO" recovery_dtbo
             elif [ -f "dtbo" ]; then
               cp -v "$COMPILED_DTBO" dtbo
             else
-              echo "ℹ️ Pas de partition DTBO séparée trouvée par magiskboot, injection directe dans le second bloc."
               cp -v "$COMPILED_DTBO" dtbo 2>/dev/null || true
             fi
           else
