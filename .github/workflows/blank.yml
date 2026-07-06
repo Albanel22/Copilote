@@ -37,22 +37,24 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Configure Kernel Drivers as Modules
+      - name: Force Built-in Display & Touchscreen Bus
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Configuration des pilotes tactiles en modules (.ko) pour le Ramdisk..."
+          echo "🛠️ Injection des lignes de bus vitales directement dans le noyau (Built-in)..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=y/CONFIG_INPUT_TOUCHSCREEN=m/g' "$TARGET_CONFIG"
-          echo "CONFIG_INPUT_TOUCHSCREEN=m" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=m" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_FOCALTECH=m" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=m" >> "$TARGET_CONFIG"
+          # On force les bus de communication de l'écran en dur (=y) au lieu de (=m)
+          sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
+          sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
           
-          echo "✅ Configuration des modules prête."
+          echo "CONFIG_I2C_QCOM_GENI=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Bus matériels convertis en built-in avec succès."
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -88,29 +90,8 @@ jobs:
           
           echo "🚀 Étape 2 : Compilation du noyau (Image)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
-          
-          echo "🚀 Étape 3 : Compilation des modules tactiles et audio..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) modules
 
-      - name: Install & package modules
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -uo pipefail
-          MOD_PATH="${{ github.workspace }}/tmp_modules"
-          mkdir -p "$MOD_PATH"
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KBUILD_MODPOST_WARN=1 INSTALL_MOD_PATH="$MOD_PATH" modules_install || true
-          
-          cd "$MOD_PATH"
-          if [ -d "lib" ]; then
-            tar -czf ${{ github.workspace }}/modules.tar.gz .
-          else
-            echo "placeholder" > ${{ github.workspace }}/empty_module
-            tar -czf ${{ github.workspace }}/modules.tar.gz ${{ github.workspace }}/empty_module
-          fi
-        shell: bash
-
-      - name: Repack Boot Image & Inject Modules into Ramdisk
+      - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -122,42 +103,13 @@ jobs:
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # 1. Extraction du boot d'origine
+          # Extraction propre sans toucher au Ramdisk d'origine
           ./magiskboot unpack boot.img
           
-          # 2. Remplacement du noyau brut
+          # Remplacement uniquement du noyau
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           
-          # 3. Extraction intelligente du ramdisk (Magiskboot l'extrait souvent sous le nom 'ramdisk.cpio')
-          RAMDISK_FILE=$(find . -name "ramdisk*" -print -quit)
-          
-          if [ -n "$RAMDISK_FILE" ]; then
-            echo "📦 Ramdisk détecté : $RAMDISK_FILE. Modification en cours..."
-            mkdir -p ramdisk_dir && cd ramdisk_dir
-            
-            # On extrait le contenu du cpio de Magisk
-            ../magiskboot cpio ../$RAMDISK_FILE extract || true
-            
-            echo "📥 Injection des nouveaux modules tactiles (.ko)..."
-            mkdir -p lib/modules
-            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} lib/modules/ \;
-            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
-            
-            # On repack le ramdisk au propre avec magiskboot cpio
-            find . | cpio -o -H newc > ../$RAMDISK_FILE || true
-            cd ..
-          else
-            echo "⚠️ Aucun ramdisk autonome extrait, injection via méthode directe magiskboot..."
-            mkdir -p dummy_mod && cd dummy_mod
-            find ${{ github.workspace }}/tmp_modules/ -name "*.ko" -exec cp -v {} . \;
-            for ko in *.ko; do
-              ../magiskboot cpio ../ramdisk.cpio "add 0644 lib/modules/$ko $ko" || true
-            done
-            cd ..
-          fi
-          
-          # 4. Rempaquetage final
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img "${{ github.workspace }}/boot.img"
         shell: bash
@@ -166,9 +118,6 @@ jobs:
         run: |
           mkdir -p final_output
           mv "${{ github.workspace }}/boot.img" final_output/boot.img
-          if [ -f "${{ github.workspace }}/modules.tar.gz" ]; then
-            mv "${{ github.workspace }}/modules.tar.gz" final_output/
-          fi
           
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
