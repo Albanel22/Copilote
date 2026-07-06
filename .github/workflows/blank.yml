@@ -24,7 +24,6 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          # Ajout de device-tree-compiler pour avoir un outil 'dtc' système stable
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
 
       - name: Download Stock Boot Image
@@ -76,11 +75,8 @@ jobs:
             make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          # 2. Compilation des DTB avec le DTC externe (DTC_EXT=dtc) pour éviter le SegFault
-          make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc -j$(nproc) dtbs
-          
-          # 3. Compilation du Noyau principal et des Modules annexes
-          make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE -j$(nproc)
+          # 2. Compilation globale en une seule passe (Noyau + DTB + DTBO) pour résoudre les dépendances manquantes
+          make O=${{ env.BUILD_DIR }} CC=$CC LD=$LD AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc -j$(nproc)
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
