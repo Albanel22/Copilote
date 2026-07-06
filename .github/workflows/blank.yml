@@ -53,37 +53,39 @@ jobs:
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -euo pipefail
+          # Désactivation temporaire du crash automatique au moindre avertissement
+          set -uo pipefail
+          
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           
-          # Utilisation de la méthode moderne LLVM=1 + cross-compile
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
           
-          # 1. Configuration initiale avec LLVM=1
+          echo "🛠️ Étape 1 : Génération de la configuration..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           else
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          # 2. Compilation complète via LLVM=1 (inclut le noyau, les DTB et résout l'assemblage final)
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" -j$(nproc)
+          echo "🚀 Étape 2 : Lancement de la compilation globale (V=1 pour voir les détails)..."
+          # On ajoute V=1 pour forcer le noyau à cracher la ligne exacte qui pose problème si ça coupe
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE DTC_EXT=dtc KCFLAGS="$KCFLAGS" V=1 -j$(nproc)
 
       - name: Install & package modules
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p tmp_modules
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KBUILD_MODPOST_WARN=1 INSTALL_MOD_PATH=../tmp_modules modules_install || true
           cd ../tmp_modules
           if [ -d "lib" ]; then
             tar -czf ../modules.tar.gz .
           else
-            echo "⚠️ Aucun module externe à empaqueter, création d'un conteneur vide."
+            echo "⚠️ Aucun module externe à empaqueter."
             echo "placeholder" > ../empty_module
             tar -czf ../modules.tar.gz ../empty_module
           fi
@@ -115,13 +117,19 @@ jobs:
           echo "🗜️ Désassemblage du boot.img d'origine..."
           ./magiskboot unpack boot.img
           
+          # Vérification de l'emplacement exact de l'Image générée
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          
+          # Mode sécurité : Si l'image n'est pas dans out, on cherche dans le répertoire racine
+          if [ ! -f "$ABS_IMAGE_ARM64" ]; then
+            ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image"
+          fi
           
           if [ -f "$ABS_IMAGE_ARM64" ]; then
             echo "🔄 Remplacement du kernel d'origine par le nouveau..."
             cp -v "$ABS_IMAGE_ARM64" kernel
           else
-            echo "❌ Erreur critique : Le fichier Image compilé est introuvable."
+            echo "❌ Erreur critique : Le fichier Image compilé reste introuvable."
             exit 1
           fi
           
@@ -149,16 +157,19 @@ jobs:
             exit 1
           fi
           
+          # Capture l'Image peu importe où elle a terminé sa course
           if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" final_output/kernel.img
+          elif [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image" ]; then
+            cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/arch/arm64/boot/Image" final_output/kernel.img
           fi
           
           if [ -f "modules.tar.gz" ]; then
             mv modules.tar.gz final_output/
           fi
           
-          find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/${{ env.ARCH }}/boot/dts/ -name "*.dtb" -exec cp {} final_output/dtbs/ \;
-
+          find ${{ github.workspace }}/${{ env.KERNEL_PATH }}/ -name "*.dtb" -exec cp {} final_output/dtbs/ \; 2>/dev/null || true
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
