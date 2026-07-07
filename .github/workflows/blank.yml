@@ -36,58 +36,16 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Integrate ReSukiSU Driver & Patch Module Loader
+      - name: Clean Stock Kernel Test (No KSU)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🎭 Récupération et intégration du gestionnaire ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-          
-          echo "🔓 Neutralisation de la sécurité Non-GKI dans le fichier Kbuild..."
-          sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
-          
-          echo "🪓 Remplacement complet et stubs pour pkg_observer (Incompatibilités 4.19)..."
-          cat << 'EOF' > drivers/kernelsu/manager/pkg_observer.c
-          #include <linux/init.h>
-          #include <linux/types.h>
-          int ksu_pkg_observer_init(void) { return 0; }
-          void ksu_pkg_observer_exit(void) {}
-          int ksu_fsnotify_init(void) { return 0; }
-          void ksu_fsnotify_exit(void) {}
-          int ksu_observer_init(void) { return 0; }
-          void ksu_observer_exit(void) {}
-          void ksu_set_current_proc_unprivillege(void) {}
-          EOF
-          
-          echo "🛡️ Force le chargement des modules d'origine (Bypass Vermagic Tactile)..."
-          python3 -c "
-          import re
-          with open('kernel/module.c', 'r') as f:
-              content = f.read()
-          
-          # Force la vérification magique à toujours valider le module (retourner 1)
-          patched = re.sub(r'strcmp\s*\(\s*amagic\s*,\s*bmagic\s*\)\s*==\s*0', '1', content)
-          
-          if patched != content:
-              print('Protection Vermagic contournee !')
-          else:
-              print('Echec du patch Vermagic.')
-              
-          with open('kernel/module.c', 'w') as f:
-              f.write(patched)
-          "
-          
-          echo "📝 Activation de la configuration ReSukiSU de base dans le defconfig..."
+          echo "🧹 Mode diagnostic actif : Aucun patch appliqué."
+          echo "📝 Configuration du defconfig d'origine..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
-          
-          echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
-          
-          echo "✅ Configuration propre et optimisée pour le Build 94."
+          echo "✅ Prêt pour un build 100% stock LineageOS."
           
       - name: Setup ccache
         uses: actions/cache@v4
