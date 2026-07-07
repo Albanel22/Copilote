@@ -36,30 +36,16 @@ jobs:
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Integrate ReSukiSU Driver
+      - name: Integrate ReSukiSU Driver & Patch Module Loader
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "🎭 Récupération et intégration du gestionnaire ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
           
-          echo "🔓 Neutralisation de la sécurité Non-GKI et bascule en mode Manual Hooks..."
+          echo "🔓 Neutralisation de la sécurité Non-GKI dans le fichier Kbuild..."
           sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
           
-          echo "🪓 Application chirurgicale des Manual Hooks..."
-          
-          # 1. Modification de fs/open.c (Ouverture des fichiers)
-          sed -i '1i #if defined(CONFIG_KSU)\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\n#endif' fs/open.c
-          sed -i '/long do_faccessat(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tint ksu_flags = 0;\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, \&ksu_flags);\n#endif/' fs/open.c
-          
-          # 2. Modification de fs/stat.c (Statistiques des fichiers - Correction du mask)
-          sed -i '1i #if defined(CONFIG_KSU)\n#include <linux/types.h>\nextern int ksu_handle_stat(int *dfd, const char __user **filename, int *flags, u32 *mask);\n#endif' fs/stat.c
-          sed -i '/int vfs_statx(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tksu_handle_stat(\&dfd, \&filename, \&flags, \&request_mask);\n#endif/' fs/stat.c
-          
-          # 3. Modification de fs/exec.c (Exécution des processus)
-          sed -i '1i #if defined(CONFIG_KSU)\nstruct filename;\nstruct user_arg_ptr;\nextern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n#endif' fs/exec.c
-          sed -i '/do_execveat_common(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif/' fs/exec.c
-
-          echo "🪓 Remplacement complet et stubs pour pkg_observer..."
+          echo "🪓 Remplacement complet et stubs pour pkg_observer (Incompatibilités 4.19)..."
           cat << 'EOF' > drivers/kernelsu/manager/pkg_observer.c
           #include <linux/init.h>
           #include <linux/types.h>
@@ -72,17 +58,36 @@ jobs:
           void ksu_set_current_proc_unprivillege(void) {}
           EOF
           
-          echo "📝 Configuration du defconfig en mode manuel..."
+          echo "🛡️ Force le chargement des modules d'origine (Bypass Vermagic Tactile)..."
+          python3 -c '
+          import re
+          with open("kernel/module.c", "r") as f:
+              content = f.read()
+          
+          # On force la fonction de vérification magique à toujours valider le module (retourner 1)
+          patched = re.sub(r"strcmp\s*\(\s*amagic\s*,\s*bmagic\s*\)\s*==\s*0", "1", content)
+          
+          if patched != content:
+              print("✅ Protection Vermagic contournée avec succès ! Le tactile va revivre.")
+          else:
+              print("⚠️ Impossible d'appliquer le patch de compatibilité des modules.")
+              
+          with open("kernel/module.c", "w") as f:
+              f.write(patched)
+          '
+          
+          echo "📝 Activation de la configuration ReSukiSU de base dans le defconfig..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # KSU actif en mode manuel (Désactive les kprobes automatiques qui plantaient l'écran tactile)
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KSU_MANUAL_HOOKS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Transition vers les Manual Hooks sécurisée et isolée."
+          echo "✅ Configuration propre et optimisée pour le Build 93."
           
       - name: Setup ccache
         uses: actions/cache@v4
