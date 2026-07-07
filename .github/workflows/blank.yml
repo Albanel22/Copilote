@@ -73,18 +73,13 @@ jobs:
           sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
           
           echo "🪓 Remplacement complet et stubs pour pkg_observer (Incompatibilités 4.19)..."
-          # On crée un fichier contenant toutes les fonctions attendues par le linker
           cat << 'EOF' > drivers/kernelsu/manager/pkg_observer.c
           #include <linux/init.h>
           #include <linux/types.h>
-          
-          // Fonctions de base de l'observer
           int ksu_pkg_observer_init(void) { return 0; }
           void ksu_pkg_observer_exit(void) {}
           int ksu_fsnotify_init(void) { return 0; }
           void ksu_fsnotify_exit(void) {}
-          
-          // Symboles manquants réclamés par le linker (ld.lld)
           int ksu_observer_init(void) { return 0; }
           void ksu_observer_exit(void) {}
           void ksu_set_current_proc_unprivillege(void) {}
@@ -96,12 +91,16 @@ jobs:
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
+          # Configuration KernelSU de base
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
           
-          echo "✅ ReSukiSU est blindé pour la liaison finale."
+          # Force ReSukiSU à utiliser la méthode d'ancrage manuelle pour Kernel 4.19
+          echo "CONFIG_KSU_HOOK_HAS_SYSCALL_TABLE=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Configuration de communication forcée pour noyau 4.19."
           
       - name: Setup ccache
         uses: actions/cache@v4
