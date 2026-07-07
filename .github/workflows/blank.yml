@@ -70,19 +70,24 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
           
           echo "🔓 Neutralisation de la sécurité Non-GKI dans le fichier Kbuild..."
-          # Remplace l'instruction $(error ...) par $(warning ...) pour laisser passer la compilation
+          # Remplace l'instruction $(error ...) par $(warning ...) par sécurité
           sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
           
-          echo "📝 Activation de la configuration ReSukiSU dans le defconfig..."
+          echo "📝 Activation de la configuration ReSukiSU et des Kprobes dans le defconfig..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # Forcer l'activation du gestionnaire au boot
+          # Forcer l'activation du gestionnaire principal
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           
-          echo "✅ ReSukiSU est intégré chirurgicalement et prêt."
+          # Activer l'infrastructure Kprobes requise par le guide pour les noyaux Non-GKI (4.19)
+          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ ReSukiSU et ses dépendances de traçage matériel sont configurés."
 
       - name: Setup ccache
         uses: actions/cache@v4
