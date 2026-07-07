@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "📥 Téléchargement du boot.img stock officiel..."
+          echo "📥 Téléchargement du boot.img stock officiel depuis : ${{ env.BOOT_URL }}"
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
 
       - name: Clone Kernel Source
@@ -44,17 +44,21 @@ jobs:
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
+          
+          # Forcer les bus de communication
           sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
           sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
           echo "CONFIG_I2C_QCOM_GENI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
+          
+          # Forcer TOUS les pilotes tactiles Motorola possibles en Built-in
           echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_NOVA_HCD=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          echo "✅ Pilotes convertis en built-in."
+          echo "✅ Pilotes convertis en built-in avec succès."
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -69,89 +73,6 @@ jobs:
           mkdir -p ~/.cache/ccache
           echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
 
-      - name: Integrate KernelSU-Next & SUSFS Patches
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📥 Téléchargement et configuration automatique de KernelSU-Next (Branche Legacy)..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
-          
-          echo "📥 Clonage des patchs SUSFS (Branche kernel-4.19)..."
-          cd ..
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 susfs_src
-          cd ${{ env.KERNEL_PATH }}
-          
-          echo "🛠️ Copie des pilotes et en-têtes SUSFS..."
-          SUSFS_PATCHES_DIR="../susfs_src/kernel_patches"
-          cp -v "$SUSFS_PATCHES_DIR/include/linux/susfs.h" include/linux/
-          cp -v "$SUSFS_PATCHES_DIR/fs/susfs.c" fs/
-          
-          echo "🛠️ Application du patch SUSFS principal..."
-          patch -p1 -F 3 -f < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Des conflits SUSFS ont été ignorés"
-          
-          echo "🛠️ Nettoyage préventif des fichiers de rejets..."
-          find . -name "*.rej" -delete
-          
-          echo "🛠️ Application du patch SUSFS sur KernelSU-Next..."
-          PATCH_KSU=$(find "$SUSFS_PATCHES_DIR/KernelSU" -name "*.patch" | head -n 1)
-          if [ -f "$PATCH_KSU" ]; then
-            cp -v "$PATCH_KSU" drivers/kernelsu/
-            cd drivers/kernelsu
-            patch -p1 -F 3 -f < "$(basename "$PATCH_KSU")" || echo "⚠️ Notification d'ajustements sur le patch KSU"
-            cd ../../
-          fi
-
-      - name: Inject Manual KernelSU-Next Hooks
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🛠️ Désactivation de la vérification stricte du Kbuild..."
-          sed -i 's/\$(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)/\$(warning -- Manual hooks injected)/g' drivers/kernelsu/Kbuild
-
-          echo "🛠️ Correction de la compatibilité umount pour Kernel 4.19 Legacy..."
-          # Remplacement du symbole path_umount inexistant par la fonction globale ksys_umount
-          if [ -f "drivers/kernelsu/feature/kernel_umount.c" ]; then
-            sed -i 's/path_umount(path, flags)/ksys_umount(path->dentry->d_name.name, flags)/g' drivers/kernelsu/feature/kernel_umount.c
-            sed -i 's/path_umount/ksys_umount/g' drivers/kernelsu/feature/kernel_umount.c
-          fi
-
-          echo "🛠️ Injection des hooks manuels certifiés conformes au format Syscall..."
-          
-          # 1. fs/open.c -> Injection dans SYSCALL_DEFINE3(faccessat) d'après le patch officiel
-          sed -i '/SYSCALL_DEFINE3(faccessat,/ , /{/ { /{/a\
-          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);
-          }' fs/open.c
-
-          # 2. fs/exec.c -> Injection au début de do_execveat_common
-          sed -i '/int do_execveat_common(/ , /{/ { /{/a\
-          extern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);
-          }' fs/exec.c
-
-          # 3. fs/stat.c -> Injection au début de vfs_getattr
-          sed -i '/int vfs_getattr(/ , /{/ { /{/a\
-          extern void ksu_handle_stat(struct path *path, struct kstat *stat);\n\tksu_handle_stat((struct path *)path, stat);
-          }' fs/stat.c
-
-          echo "✅ Reliaison umount effectuée et hooks alignés."
-
-
-      - name: Configure Defconfig Options
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📝 Configuration des options Kconfig..."
-          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
-          if [ ! -f "$TARGET_CONFIG" ]; then
-            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
-          fi
-          echo "CONFIG_KPROBES=n" >> "$TARGET_CONFIG"
-          echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$TARGET_CONFIG"
-          echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KSU_NEXT=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS_SUS_PATH=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS_SUS_MOUNT=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -161,8 +82,8 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export KCFLAGS="-w -Wno-error -Wno-implicit-function-declaration -Wno-maybe-uninitialized"
-
+          export KCFLAGS="-Wno-error"
+          
           echo "🛠️ Étape 1 : Génération de la configuration..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
@@ -170,25 +91,11 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "🛠️ Étape 1.5 : Ajustement fin du .config..."
-          FINAL_CONFIG="${{ env.BUILD_DIR }}/.config"
-          sed -i 's/CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/g' "$FINAL_CONFIG"
-          echo "CONFIG_KPROBES=n" >> "$FINAL_CONFIG"
-          echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$FINAL_CONFIG"
-          echo "CONFIG_KSU=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_KSU_NEXT=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS_SUS_PATH=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS_SUS_MOUNT=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_SUSFS_SUS_SU=y" >> "$FINAL_CONFIG"
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          
-          echo "🚀 Étape 2 : Lancement de la compilation..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" CFLAGS_KERNEL="$KCFLAGS" CFLAGS_MODULE="$KCFLAGS" -j$(nproc) Image
+          echo "🚀 Étape 2 : Compilation du noyau (Image)..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
+        working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
@@ -198,7 +105,11 @@ jobs:
           unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
+          
+          # Extraction propre sans toucher au Ramdisk d'origine
           ./magiskboot unpack boot.img
+          
+          # Remplacement uniquement du noyau
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           ./magiskboot repack boot.img new-boot.img
