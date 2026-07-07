@@ -45,15 +45,19 @@ jobs:
           echo "🔓 Neutralisation de la sécurité Non-GKI et bascule en mode Manual Hooks..."
           sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
           
-          echo "🪓 Application des Manual Hooks dans les fichiers système du noyau..."
-          # 1. Hook pour le système d'ouverture des fichiers (fs/open.c)
-          sed -i '/        if (ret >= 0) {/a \\t\t\t\t#if defined(CONFIG_KSU)\n\t\t\t\tksu_handle_faccessat(&dfd, &filename, &mode, &flags);\n\t\t\t\t#endif' fs/open.c
+          echo "🪓 Application chirurgicale des Manual Hooks..."
           
-          # 2. Hook pour l'exécution des processus (fs/exec.c)
-          sed -i '/	if (retval < 0)/i \\t#if defined(CONFIG_KSU)\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n\t#endif' fs/exec.c
+          # 1. Modification de fs/open.c (Ouverture des fichiers)
+          sed -i '1i #if defined(CONFIG_KSU)\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\n#endif' fs/open.c
+          sed -i '/long do_faccessat(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tint ksu_flags = 0;\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, \&ksu_flags);\n#endif/' fs/open.c
           
-          # 3. Hook pour les statistiques de fichiers (fs/stat.c)
-          sed -i '/	if (!error)/i \\t#if defined(CONFIG_KSU)\n\tksu_handle_stat(&dfd, &filename, &flags, &mask);\n\t#endif' fs/stat.c
+          # 2. Modification de fs/stat.c (Statistiques des fichiers - Correction du mask)
+          sed -i '1i #if defined(CONFIG_KSU)\n#include <linux/types.h>\nextern int ksu_handle_stat(int *dfd, const char __user **filename, int *flags, u32 *mask);\n#endif' fs/stat.c
+          sed -i '/int vfs_statx(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tksu_handle_stat(\&dfd, \&filename, \&flags, \&request_mask);\n#endif/' fs/stat.c
+          
+          # 3. Modification de fs/exec.c (Exécution des processus)
+          sed -i '1i #if defined(CONFIG_KSU)\nstruct filename;\nstruct user_arg_ptr;\nextern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n#endif' fs/exec.c
+          sed -i '/do_execveat_common(/,/{/s/{/{\n#if defined(CONFIG_KSU)\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif/' fs/exec.c
 
           echo "🪓 Remplacement complet et stubs pour pkg_observer..."
           cat << 'EOF' > drivers/kernelsu/manager/pkg_observer.c
@@ -74,11 +78,11 @@ jobs:
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # On active KSU mais on désactive l'injection automatique agressive
+          # KSU actif en mode manuel (Désactive les kprobes automatiques qui plantaient l'écran tactile)
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_MANUAL_HOOKS=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Transition vers les Manual Hooks complétée avec succès."
+          echo "✅ Transition vers les Manual Hooks sécurisée et isolée."
           
       - name: Setup ccache
         uses: actions/cache@v4
