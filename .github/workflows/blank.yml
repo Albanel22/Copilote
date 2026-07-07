@@ -1,80 +1,30 @@
-name: Kernel CI — build & package
+name: Build Kernel (KernelSU-Next & SUSFS)
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 env:
   KERNEL_PATH: kernel_src
-  BUILD_DIR: out
+  BUILD_DIR: kernel_src/out
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
-  CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
-
-      - name: Download Stock Boot Image
-        run: |
-          set -euo pipefail
-          echo "📥 Téléchargement du boot.img stock officiel depuis : ${{ env.BOOT_URL }}"
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
-        shell: bash
+          sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev ccache bison flex libelf-dev clang lld llvm
 
       - name: Clone Kernel Source
         run: |
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
-      - name: Force Built-in Display & Touchscreen Bus
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🛠️ Injection des pilotes tactiles Motorola directement dans le noyau..."
-          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
-          if [ ! -f "$TARGET_CONFIG" ]; then
-            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
-          fi
-          
-          # Forcer les bus de communication
-          sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
-          sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
-          
-          echo "CONFIG_I2C_QCOM_GENI=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
-          
-          # Forcer TOUS les pilotes tactiles Motorola possibles en Built-in
-          echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_NOVA_HCD=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          
-          echo "✅ Pilotes convertis en built-in avec succès."
-
-      - name: Setup ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-
-      - name: Configure ccache Size
-        run: |
-          mkdir -p ~/.cache/ccache
-          echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
+          # Correction définitive : SM8250 + Lineage 23.2
+          git clone --depth=1 https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 ${{ env.KERNEL_PATH }}
 
       - name: Integrate KernelSU-Next & SUSFS Patches
         working-directory: ${{ env.KERNEL_PATH }}
@@ -97,7 +47,6 @@ jobs:
           patch -p1 < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Notification d'ajustements sur le noyau"
 
           echo "🛠️ Application du patch SUSFS sur KernelSU-Next..."
-          # Trouver le patch KSU (peut s'appeler 10_add_susfs_in_ksu.patch ou 10_enable_susfs_for_ksu.patch)
           PATCH_KSU=$(find "$SUSFS_PATCHES_DIR/KernelSU" -name "*.patch" | head -n 1)
           if [ -f "$PATCH_KSU" ]; then
             cp -v "$PATCH_KSU" drivers/kernelsu/
@@ -106,18 +55,20 @@ jobs:
             cd ../../
           fi
 
-          echo "📝 Activation des configurations KernelSU, KPROBES et SUSFS..."
+          echo "📝 Activation des configurations initiales dans le defconfig d'origine..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
 
-          # Forcer les dépendances requises par KernelSU-Next en mode Non-GKI (Kprobes)
-          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$TARGET_CONFIG"
+          # 1. Préservation du correctif tactile (FocalTech) en Built-in
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
 
-          # Forcer l'activation de KernelSU-Next et SUSFS avec les options recommandées
+          # 2. Désactivation des KPROBES pour contourner le bug selinux_hide.c
+          echo "CONFIG_KPROBES=n" >> "$TARGET_CONFIG"
+          echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$TARGET_CONFIG"
+
+          # 3. Pré-activation de KernelSU-Next et SUSFS
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS=y" >> "$TARGET_CONFIG"
@@ -127,8 +78,7 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Synchronisation KernelSU-Next et SUSFS validée !"
-        
+          echo "✅ Étape d'intégration terminée."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -149,20 +99,16 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
 
-          echo "🛠️ Étape 1.5 : Injection forcée des configurations KernelSU-Next, KPROBES et SUSFS dans le fichier de build final..."
+          echo "🛠️ Étape 1.5 : Injection et écrasement final dans le fichier .config..."
           FINAL_CONFIG="${{ env.BUILD_DIR }}/.config"
           
-          # Forcer le remplacement propre des configurations Kprobes si elles existent en mode "not set"
-          sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/g' "$FINAL_CONFIG"
-          sed -i 's/# CONFIG_HAVE_KPROBES is not set/CONFIG_HAVE_KPROBES=y/g' "$FINAL_CONFIG"
-          
-          # Injection finale en fin de fichier pour écraser tout doublon résiduel
-          echo "CONFIG_KPROBES=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_HAVE_KPROBES=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$FINAL_CONFIG"
-          echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$FINAL_CONFIG"
+          # Nettoyage et forçage de la désactivation des KPROBES
+          sed -i 's/CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/g' "$FINAL_CONFIG"
+          echo "CONFIG_KPROBES=n" >> "$FINAL_CONFIG"
+          echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$FINAL_CONFIG"
 
-          # Forcer KernelSU-Next et SUSFS
+          # Forçage absolu de nos options (Tactile + Root / Hide)
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$FINAL_CONFIG"
           echo "CONFIG_KSU=y" >> "$FINAL_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$FINAL_CONFIG"
           echo "CONFIG_SUSFS=y" >> "$FINAL_CONFIG"
@@ -172,42 +118,14 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$FINAL_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$FINAL_CONFIG"
 
-          # Valider proprement la configuration finale pour générer les dépendances
+          # Validation finale de la configuration par le noyau
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
           echo "🚀 Étape 2 : Compilation du noyau (Image)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
-          
-      - name: Repack Clean Boot Image
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          mkdir -p repack && cp boot-stock.img repack/boot.img
-          cd repack
-          
-          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
-          mv libmagiskboot.so magiskboot
-          chmod +x magiskboot
-          
-          # Extraction propre sans toucher au Ramdisk d'origine
-          ./magiskboot unpack boot.img
-          
-          # Remplacement uniquement du noyau
-          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          cp -v "$ABS_IMAGE_ARM64" kernel
-          
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img "${{ github.workspace }}/boot.img"
-        shell: bash
 
-      - name: Organize Final Output Artifacts
-        run: |
-          mkdir -p final_output
-          mv "${{ github.workspace }}/boot.img" final_output/boot.img
-          
-      - name: Upload Finished Packaged Assets
-        uses: actions/upload-artifact@v4
+      - name: Upload Kernel Image Artifact
+        uses: actions/artifacts/upload-artifact@v4
         with:
-          name: kernel-motorola_one_5g_ace-latest
-          path: final_output/
+          name: Image-KernelSU-Next-SUSFS
+          path: ${{ env.BUILD_DIR }}/arch/arm64/boot/Image
