@@ -29,39 +29,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "📥 Téléchargement du boot.img stock officiel depuis : ${{ env.BOOT_URL }}"
+          echo "📥 Téléchargement du boot.img stock officiel..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
 
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
-      - name: Force Built-in Display & Touchscreen Bus
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🛠️ Injection et activation en dur des pilotes tactiles FocalTech..."
-          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
-          if [ ! -f "$TARGET_CONFIG" ]; then
-            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
-          fi
-          
-          # Forcer les bus de communication généraux indispensables
-          sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
-          sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
-          echo "CONFIG_I2C_QCOM_GENI=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
-          
-          # Forcer spécifiquement TOUT l'écosystème FocalTech en Built-in (y)
-          sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH_FTS=m/CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y/g' "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS_DIRECTORY=y" >> "$TARGET_CONFIG"
-          
-          # Garder les autres pilotes au cas où par sécurité
-          echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
-          
-          echo "✅ Pilote FocalTech lié directement au cœur du noyau avec succès."
 
       - name: Integrate ReSukiSU Driver
         working-directory: ${{ env.KERNEL_PATH }}
@@ -85,23 +58,19 @@ jobs:
           void ksu_set_current_proc_unprivillege(void) {}
           EOF
           
-          echo "📝 Activation de la configuration ReSukiSU et des Kprobes dans le defconfig..."
+          echo "📝 Activation de la configuration ReSukiSU de base dans le defconfig..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # Configuration KernelSU de base
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
           
-          # Force ReSukiSU à utiliser la méthode d'ancrage manuelle pour Kernel 4.19
-          echo "CONFIG_KSU_HOOK_HAS_SYSCALL_TABLE=y" >> "$TARGET_CONFIG"
-          
-          echo "✅ Configuration de communication forcée pour noyau 4.19."
-          
+          echo "✅ Configuration ReSukiSU injectée sans altération des pilotes matériels."
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -148,10 +117,8 @@ jobs:
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # Extraction propre sans toucher au Ramdisk d'origine
           ./magiskboot unpack boot.img
           
-          # Remplacement uniquement du noyau
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           ./magiskboot repack boot.img new-boot.img
