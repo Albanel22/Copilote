@@ -59,22 +59,22 @@ jobs:
           EOF
           
           echo "🛡️ Force le chargement des modules d'origine (Bypass Vermagic Tactile)..."
-          python3 -c '
+          python3 -c "
           import re
-          with open("kernel/module.c", "r") as f:
+          with open('kernel/module.c', 'r') as f:
               content = f.read()
           
-          # On force la fonction de vérification magique à toujours valider le module (retourner 1)
-          patched = re.sub(r"strcmp\s*\(\s*amagic\s*,\s*bmagic\s*\)\s*==\s*0", "1", content)
+          # Force la vérification magique à toujours valider le module (retourner 1)
+          patched = re.sub(r'strcmp\s*\(\s*amagic\s*,\s*bmagic\s*\)\s*==\s*0', '1', content)
           
           if patched != content:
-              print("✅ Protection Vermagic contournée avec succès ! Le tactile va revivre.")
+              print('Protection Vermagic contournee !')
           else:
-              print("⚠️ Impossible d'appliquer le patch de compatibilité des modules.")
+              print('Echec du patch Vermagic.')
               
-          with open("kernel/module.c", "w") as f:
+          with open('kernel/module.c', 'w') as f:
               f.write(patched)
-          '
+          "
           
           echo "📝 Activation de la configuration ReSukiSU de base dans le defconfig..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
@@ -87,7 +87,7 @@ jobs:
           echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Configuration propre et optimisée pour le Build 93."
+          echo "✅ Configuration propre et optimisée pour le Build 94."
           
       - name: Setup ccache
         uses: actions/cache@v4
