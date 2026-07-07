@@ -39,26 +39,29 @@ jobs:
       - name: Force Built-in Display & Touchscreen Bus
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Injection des pilotes tactiles Motorola directement dans le noyau..."
+          echo "🛠️ Injection et activation en dur des pilotes tactiles FocalTech..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # Forcer les bus de communication
+          # Forcer les bus de communication généraux indispensables
           sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
           sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
           echo "CONFIG_I2C_QCOM_GENI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
           
-          # Forcer TOUS les pilotes tactiles Motorola possibles en Built-in
-          echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_NOVA_HCD=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
+          # Forcer spécifiquement TOUT l'écosystème FocalTech en Built-in (y)
+          sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH_FTS=m/CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y/g' "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          echo "✅ Pilotes convertis en built-in avec succès."
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS_DIRECTORY=y" >> "$TARGET_CONFIG"
+          
+          # Garder les autres pilotes au cas où par sécurité
+          echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Pilote FocalTech lié directement au cœur du noyau avec succès."
 
       - name: Setup ccache
         uses: actions/cache@v4
