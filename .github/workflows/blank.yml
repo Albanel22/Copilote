@@ -23,7 +23,6 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          # Correction définitive : SM8250 + Lineage 23.2
           git clone --depth=1 https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 ${{ env.KERNEL_PATH }}
 
       - name: Integrate KernelSU-Next & SUSFS Patches
@@ -125,7 +124,7 @@ jobs:
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Upload Kernel Image Artifact
-        uses: actions/artifacts/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: Image-KernelSU-Next-SUSFS
           path: ${{ env.BUILD_DIR }}/arch/arm64/boot/Image
