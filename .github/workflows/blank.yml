@@ -28,10 +28,10 @@ jobs:
       - name: Integrate KernelSU-Next & SUSFS Patches
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Téléchargement et configuration automatique de KernelSU-Next (Branche Legacy)..."
+          echo "📥 Téléchargement et configuration automatique de KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-          echo "📥 Clonage des patchs SUSFS (Branche kernel-4.19)..."
+          echo "📥 Clonage des patchs SUSFS..."
           cd ..
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 susfs_src
           cd ${{ env.KERNEL_PATH }}
@@ -42,32 +42,27 @@ jobs:
           cp -v "$SUSFS_PATCHES_DIR/include/linux/susfs.h" include/linux/
           cp -v "$SUSFS_PATCHES_DIR/fs/susfs.c" fs/
           
-          echo "🛠️ Application du patch SUSFS principal sur le noyau 4.19..."
-          patch -p1 < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Notification d'ajustements sur le noyau"
+          echo "🛠️ Application du patch SUSFS principal..."
+          patch -p1 < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Patch noyau partiel"
 
           echo "🛠️ Application du patch SUSFS sur KernelSU-Next..."
           PATCH_KSU=$(find "$SUSFS_PATCHES_DIR/KernelSU" -name "*.patch" | head -n 1)
           if [ -f "$PATCH_KSU" ]; then
             cp -v "$PATCH_KSU" drivers/kernelsu/
             cd drivers/kernelsu
-            patch -p1 < "$(basename "$PATCH_KSU")" || echo "⚠️ Notification d'ajustements sur le patch KSU"
+            patch -p1 < "$(basename "$PATCH_KSU")" || echo "⚠️ Patch KSU partiel"
             cd ../../
           fi
 
-          echo "📝 Activation des configurations initiales dans le defconfig d'origine..."
+          echo "📝 Configuration du defconfig d'origine..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
 
-          # 1. Préservation du correctif tactile (FocalTech) en Built-in
           echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
-
-          # 2. Désactivation des KPROBES pour contourner le bug selinux_hide.c
           echo "CONFIG_KPROBES=n" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$TARGET_CONFIG"
-
-          # 3. Pré-activation de KernelSU-Next et SUSFS
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS=y" >> "$TARGET_CONFIG"
@@ -76,8 +71,6 @@ jobs:
           echo "CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
-          
-          echo "✅ Étape d'intégration terminée."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -91,22 +84,19 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
 
-          echo "🛠️ Étape 1 : Génération de la configuration initiale..."
+          echo "🛠️ Étape 1 : Configuration..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           else
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
 
-          echo "🛠️ Étape 1.5 : Injection et écrasement final dans le fichier .config..."
+          echo "🛠️ Étape 1.5 : Injection .config..."
           FINAL_CONFIG="${{ env.BUILD_DIR }}/.config"
           
-          # Nettoyage et forçage de la désactivation des KPROBES
           sed -i 's/CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/g' "$FINAL_CONFIG"
           echo "CONFIG_KPROBES=n" >> "$FINAL_CONFIG"
           echo "CONFIG_KSU_KPROBE_HOOKS=n" >> "$FINAL_CONFIG"
-
-          # Forçage absolu de nos options (Tactile + Root / Hide)
           echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$FINAL_CONFIG"
           echo "CONFIG_KSU=y" >> "$FINAL_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$FINAL_CONFIG"
@@ -117,10 +107,9 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$FINAL_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$FINAL_CONFIG"
 
-          # Validation finale de la configuration par le noyau
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Étape 2 : Compilation du noyau (Image)..."
+          echo "🚀 Étape 2 : Compilation..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Upload Kernel Image Artifact
