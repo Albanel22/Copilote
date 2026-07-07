@@ -78,23 +78,19 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "💉 Forçage global et agressif de l'arborescence tactile en Built-In..."
-          # Convertit absolument TOUS les modules de la section Input/Touchscreen de =m à =y
-          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=m/CONFIG_INPUT_TOUCHSCREEN=y/g' ${{ env.BUILD_DIR }}/.config
+          echo "💉 Injection de la configuration tactile officielle Motorola (FTS)..."
+          # Neutralise l'ancienne config générique potentielle
           sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH=m/CONFIG_TOUCHSCREEN_FOCALTECH=y/g' ${{ env.BUILD_DIR }}/.config
-          sed -i 's/_TOUCHSCREEN_=m/_TOUCHSCREEN_=y/g' ${{ env.BUILD_DIR }}/.config
           
-          # Ajout des flags de bus et de l'infrastructure d'initialisation hâtive (Early Init)
+          # Force l'architecture officielle extraite du stock_config.txt fonctionnel
           {
             echo "CONFIG_INPUT_TOUCHSCREEN=y"
-            echo "CONFIG_TOUCHSCREEN_COMMON=y"
-            echo "CONFIG_TOUCHSCREEN_FOCALTECH=y"
-            echo "CONFIG_TOUCHSCREEN_FOCALTECH_CORE=y"
-            echo "CONFIG_TOUCHSCREEN_FOCALTECH_SPI=y"
-            echo "CONFIG_TOUCHSCREEN_FOCALTECH_I2C=y"
+            echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
+            echo "CONFIG_TOUCHSCREEN_FTS=y"
+            echo "CONFIG_TOUCHSCREEN_FTS_DIRECTORY=\"fts\""
           } >> ${{ env.BUILD_DIR }}/.config
           
-          echo "🚀 Étape 2 : Compilation du noyau (Image monolithique)..."
+          echo "🚀 Étape 2 : Compilation du noyau avec support matériel intégré..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
