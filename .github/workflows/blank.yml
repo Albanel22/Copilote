@@ -79,8 +79,8 @@ jobs:
       - name: Integrate KernelSU-Next & SUSFS Patches
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Téléchargement et configuration de KernelSU-Next..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
+          echo "📥 Clonage direct de KernelSU-Next..."
+          git clone https://github.com/KernelSU-Next/KernelSU-Next.git -b main --depth=1 drivers/kernelsu
 
           echo "📥 Clonage des patchs SUSFS (v1.5.2 pour Noyau 4.19)..."
           cd ..
@@ -92,8 +92,8 @@ jobs:
           cp ../susfs_src/kernel/include/linux/susfs.h include/linux/
           cp ../susfs_src/kernel/fs/susfs.c fs/
           
-          # Application des patchs magiques de Simonpunk
-          patch -p1 < ../susfs_src/kernel/patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Alerte d'application partielle sur le noyau (à vérifier si conflit)"
+          # Application des patchs de Simonpunk
+          patch -p1 < ../susfs_src/kernel/patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Alerte d'application partielle sur le noyau"
           patch -p1 < ../susfs_src/kernel/patches/fs_mgr.patch || echo "⚠️ Alerte sur le patch fs_mgr"
 
           echo "🛠️ Application du patch SUSFS spécifique à KernelSU-Next..."
@@ -102,6 +102,15 @@ jobs:
           cd drivers/kernelsu
           patch -p1 < 10_add_susfs_in_ksu.patch || echo "⚠️ Alerte d'application sur le patch KSU"
           cd ../../
+
+          echo "📝 Liaison de KernelSU-Next dans le système de build..."
+          # On s'assure que le noyau sait qu'il doit compiler le dossier kernelsu
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+          fi
+          if ! grep -q "kernelsu" drivers/Kconfig; then
+            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          fi
 
           echo "📝 Activation des configurations KernelSU et SUSFS..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
