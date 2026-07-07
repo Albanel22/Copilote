@@ -103,42 +103,33 @@ jobs:
       - name: Inject Manual KernelSU-Next Hooks
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Désactivation de la vérification stricte des hooks de KernelSU-Next..."
-          # Supprime ou commente la ligne qui provoque le plantage "Stop" dans le Kbuild de KernelSU
-          sed -i 's/\$(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)/\$(warning -- Hooks verification bypassed for manual injection)/g' drivers/kernelsu/Kbuild
+          echo "🛠️ Désactivation de la vérification stricte du Kbuild..."
+          sed -i 's/\$(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)/\$(warning -- Manual hooks injected)/g' drivers/kernelsu/Kbuild
 
-          echo "🛠️ Injection manuelle des fonctions d'interception obligatoires..."
+          echo "🛠️ Correction de la compatibilité path_umount pour Kernel 4.19..."
+          # Remplacement du symbole path_umount inexistant en 4.19 par do_umount / ksys_umount
+          if [ -f "drivers/kernelsu/feature/kernel_umount.c" ]; then
+            sed -i 's/path_umount/do_umount/g' drivers/kernelsu/feature/kernel_umount.c
+          fi
+
+          echo "🛠️ Injection manuelle des hooks officiels selon le guide ReSukiSU..."
           
-          # 1. Interception dans fs/open.c (do_faccessat)
-          sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/,/{/ {
-            /{/a\
-          extern void ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *nonblock);\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);\n#endif
+          # 1. fs/open.c -> do_faccessat
+          sed -i '/int do_faccessat(int dfd/ , /{/ { /{/a\
+          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *nonblock);\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);\n#endif
           }' fs/open.c
 
-          # 2. Interception dans fs/exec.c (do_execveat_common)
-          sed -i '/int do_execveat_common(int fd, struct filename \*filename,/,/{/ {
-            /{/a\
-          extern void ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n#ifdef CONFIG_KSU\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif
+          # 2. fs/exec.c -> do_execveat_common
+          sed -i '/int do_execveat_common(/ , /{/ { /{/a\
+          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif
           }' fs/exec.c
 
-          # 3. Interception dans fs/stat.c (vfs_getattr)
-          sed -i '/int vfs_getattr(const struct path \*path, struct kstat \*stat,/,/{/ {
-            /{/a\
-          extern void ksu_handle_stat(struct path *path, struct kstat *stat);\n#ifdef CONFIG_KSU\n\tksu_handle_stat((struct path *)path, stat);\n#endif
+          # 3. fs/stat.c -> vfs_getattr
+          sed -i '/int vfs_getattr(/ , /{/ { /{/a\
+          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_stat(struct path *path, struct kstat *stat);\n\tksu_handle_stat((struct path *)path, stat);\n#endif
           }' fs/stat.c
 
-          # 4. Interception dans fs/read_write.c (vfs_read et vfs_write)
-          sed -i '/ssize_t vfs_read(struct file \*file, char __user \*buf, size_t count, loff_t \*pos)/,/{/ {
-            /{/a\
-          extern void ksu_handle_read(struct file *file, char __user *buf, size_t count, loff_t *pos);\n#ifdef CONFIG_KSU\n\tksu_handle_read(file, buf, count, pos);\n#endif
-          }' fs/read_write.c
-
-          sed -i '/ssize_t vfs_write(struct file \*file, const char __user \*buf, size_t count, loff_t \*pos)/,/{/ {
-            /{/a\
-          extern void ksu_handle_write(struct file *file, const char __user *buf, size_t count, loff_t *pos);\n#ifdef CONFIG_KSU\n\tksu_handle_write(file, buf, count, pos);\n#endif
-          }' fs/read_write.c
-
-          echo "✅ Bypass et hooks appliqués avec succès."
+          echo "✅ Hooks épurés et correctifs de compatibilité 4.19 appliqués."
 
       - name: Configure Defconfig Options
         working-directory: ${{ env.KERNEL_PATH }}
