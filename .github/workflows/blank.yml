@@ -106,30 +106,32 @@ jobs:
           echo "🛠️ Désactivation de la vérification stricte du Kbuild..."
           sed -i 's/\$(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)/\$(warning -- Manual hooks injected)/g' drivers/kernelsu/Kbuild
 
-          echo "🛠️ Correction de la compatibilité path_umount pour Kernel 4.19..."
-          # Remplacement du symbole path_umount inexistant en 4.19 par do_umount / ksys_umount
+          echo "🛠️ Correction de la compatibilité umount pour Kernel 4.19 Legacy..."
+          # Remplacement du symbole path_umount inexistant par la fonction globale ksys_umount
           if [ -f "drivers/kernelsu/feature/kernel_umount.c" ]; then
-            sed -i 's/path_umount/do_umount/g' drivers/kernelsu/feature/kernel_umount.c
+            sed -i 's/path_umount(path, flags)/ksys_umount(path->dentry->d_name.name, flags)/g' drivers/kernelsu/feature/kernel_umount.c
+            sed -i 's/path_umount/ksys_umount/g' drivers/kernelsu/feature/kernel_umount.c
           fi
 
-          echo "🛠️ Injection manuelle des hooks officiels selon le guide ReSukiSU..."
+          echo "🛠️ Injection des hooks manuels certifiés conformes au format Syscall..."
           
-          # 1. fs/open.c -> do_faccessat
-          sed -i '/int do_faccessat(int dfd/ , /{/ { /{/a\
-          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *nonblock);\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);\n#endif
+          # 1. fs/open.c -> Injection dans SYSCALL_DEFINE3(faccessat) d'après le patch officiel
+          sed -i '/SYSCALL_DEFINE3(faccessat,/ , /{/ { /{/a\
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);
           }' fs/open.c
 
-          # 2. fs/exec.c -> do_execveat_common
+          # 2. fs/exec.c -> Injection au début de do_execveat_common
           sed -i '/int do_execveat_common(/ , /{/ { /{/a\
-          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif
+          extern int ksu_handle_execveat(int *fd, struct filename **filename, struct user_arg_ptr *argv, struct user_arg_ptr *envp, int *flags);\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);
           }' fs/exec.c
 
-          # 3. fs/stat.c -> vfs_getattr
+          # 3. fs/stat.c -> Injection au début de vfs_getattr
           sed -i '/int vfs_getattr(/ , /{/ { /{/a\
-          #if defined(CONFIG_KSU) \&\& !defined(CONFIG_KSU_KPROBE_HOOKS)\n\textern int ksu_handle_stat(struct path *path, struct kstat *stat);\n\tksu_handle_stat((struct path *)path, stat);\n#endif
+          extern void ksu_handle_stat(struct path *path, struct kstat *stat);\n\tksu_handle_stat((struct path *)path, stat);
           }' fs/stat.c
 
-          echo "✅ Hooks épurés et correctifs de compatibilité 4.19 appliqués."
+          echo "✅ Reliaison umount effectuée et hooks alignés."
+
 
       - name: Configure Defconfig Options
         working-directory: ${{ env.KERNEL_PATH }}
