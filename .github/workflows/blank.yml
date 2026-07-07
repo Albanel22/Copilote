@@ -117,10 +117,10 @@ jobs:
           #ifdef CONFIG_KSU\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif
           }' fs/exec.c
 
-          # 3. Interception dans fs/stat.c (vfs_getattr)
+          # 3. Interception dans fs/stat.c (vfs_getattr) - CORRIGÉ ICI
           sed -i '/int vfs_getattr(const struct path \*path, struct kstat \*stat,/,/{/ {
             /{/a\
-          #ifdef CONFIG_KSU\n\tksu_handle_stat(\&path-Metrics-Flags, \&path-Metrics-Dentry, \&stat);\n#endif
+          #ifdef CONFIG_KSU\n\tksu_handle_stat(\&(path->mnt), path->dentry, stat);\n#endif
           }' fs/stat.c
 
           # 4. Interception dans fs/read_write.c (vfs_read et vfs_write)
@@ -134,7 +134,8 @@ jobs:
           #ifdef CONFIG_KSU\n\tksu_handle_write(file, buf, count, pos);\n#endif
           }' fs/read_write.c
 
-          echo "✅ Hooks de sécurité de secours injectés."
+          echo "✅ Hooks de sécurité de secours proprement injectés."
+ 
 
       - name: Configure Defconfig Options
         working-directory: ${{ env.KERNEL_PATH }}
