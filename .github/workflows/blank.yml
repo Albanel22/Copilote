@@ -40,13 +40,13 @@ jobs:
       - name: Force Built-in Display & Touchscreen Bus
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Injection des lignes de bus vitales directement dans le noyau (Built-in)..."
+          echo "🛠️ Injection des pilotes tactiles Motorola directement dans le noyau..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
-          # On force les bus de communication de l'écran en dur (=y) au lieu de (=m)
+          # Forcer les bus de communication
           sed -i 's/CONFIG_I2C_QCOM_GENI=m/CONFIG_I2C_QCOM_GENI=y/g' "$TARGET_CONFIG"
           sed -i 's/CONFIG_SPI_QCOM_GENI=m/CONFIG_SPI_QCOM_GENI=y/g' "$TARGET_CONFIG"
           
@@ -54,7 +54,14 @@ jobs:
           echo "CONFIG_SPI_QCOM_GENI=y" >> "$TARGET_CONFIG"
           echo "CONFIG_INPUT_TOUCHSCREEN=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Bus matériels convertis en built-in avec succès."
+          # Forcer TOUS les pilotes tactiles Motorola possibles en Built-in
+          echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSAN=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_NOVA_HCD=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ Pilotes convertis en built-in avec succès."
 
       - name: Setup ccache
         uses: actions/cache@v4
