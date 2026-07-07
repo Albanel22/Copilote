@@ -79,8 +79,8 @@ jobs:
       - name: Integrate KernelSU-Next & SUSFS Patches
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Clonage direct de KernelSU-Next..."
-          git clone https://github.com/KernelSU-Next/KernelSU-Next.git -b main --depth=1 drivers/kernelsu
+          echo "📥 Téléchargement et configuration automatique de KernelSU-Next (Branche Legacy)..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
           echo "📥 Clonage des patchs SUSFS (v1.5.2 pour Noyau 4.19)..."
           cd ..
@@ -103,22 +103,18 @@ jobs:
           patch -p1 < 10_add_susfs_in_ksu.patch || echo "⚠️ Alerte d'application sur le patch KSU"
           cd ../../
 
-          echo "📝 Liaison de KernelSU-Next dans le système de build..."
-          # On s'assure que le noyau sait qu'il doit compiler le dossier kernelsu
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo "obj-y += kernelsu/" >> drivers/Makefile
-          fi
-          if ! grep -q "kernelsu" drivers/Kconfig; then
-            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          fi
-
-          echo "📝 Activation des configurations KernelSU et SUSFS..."
+          echo "📝 Activation des configurations KernelSU, KPROBES et SUSFS..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
 
-          # Forcer l'activation dans le defconfig
+          # Forcer les dépendances requises par KernelSU-Next en mode Non-GKI (Kprobes)
+          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$TARGET_CONFIG"
+
+          # Forcer l'activation de KernelSU-Next et SUSFS
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS=y" >> "$TARGET_CONFIG"
@@ -128,7 +124,7 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
           
-          echo "✅ KernelSU-Next et SUSFS sont injectés et prêts !"   
+          echo "✅ KernelSU-Next (Legacy) et SUSFS sont configurés avec succès !"  
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
