@@ -63,6 +63,24 @@ jobs:
           
           echo "✅ Pilote FocalTech lié directement au cœur du noyau avec succès."
 
+      - name: Integrate ReSukiSU Driver
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🎭 Récupération et intégration du gestionnaire ReSukiSU..."
+          # Téléchargement et exécution du script officiel depuis le dépôt ReSukiSU
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          
+          echo "📝 Activation de la configuration ReSukiSU dans le defconfig..."
+          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
+          if [ ! -f "$TARGET_CONFIG" ]; then
+            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
+          fi
+          
+          # Forcer l'activation du gestionnaire au boot
+          echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
+          
+          echo "✅ ReSukiSU est intégré chirurgicalement et prêt."
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
