@@ -78,7 +78,17 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "🚀 Étape 2 : Compilation du noyau (Image)..."
+          echo "💉 Forçage chirurgical du pilote FocalTech FT8756 en Built-In..."
+          # Remplacement de =m par =y sur toute la configuration tactile générée
+          sed -i 's/CONFIG_INPUT_TOUCHSCREEN=m/CONFIG_INPUT_TOUCHSCREEN=y/g' ${{ env.BUILD_DIR }}/.config
+          sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH=m/CONFIG_TOUCHSCREEN_FOCALTECH=y/g' ${{ env.BUILD_DIR }}/.config
+          
+          # Forçage explicite des flags requis pour l'initialisation de l'arborescence des bus QUP i2c et de la puce TDDI FocalTech
+          echo "CONFIG_INPUT_TOUCHSCREEN=y" >> ${{ env.BUILD_DIR }}/.config
+          echo "CONFIG_TOUCHSCREEN_COMMON=y" >> ${{ env.BUILD_DIR }}/.config
+          echo "CONFIG_TOUCHSCREEN_FOCALTECH=y" >> ${{ env.BUILD_DIR }}/.config
+          
+          echo "🚀 Étape 2 : Compilation du noyau (Image monolithique)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
