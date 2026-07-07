@@ -137,21 +137,44 @@ jobs:
           
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export KCFLAGS="-Wno-error"
-          
-          echo "🛠️ Étape 1 : Génération de la configuration..."
+          export USE_CCACHE=1          export CCACHE_EXEC=$(which ccache)
+          export CROSS_COMPILE=aarch64-linux-gnu-          export KCFLAGS="-Wno-error"
+
+          echo "🛠️ Étape 1 : Génération de la configuration initiale..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           else
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
+
+          echo "🛠️ Étape 1.5 : Injection forcée des configurations KernelSU-Next, KPROBES et SUSFS dans le fichier de build final..."
+          FINAL_CONFIG="${{ env.BUILD_DIR }}/.config"
           
+          # Forcer les dépendances fondamentales de Kprobes requises par le code selinux_hide.c
+          sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/g' "$FINAL_CONFIG"
+          sed -i 's/# CONFIG_HAVE_KPROBES is not set/CONFIG_HAVE_KPROBES=y/g/g' "$FINAL_CONFIG"
+          
+          echo "CONFIG_KPROBES=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_HAVE_KPROBES=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$FINAL_CONFIG"
+
+          # Forcer KernelSU-Next et SUSFS
+          echo "CONFIG_KSU=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_KSU_NEXT=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS_SUS_PATH=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS_SUS_MOUNT=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$FINAL_CONFIG"
+          echo "CONFIG_SUSFS_SUS_SU=y" >> "$FINAL_CONFIG"
+
+          # Rafraîchir proprement la configuration finale pour valider les ajouts
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+
           echo "🚀 Étape 2 : Compilation du noyau (Image)..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
-
+          
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         run: |
