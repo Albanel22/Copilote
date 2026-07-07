@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "📥 Téléchargement du boot.img stock officiel depuis : ${{ env.BOOT_URL }}"
+          echo "📥 Téléchargement du boot.img stock officiel..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
 
       - name: Clone Kernel Source
@@ -54,7 +54,7 @@ jobs:
           echo "CONFIG_TOUCHSCREEN_GOODIX_BRL=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_FOCALTECH_FTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_TOUCHSCREEN_SYNAPTICS_DSX=y" >> "$TARGET_CONFIG"
-          echo "✅ Pilotes convertis en built-in avec succès."
+          echo "✅ Pilotes convertis en built-in."
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -74,20 +74,21 @@ jobs:
         run: |
           echo "📥 Téléchargement et configuration automatique de KernelSU-Next (Branche Legacy)..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          
           echo "📥 Clonage des patchs SUSFS (Branche kernel-4.19)..."
           cd ..
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 susfs_src
           cd ${{ env.KERNEL_PATH }}
+          
           echo "🛠️ Copie des pilotes et en-têtes SUSFS..."
           SUSFS_PATCHES_DIR="../susfs_src/kernel_patches"
           cp -v "$SUSFS_PATCHES_DIR/include/linux/susfs.h" include/linux/
           cp -v "$SUSFS_PATCHES_DIR/fs/susfs.c" fs/
           
-          echo "🛠️ Application du patch SUSFS principal avec forçage..."
-          # L'argument -f / --force force l'outil patch à appliquer ce qu'il peut sans s'arrêter au premier bloc en échec
-          patch -p1 -F 3 -f < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Des conflits ont été ignorés pour forcer le passage"
+          echo "🛠️ Application du patch SUSFS principal..."
+          patch -p1 -F 3 -f < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Des conflits SUSFS ont été ignorés"
           
-          echo "🛠️ Nettoyage préventif des fichiers de rejets pour éviter les blocages de build..."
+          echo "🛠️ Nettoyage préventif des fichiers de rejets..."
           find . -name "*.rej" -delete
           
           echo "🛠️ Application du patch SUSFS sur KernelSU-Next..."
@@ -98,8 +99,47 @@ jobs:
             patch -p1 -F 3 -f < "$(basename "$PATCH_KSU")" || echo "⚠️ Notification d'ajustements sur le patch KSU"
             cd ../../
           fi
+
+      - name: Inject Manual KernelSU-Next Hooks
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Injection manuelle des fonctions d'interception obligatoires pour KernelSU-Next..."
           
-          echo "📝 Activation des configurations KernelSU, KPROBES et SUSFS..."
+          # 1. Interception dans fs/open.c (do_faccessat)
+          sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/,/{/ {
+            /{/a\
+          #ifdef CONFIG_KSU\n\tksu_handle_faccessat(\&dfd, \&filename, \&mode, NULL);\n#endif
+          }' fs/open.c
+
+          # 2. Interception dans fs/exec.c (do_execveat_common)
+          sed -i '/int do_execveat_common(int fd, struct filename \*filename,/,/{/ {
+            /{/a\
+          #ifdef CONFIG_KSU\n\tksu_handle_execveat(\&fd, \&filename, \&argv, \&envp, \&flags);\n#endif
+          }' fs/exec.c
+
+          # 3. Interception dans fs/stat.c (vfs_getattr)
+          sed -i '/int vfs_getattr(const struct path \*path, struct kstat \*stat,/,/{/ {
+            /{/a\
+          #ifdef CONFIG_KSU\n\tksu_handle_stat(\&path-Metrics-Flags, \&path-Metrics-Dentry, \&stat);\n#endif
+          }' fs/stat.c
+
+          # 4. Interception dans fs/read_write.c (vfs_read et vfs_write)
+          sed -i '/ssize_t vfs_read(struct file \*file, char __user \*buf, size_t count, loff_t \*pos)/,/{/ {
+            /{/a\
+          #ifdef CONFIG_KSU\n\tksu_handle_read(file, buf, count, pos);\n#endif
+          }' fs/read_write.c
+
+          sed -i '/ssize_t vfs_write(struct file \*file, const char __user \*buf, size_t count, loff_t \*pos)/,/{/ {
+            /{/a\
+          #ifdef CONFIG_KSU\n\tksu_handle_write(file, buf, count, pos);\n#endif
+          }' fs/read_write.c
+
+          echo "✅ Hooks de sécurité de secours injectés."
+
+      - name: Configure Defconfig Options
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "📝 Configuration des options Kconfig..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
@@ -114,7 +154,6 @@ jobs:
           echo "CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
-          echo "ANALYSE: Contenu injecté avec succès."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -127,13 +166,14 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-w -Wno-error -Wno-implicit-function-declaration -Wno-maybe-uninitialized"
 
-          echo "🛠️ Étape 1 : Génération de la configuration initiale..."
+          echo "🛠️ Étape 1 : Génération de la configuration..."
           if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           else
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
-          echo "🛠️ Étape 1.5 : Injection .config..."
+          
+          echo "🛠️ Étape 1.5 : Ajustement fin du .config..."
           FINAL_CONFIG="${{ env.BUILD_DIR }}/.config"
           sed -i 's/CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/g' "$FINAL_CONFIG"
           echo "CONFIG_KPROBES=n" >> "$FINAL_CONFIG"
@@ -147,7 +187,8 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$FINAL_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$FINAL_CONFIG"
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          echo "🚀 Étape 2 : Compilation du noyau (Image)..."
+          
+          echo "🚀 Étape 2 : Lancement de la compilation..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" CFLAGS_KERNEL="$KCFLAGS" CFLAGS_MODULE="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
