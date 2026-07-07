@@ -7,7 +7,8 @@ env:
   KERNEL_PATH: kernel_src
   BUILD_DIR: kernel_src/out
   ARCH: arm64
-  DEFCONFIG: lito-perf_defconfig
+  # Correction cruciale pour l'architecture SM8250 (Kona) au lieu de lito (SM7250)
+  DEFCONFIG: kona-perf_defconfig
 
 jobs:
   build:
