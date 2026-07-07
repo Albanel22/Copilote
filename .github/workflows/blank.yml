@@ -42,10 +42,20 @@ jobs:
           echo "🎭 Récupération et intégration du gestionnaire ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
           
-          echo "🔓 Neutralisation de la sécurité Non-GKI dans le fichier Kbuild..."
+          echo "🔓 Neutralisation de la sécurité Non-GKI et bascule en mode Manual Hooks..."
           sed -i '/TP hooks are incompatible/s/\$(error/\$(warning/g' drivers/kernelsu/Kbuild
           
-          echo "🪓 Remplacement complet et stubs pour pkg_observer (Incompatibilités 4.19)..."
+          echo "🪓 Application des Manual Hooks dans les fichiers système du noyau..."
+          # 1. Hook pour le système d'ouverture des fichiers (fs/open.c)
+          sed -i '/        if (ret >= 0) {/a \\t\t\t\t#if defined(CONFIG_KSU)\n\t\t\t\tksu_handle_faccessat(&dfd, &filename, &mode, &flags);\n\t\t\t\t#endif' fs/open.c
+          
+          # 2. Hook pour l'exécution des processus (fs/exec.c)
+          sed -i '/	if (retval < 0)/i \\t#if defined(CONFIG_KSU)\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n\t#endif' fs/exec.c
+          
+          # 3. Hook pour les statistiques de fichiers (fs/stat.c)
+          sed -i '/	if (!error)/i \\t#if defined(CONFIG_KSU)\n\tksu_handle_stat(&dfd, &filename, &flags, &mask);\n\t#endif' fs/stat.c
+
+          echo "🪓 Remplacement complet et stubs pour pkg_observer..."
           cat << 'EOF' > drivers/kernelsu/manager/pkg_observer.c
           #include <linux/init.h>
           #include <linux/types.h>
@@ -58,19 +68,18 @@ jobs:
           void ksu_set_current_proc_unprivillege(void) {}
           EOF
           
-          echo "📝 Activation de la configuration ReSukiSU de base dans le defconfig..."
+          echo "📝 Configuration du defconfig en mode manuel..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           
+          # On active KSU mais on désactive l'injection automatique agressive
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KPROBES=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
-          echo "CONFIG_HAVE_KPROBES=y" >> "$TARGET_CONFIG"
+          echo "CONFIG_KSU_MANUAL_HOOKS=y" >> "$TARGET_CONFIG"
           
-          echo "✅ Configuration ReSukiSU injectée sans altération des pilotes matériels."
-
+          echo "✅ Transition vers les Manual Hooks complétée avec succès."
+          
       - name: Setup ccache
         uses: actions/cache@v4
         with:
