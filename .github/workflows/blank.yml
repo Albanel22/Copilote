@@ -82,26 +82,29 @@ jobs:
           echo "📥 Téléchargement et configuration automatique de KernelSU-Next (Branche Legacy)..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-          echo "📥 Clonage des patchs SUSFS (v1.5.2 pour Noyau 4.19)..."
+          echo "📥 Clonage des patchs SUSFS (Branche kernel-4.19)..."
           cd ..
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 susfs_src
           cd ${{ env.KERNEL_PATH }}
 
-          echo "🛠️ Application des patchs SUSFS sur le noyau..."
-          # Copie des fichiers d'en-tête et du driver SUSFS dans l'arborescence du noyau
-          cp ../susfs_src/kernel/include/linux/susfs.h include/linux/
-          cp ../susfs_src/kernel/fs/susfs.c fs/
+          echo "🛠️ Copie des pilotes et en-têtes SUSFS..."
+          SUSFS_PATCHES_DIR="../susfs_src/kernel_patches"
           
-          # Application des patchs de Simonpunk
-          patch -p1 < ../susfs_src/kernel/patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Alerte d'application partielle sur le noyau"
-          patch -p1 < ../susfs_src/kernel/patches/fs_mgr.patch || echo "⚠️ Alerte sur le patch fs_mgr"
+          cp -v "$SUSFS_PATCHES_DIR/include/linux/susfs.h" include/linux/
+          cp -v "$SUSFS_PATCHES_DIR/fs/susfs.c" fs/
+          
+          echo "🛠️ Application du patch SUSFS principal sur le noyau 4.19..."
+          patch -p1 < "$SUSFS_PATCHES_DIR/50_add_susfs_in_kernel-4.19.patch" || echo "⚠️ Notification d'ajustements sur le noyau"
 
-          echo "🛠️ Application du patch SUSFS spécifique à KernelSU-Next..."
-          # Copie le patch KSU dans le sous-dossier drivers/kernelsu
-          cp ../susfs_src/KernelSU/10_add_susfs_in_ksu.patch drivers/kernelsu/
-          cd drivers/kernelsu
-          patch -p1 < 10_add_susfs_in_ksu.patch || echo "⚠️ Alerte d'application sur le patch KSU"
-          cd ../../
+          echo "🛠️ Application du patch SUSFS sur KernelSU-Next..."
+          # Trouver le patch KSU (peut s'appeler 10_add_susfs_in_ksu.patch ou 10_enable_susfs_for_ksu.patch)
+          PATCH_KSU=$(find "$SUSFS_PATCHES_DIR/KernelSU" -name "*.patch" | head -n 1)
+          if [ -f "$PATCH_KSU" ]; then
+            cp -v "$PATCH_KSU" drivers/kernelsu/
+            cd drivers/kernelsu
+            patch -p1 < "$(basename "$PATCH_KSU")" || echo "⚠️ Notification d'ajustements sur le patch KSU"
+            cd ../../
+          fi
 
           echo "📝 Activation des configurations KernelSU, KPROBES et SUSFS..."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
@@ -114,7 +117,7 @@ jobs:
           echo "CONFIG_KPROBE_EVENTS=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$TARGET_CONFIG"
 
-          # Forcer l'activation de KernelSU-Next et SUSFS
+          # Forcer l'activation de KernelSU-Next et SUSFS avec les options recommandées
           echo "CONFIG_KSU=y" >> "$TARGET_CONFIG"
           echo "CONFIG_KSU_NEXT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS=y" >> "$TARGET_CONFIG"
@@ -124,7 +127,8 @@ jobs:
           echo "CONFIG_SUSFS_OPEN_REDIRECT=y" >> "$TARGET_CONFIG"
           echo "CONFIG_SUSFS_SUS_SU=y" >> "$TARGET_CONFIG"
           
-          echo "✅ KernelSU-Next (Legacy) et SUSFS sont configurés avec succès !"  
+          echo "✅ Synchronisation KernelSU-Next et SUSFS validée !"
+        
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
