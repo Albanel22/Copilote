@@ -77,35 +77,11 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "🔍 Recherche automatique et export global de panel_register_notifier..."
-          # On cherche tous les fichiers .c qui contiennent la définition de la fonction et on exporte le symbole
-          TARGET_FILES=$(grep -rl "int panel_register_notifier" . || true)
-          if [ -n "$TARGET_FILES" ]; then
-            for f in $TARGET_FILES; do
-              echo "💉 Application du correctif d'exportation dans : $f"
-              echo "" >> "$f"
-              echo "EXPORT_SYMBOL(panel_register_notifier);" >> "$f"
-              echo "EXPORT_SYMBOL(panel_unregister_notifier);" >> "$f"
-            done
-          else
-            echo "⚠️ Définition stricte non trouvée, scan large..."
-            TARGET_FILES_WIDE=$(grep -rl "panel_register_notifier" . | grep -E "\.c$" || true)
-            for f in $TARGET_FILES_WIDE; do
-              if ! grep -q "EXPORT_SYMBOL(panel_register_notifier)" "$f"; then
-                echo "EXPORT_SYMBOL(panel_register_notifier);" >> "$f"
-                echo "EXPORT_SYMBOL(panel_unregister_notifier);" >> "$f"
-              fi
-            done
-          fi
+          echo "💉 FORCE INJECTION ET EXPORTATION DES SYMBOLES DANS MSM_DRV 💉"
+          # On ajoute manuellement la déclaration et l'exportation en dur à la fin du fichier msm_drv.c
+          echo -e "\n/* Correctif Chirurgical Tactile */\nextern int panel_register_notifier(struct notifier_block *nb);\nextern int panel_unregister_notifier(struct notifier_block *nb);\nEXPORT_SYMBOL(panel_register_notifier);\nEXPORT_SYMBOL(panel_unregister_notifier);" >> drivers/gpu/drm/msm/msm_drv.c
 
-          echo "🪓 Modification forcée des Makefiles tactiles 🪓"
-          if [ -f "techpack/display/drivers/input/touchscreen/Makefile" ]; then
-            sed -i 's/obj-\$(CONFIG_TOUCHSCREEN_FTS)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
-            sed -i 's/obj-\$(CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
-            echo "obj-y += fts/" >> techpack/display/drivers/input/touchscreen/Makefile
-          fi
-
-          echo "⚙️ Forçage des configs de secours..."
+          echo "🪓 Alignement forcé des modules de secours..."
           {
             echo "CONFIG_DRM_PANEL_NOTIFIER=y"
             echo "CONFIG_INPUT_TOUCHSCREEN=y"
@@ -113,7 +89,7 @@ jobs:
             echo "CONFIG_TOUCHSCREEN_FTS=y"
           } >> ${{ env.BUILD_DIR }}/.config
 
-          echo "💉 Correctif de l'erreur strnstr..."
+          echo "💉 Correctif historique de l'erreur strnstr..."
           sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' drivers/gpu/drm/msm/msm_drv.c
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
