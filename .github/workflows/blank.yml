@@ -74,14 +74,27 @@ jobs:
           echo "📥 Injection de la configuration parfaite d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          echo "🛠️ Étape 1 : Génération de la configuration..."
+          echo "🛠️ Étape 1 : Génération de la configuration d'origine..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           
-          echo "💉 Correctif chirurgical de l'erreur strnstr dans msm_drv.c..."
-          # Remplace l'appel à 2 arguments par un appel valide à 3 arguments requis par Clang 18
+          echo "💉 Forçage du tactile en mode Intégré (Built-in =y)..."
+          # On désactive la version module (=m) et on force l'intégration directe (=y)
+          sed -i 's/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=m/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y/g' ${{ env.BUILD_DIR }}/.config
+          sed -i 's/CONFIG_TOUCHSCREEN_FTS=m/CONFIG_TOUCHSCREEN_FTS=y/g' ${{ env.BUILD_DIR }}/.config
+          
+          # Sécurité : on s'assure qu'ils soient bien présents au cas où
+          {
+            echo "CONFIG_INPUT_TOUCHSCREEN=y"
+            echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
+            echo "CONFIG_TOUCHSCREEN_FTS=y"
+            echo "CONFIG_TOUCHSCREEN_FTS_DIRECTORY=\"fts\""
+            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+
+          echo "💉 Correctif de l'erreur strnstr dans msm_drv.c..."
           sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' drivers/gpu/drm/msm/msm_drv.c
 
-          echo "🚀 Étape 2 : Compilation du noyau propre..."
+          echo "🚀 Étape 2 : Compilation du noyau avec tactile intégré..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
