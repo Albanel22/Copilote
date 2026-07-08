@@ -77,9 +77,20 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           
-          echo "🪓 MODIFICATION FORCÉE DU CODE SOURCE (BUILD-IN) 🪓"
-          # On force l'inclusion du dossier du driver tactile de Motorola directement dans le Makefile de Techpack
-          # Cela court-circuite les variables de config pour s'assurer que le driver tactile est TOUJOURS compilé et lié.
+          echo "🪓 NETTOYAGE ET FORÇAGE DU TACTILE EN DUR (BUILD-IN) 🪓"
+          # On désactive drastiquement la compilation sous forme de module externe (.ko)
+          sed -i 's/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=m/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y/g' ${{ env.BUILD_DIR }}/.config
+          sed -i 's/CONFIG_TOUCHSCREEN_FTS=m/CONFIG_TOUCHSCREEN_FTS=y/g' ${{ env.BUILD_DIR }}/.config
+          
+          # On s'assure que le noyau intègre nativement les gestionnaires de notificateurs de dalle
+          {
+            echo "CONFIG_INPUT_TOUCHSCREEN=y"
+            echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
+            echo "CONFIG_TOUCHSCREEN_FTS=y"
+            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+
+          # Forçage au niveau du Makefile de Techpack
           if [ -f "techpack/display/drivers/input/touchscreen/Makefile" ]; then
             echo "obj-y += fts/" >> techpack/display/drivers/input/touchscreen/Makefile
           fi
@@ -87,7 +98,7 @@ jobs:
           echo "💉 Correctif de l'erreur strnstr..."
           sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' drivers/gpu/drm/msm/msm_drv.c
 
-          echo "🚀 Étape 2 : Compilation du noyau propre..."
+          echo "🚀 Étape 2 : Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack Clean Boot Image
