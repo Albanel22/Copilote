@@ -76,31 +76,34 @@ jobs:
           
           echo "🛠️ Étape 1 : Génération de la configuration..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
-          
-          echo "🪓 APPLIQUER LES EXPORTS DE SYMBOLES DRM 🪓"
-          # On s'assure que le DRM PANEL NOTIFIER est compilé en dur
-          sed -i 's/CONFIG_DRM_PANEL_NOTIFIER=m/CONFIG_DRM_PANEL_NOTIFIER=y/g' ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_DRM_PANEL_NOTIFIER=y" >> ${{ env.BUILD_DIR }}/.config
 
-          # Forçage des configurations tactiles du build précédent
-          sed -i 's/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=m/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y/g' ${{ env.BUILD_DIR }}/.config
-          sed -i 's/CONFIG_TOUCHSCREEN_FTS=m/CONFIG_TOUCHSCREEN_FTS=y/g' ${{ env.BUILD_DIR }}/.config
+          echo "💉 FORCE EXPORT DES SYMBOLES PANNEAU DRM (Code Source) 💉"
+          # On cherche le fichier qui définit panel_register_notifier et on lui force un EXPORT_SYMBOL
+          find . -name "drm_panel.c" -exec sed -i '/panel_register_notifier/!b;n;c\\EXPORT_SYMBOL(panel_register_notifier);' {} +
+          find . -name "drm_panel.c" -exec sed -i '/panel_unregister_notifier/!b;n;c\\EXPORT_SYMBOL(panel_unregister_notifier);' {} +
+
+          echo "🪓 Modification forcée des Makefiles tactiles 🪓"
+          # On force la compilation en dur dans les Makefiles plutôt que via le .config
+          if [ -f "techpack/display/drivers/input/touchscreen/Makefile" ]; then
+            sed -i 's/obj-$(CONFIG_TOUCHSCREEN_FTS)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
+            sed -i 's/obj-$(CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
+            echo "obj-y += fts/" >> techpack/display/drivers/input/touchscreen/Makefile
+          fi
+
+          echo "⚙️ Forçage des configs de secours..."
           {
+            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
             echo "CONFIG_INPUT_TOUCHSCREEN=y"
             echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
             echo "CONFIG_TOUCHSCREEN_FTS=y"
           } >> ${{ env.BUILD_DIR }}/.config
-
-          if [ -f "techpack/display/drivers/input/touchscreen/Makefile" ]; then
-            echo "obj-y += fts/" >> techpack/display/drivers/input/touchscreen/Makefile
-          fi
 
           echo "💉 Correctif de l'erreur strnstr..."
           sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' drivers/gpu/drm/msm/msm_drv.c
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
-
+          
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
