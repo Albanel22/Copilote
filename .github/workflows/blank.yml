@@ -78,13 +78,11 @@ jobs:
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
           echo "🪓 NEUTRALISATION DES DOUBLONS GRAPHIQUES 🪓"
-          # On vide proprement la variable dans le Makefile d'origine pour que drivers/gpu/drm/msm/ ne soit PAS compilé
           if [ -f "drivers/gpu/drm/Makefile" ]; then
             sed -i 's/obj-\$(CONFIG_DRM_MSM) += msm\///g' drivers/gpu/drm/Makefile
           fi
 
-          echo "🪓 MODIFICATION DU MAKEFILE TECHPACK (STRATÉGIE FUSION UNIQUE) 🪓"
-          # On force le techpack d'affichage (le bon dossier msm) à se compiler en dur (Built-in)
+          echo "🪓 MODIFICATION DU MAKEFILE TECHPACK 🪓"
           if [ -f "techpack/display/Makefile" ]; then
             sed -i 's/obj-\$(CONFIG_DRM_MSM) += msm\///g' techpack/display/Makefile
             echo "obj-y += msm/" >> techpack/display/Makefile
@@ -98,15 +96,31 @@ jobs:
             echo "CONFIG_INPUT_TOUCHSCREEN=y"
           } >> ${{ env.BUILD_DIR }}/.config
 
-          echo "💉 Correctif de l'erreur strnstr dans le Techpack..."
-          # On applique le correctif strnstr sur le fichier du Techpack qui va être réellement compilé !
+          echo "💉 Injection alignée des symboles manquants dans msm_drv.c..."
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
+            # 1. Correctif historique strnstr
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
+            
+            # 2. Insertion propre au début du fichier (après le premier include de module.h)
+            # Cela évite tout problème d'alignement ou de blocage en fin de fichier.
+            sed -i '/#include <linux\/module.h>/a \
+            \
+            /* CODE INJECTE POUR LE TACTILE MOTOROLA MMI */\
+            static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
+            \
+            int panel_register_notifier(struct notifier_block *nb) {\
+            return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\
+            }\
+            EXPORT_SYMBOL(panel_register_notifier);\
+            \
+            int panel_unregister_notifier(struct notifier_block *nb) {\
+            return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\
+            }\
+            EXPORT_SYMBOL(panel_unregister_notifier);' techpack/display/msm/msm_drv.c
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
-          
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
