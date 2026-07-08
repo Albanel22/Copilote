@@ -77,29 +77,21 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "🪓 NOUVELLE STRATÉGIE : FORÇAGE DES CONFIGS DISPLAY TECHPACK 🪓"
-          # On force les options au niveau des scripts de configuration internes du Techpack Display
-          find techpack/display/config -type f -exec sed -i 's/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=m/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y/g' {} +
-          find techpack/display/config -type f -exec sed -i 's/CONFIG_TOUCHSCREEN_FTS=m/CONFIG_TOUCHSCREEN_FTS=y/g' {} +
-
-          echo "⚙️ Application au .config global..."
-          sed -i 's/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=m/CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y/g' ${{ env.BUILD_DIR }}/.config
-          sed -i 's/CONFIG_TOUCHSCREEN_FTS=m/CONFIG_TOUCHSCREEN_FTS=y/g' ${{ env.BUILD_DIR }}/.config
-          {
-            echo "CONFIG_INPUT_TOUCHSCREEN=y"
-            echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
-            echo "CONFIG_TOUCHSCREEN_FTS=y"
-            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-
-          echo "💉 Alignement chirurgical des Makefiles..."
-          if [ -f "techpack/display/drivers/input/touchscreen/Makefile" ]; then
-            sed -i 's/obj-\$(CONFIG_TOUCHSCREEN_FTS)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
-            sed -i 's/obj-\$(CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE)/obj-y/g' techpack/display/drivers/input/touchscreen/Makefile
-            echo "obj-y += fts/" >> techpack/display/drivers/input/touchscreen/Makefile
+          echo "🪓 MODIFICATION DU MAKEFILE TECHPACK (STRATÉGIE FUSION GLOBAL) 🪓"
+          # On force tout le sous-système d'affichage MSM de Qualcomm à se compiler en dur (Built-in)
+          if [ -f "techpack/display/Makefile" ]; then
+            sed -i 's/obj-\$(CONFIG_DRM_MSM) += msm\//obj-y += msm\//g' techpack/display/Makefile
           fi
 
-          echo "💉 Correctif de l'erreur strnstr..."
+          echo "⚙️ Forçage des options de liaison graphique au .config global..."
+          sed -i 's/CONFIG_DRM_MSM=m/CONFIG_DRM_MSM=y/g' ${{ env.BUILD_DIR }}/.config
+          {
+            echo "CONFIG_DRM_MSM=y"
+            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
+            echo "CONFIG_INPUT_TOUCHSCREEN=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+
+          echo "💉 Correctif historique de l'erreur strnstr..."
           sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' drivers/gpu/drm/msm/msm_drv.c
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
