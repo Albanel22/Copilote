@@ -78,16 +78,20 @@ jobs:
             make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE ${{ env.DEFCONFIG }}
           fi
           
-          echo "💉 Injection de la configuration tactile officielle Motorola (FTS)..."
+          echo "💉 Injection de la configuration tactile officielle Motorola (FTS) & DRM..."
           # Neutralise l'ancienne config générique potentielle
           sed -i 's/CONFIG_TOUCHSCREEN_FOCALTECH=m/CONFIG_TOUCHSCREEN_FOCALTECH=y/g' ${{ env.BUILD_DIR }}/.config
           
-          # Force l'architecture officielle extraite du stock_config.txt fonctionnel
+          # Force l'architecture officielle extraite du stock_config.txt et résout les symboles manquants
           {
             echo "CONFIG_INPUT_TOUCHSCREEN=y"
             echo "CONFIG_TOUCHSCREEN_MOTOROLA_MULTSENSE=y"
             echo "CONFIG_TOUCHSCREEN_FTS=y"
             echo "CONFIG_TOUCHSCREEN_FTS_DIRECTORY=\"fts\""
+            
+            # Dépendances critiques pour l'affichage et les notificateurs de panneaux (Unknown symbol panel_register_notifier)
+            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
+            echo "CONFIG_FB_MSM=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           echo "🚀 Étape 2 : Compilation du noyau avec support matériel intégré..."
