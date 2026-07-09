@@ -82,14 +82,16 @@ jobs:
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
           fi
 
-          echo "💉 INJECTION COMPLÈTE DES FONCTIONS MANQUANTES AU CŒUR DU NOYAU (BUILD 119) 💉"
+          echo "💉 INJECTION AUTONOME DES FONCTIONS AU CŒUR DU NOYAU (BUILD 120) 💉"
           if [ -f "kernel/sys.c" ]; then
-            # On injecte l'infrastructure d'attachement requise par le tactile directement dans le cœur du système linux
+            # On injecte l'inclusion de notifier.h ET le code de relais requis par le tactile
             sed -i '/#include <linux\/export.h>/a \
-            \
-            /* CODE NATIF DE RELAIS POUR LE TACTILE MOTOROLA MMI */\
-            static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
-            \
+          \
+          /* CODE EN PURE INFRASTRUCTURE POUR LE TACTILE MOTOROLA MMI */\
+          #include <linux/notifier.h>\
+          \
+          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
+          \
           int panel_register_notifier(struct notifier_block *nb) {\
           return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\
           }\
