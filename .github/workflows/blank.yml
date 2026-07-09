@@ -82,12 +82,12 @@ jobs:
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
           fi
 
-          echo "💉 INJECTION AUTONOME DES FONCTIONS AU CŒUR DU NOYAU (BUILD 120) 💉"
-          if [ -f "kernel/sys.c" ]; then
-            # On injecte l'inclusion de notifier.h ET le code de relais requis par le tactile
-            sed -i '/#include <linux\/export.h>/a \
+          echo "💉 INJECTION DANS LE SOUS-SYSTÈME INPUT (BUILD 121) 💉"
+          if [ -f "drivers/input/input.c" ]; then
+            # On injecte le code directement après l'inclusion du module pour bénéficier du namespace des pilotes d'entrée
+            sed -i '/#include <linux\/module.h>/a \
           \
-          /* CODE EN PURE INFRASTRUCTURE POUR LE TACTILE MOTOROLA MMI */\
+          /* CODE DE RELAIS IMMUNITAIRE POUR LE TACTILE MOTOROLA MMI */\
           #include <linux/notifier.h>\
           \
           static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
@@ -100,7 +100,7 @@ jobs:
           int panel_unregister_notifier(struct notifier_block *nb) {\
           return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\
           }\
-          EXPORT_SYMBOL(panel_unregister_notifier);' kernel/sys.c
+          EXPORT_SYMBOL(panel_unregister_notifier);' drivers/input/input.c
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
