@@ -79,26 +79,23 @@ jobs:
 
           echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 124) 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
-          sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
-          
-          cat << 'EOF' > display_patch.tmp
-#include <linux/notifier.h>
-#include <linux/module.h>
-
-static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
-
-int panel_register_notifier(struct notifier_block *nb) {
-    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);
-}
-EXPORT_SYMBOL(panel_register_notifier);
-
-int panel_unregister_notifier(struct notifier_block *nb) {
-    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
-}
-EXPORT_SYMBOL(panel_unregister_notifier);
-EOF
-          sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
-          rm -f display_patch.tmp
+            sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
+            
+            rm -f display_patch.tmp
+            echo '#include <linux/notifier.h>' >> display_patch.tmp
+            echo '#include <linux/module.h>' >> display_patch.tmp
+            echo 'static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);' >> display_patch.tmp
+            echo 'int panel_register_notifier(struct notifier_block *nb) {' >> display_patch.tmp
+            echo '    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);' >> display_patch.tmp
+            echo '}' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(panel_register_notifier);' >> display_patch.tmp
+            echo 'int panel_unregister_notifier(struct notifier_block *nb) {' >> display_patch.tmp
+            echo '    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);' >> display_patch.tmp
+            echo '}' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(panel_unregister_notifier);' >> display_patch.tmp
+            
+            sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
+            rm -f display_patch.tmp
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2) ..."
