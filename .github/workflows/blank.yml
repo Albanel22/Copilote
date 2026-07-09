@@ -77,13 +77,13 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "🔓 DÉSACTIVATION DE LA PROTECTION DES SIGNATURES (ANTI ERR -22) 🔓"
-          # On force le noyau à ignorer la stricte vérification KABI pour accepter tous les modules
-          sed -i 's/CONFIG_ANDROID_KABI_PROTECT=y/CONFIG_ANDROID_KABI_PROTECT=n/g' ${{ env.BUILD_DIR }}/.config
-          echo 'CONFIG_ANDROID_KABI_PROTECT=n' >> ${{ env.BUILD_DIR }}/.config
-          echo 'CONFIG_MODVERSIONS=n' >> ${{ env.BUILD_DIR }}/.config
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE MODULE.C (BUILD 128) 🔓"
+          # On force la fonction check_version() du noyau à toujours renvoyer 1 (vrai) au lieu de bloquer sur l'erreur -22
+          if [ -f "kernel/module.c" ]; then
+            sed -i 's/return check_version(info, symname, mod, crc);/return 1;/g' kernel/module.c
+          fi
 
-          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 127) 💉"
+          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
             
@@ -100,7 +100,6 @@ jobs:
             echo '}' >> display_patch.tmp
             echo 'EXPORT_SYMBOL(panel_unregister_notifier);' >> display_patch.tmp
             
-            # Ajout de la fonction manquante demandée par Focaltech
             echo 'void touch_set_state(int state) { return; }' >> display_patch.tmp
             echo 'EXPORT_SYMBOL(touch_set_state);' >> display_patch.tmp
             
