@@ -73,12 +73,8 @@ jobs:
           
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
-          
-          echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129) 🔓"
-          # On court-circuicte le blocage de version pour forcer le chargement de TOUS les modules sans erreur -22
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129 BASE) 🔓"
           if [ -f "kernel/module.c" ]; then
             sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
@@ -107,7 +103,34 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2) ..."
+          echo "🟢 INTEGRATION ET AUTOMATISATION DE KERNELSU-NEXT (BUILD 130) 🟢"
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+
+          echo "🦊 PATCH COHÉSIF DE SUSFS (BRANCHE KERNEL 4.19) 🦊"
+          git clone https://gitlab.com/tiann/susfs4ksu.git -b kernel-4.19
+          
+          # Application des modifications et liaisons de fichiers
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_for_arch_arm64.patch || echo "⚠️ Erreur non-fatale patch 1"
+          patch -p1 < susfs4ksu/kernel_patches/fs_susfs.patch || echo "⚠️ Erreur non-fatale patch 2"
+          patch -p1 < susfs4ksu/kernel_patches/ksu_susfs.patch || echo "⚠️ Erreur non-fatale patch 3"
+          
+          # Migration des dossiers de masquage
+          cp -r susfs4ksu/kernel_patches/fs/* fs/
+          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+
+          echo "💾 FORCE-INJECTION DES CONFIGURATIONS INVISIBLES DANS KIEV_PERFECT_DEFCONFIG 💾"
+          TARGET_DEFCONFIG="arch/arm64/configs/vendor/kiev_perfect_defconfig"
+          echo "CONFIG_KSU=y" >> "$TARGET_DEFCONFIG"
+          echo "CONFIG_KSU_NEXT=y" >> "$TARGET_DEFCONFIG"
+          echo "CONFIG_KSU_SUSFS=y" >> "$TARGET_DEFCONFIG"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$TARGET_DEFCONFIG"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$TARGET_DEFCONFIG"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$TARGET_DEFCONFIG"
+          
+          echo "🛠️ Étape 1 : Génération de la configuration d'origine modifiée..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
+
+          echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2 + Root Invisible) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
