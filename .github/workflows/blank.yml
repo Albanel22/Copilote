@@ -82,10 +82,10 @@ jobs:
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
           fi
 
-          echo "💉 CRÉATION DU PILOTE DE PONT ISOLÉ (BUILD 122) 💉"
-          cat << 'EOF' > drivers/input/motorola_touch_bridge.c
+          echo "💉 CRÉATION DU MODULE EXTENSION REQUIS POUR LE TACTILE (BUILD 123) 💉"
+          cat << 'EOF' > drivers/misc/motorola_touch_bridge.c
 
-          /* PILOTE RELAIS PUR ET ISOLÉ POUR LE TACTILE MOTOROLA MMI */
+          /* MODULE RECONSTITUÉ SANS MODIFICATION DE L'IMAGE CENTRALE */
           #include <linux/module.h>
           #include <linux/notifier.h>
 
@@ -94,24 +94,37 @@ jobs:
           int panel_register_notifier(struct notifier_block *nb) {
           return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);
           }
-          EXPORT_SYMBOL_GPL(panel_register_notifier);
+          EXPORT_SYMBOL(panel_register_notifier);
 
           int panel_unregister_notifier(struct notifier_block *nb) {
           return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
           }
-          EXPORT_SYMBOL_GPL(panel_unregister_notifier);
+          EXPORT_SYMBOL(panel_unregister_notifier);
+
+          static int __init touch_bridge_init(void) {
+          pr_info("Motorola Touch Bridge Loaded Successfully\n");
+          return 0;
+          }
+
+          static void __exit touch_bridge_exit(void) {
+          pr_info("Motorola Touch Bridge Unloaded\n");
+          }
+
+          module_init(touch_bridge_init);
+          module_exit(touch_bridge_exit);
 
           MODULE_LICENSE("GPL");
-          MODULE_DESCRIPTION("Motorola Touchscreen Panel Notifier Bridge");
+          MODULE_AUTHOR("Copilote");
+          MODULE_DESCRIPTION("Motorola Touchscreen Panel Notifier Bridge Module");
           EOF
 
-          echo "⚙️ INCLUSION DU PONT DANS LE MAKEFILE DES PILOTES D'ENTRÉE ⚙️"
-          if [ -f "drivers/input/Makefile" ]; then
-            echo "obj-y += motorola_touch_bridge.o" >> drivers/input/Makefile
+          echo "⚙️ INCLUSION DU MODULE DANS LE MAKEFILE MISC EN MODE DYNAMIQUE ⚙️"
+          if [ -f "drivers/misc/Makefile" ]; then
+            echo "obj-m += motorola_touch_bridge.o" >> drivers/misc/Makefile
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image modules
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
