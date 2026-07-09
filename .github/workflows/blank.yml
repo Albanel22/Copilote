@@ -79,32 +79,30 @@ jobs:
 
           echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 124) 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
-            # 1. Correctif historique strnstr
-            sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
-            
-            # 2. Ajout du pont d'alimentation directement au début du fichier d'affichage
-            cat << 'EOF' > display_patch.tmp
-          #include <linux/notifier.h>
-          #include <linux/module.h>
+          sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
+          
+          cat << 'EOF' > display_patch.tmp
+#include <linux/notifier.h>
+#include <linux/module.h>
 
-          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
+static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
 
-          int panel_register_notifier(struct notifier_block *nb) {
-          return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);
-          }
-          EXPORT_SYMBOL(panel_register_notifier);
+int panel_register_notifier(struct notifier_block *nb) {
+    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);
+}
+EXPORT_SYMBOL(panel_register_notifier);
 
-          int panel_unregister_notifier(struct notifier_block *nb) {
-          return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
-          }
-          EXPORT_SYMBOL(panel_unregister_notifier);
-          EOF
-            sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
-            rm -f display_patch.tmp
+int panel_unregister_notifier(struct notifier_block *nb) {
+    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
+}
+EXPORT_SYMBOL(panel_unregister_notifier);
+EOF
+          sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
+          rm -f display_patch.tmp
           fi
 
-          echo "🚀 Étape 2 : Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2) ..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
