@@ -74,36 +74,31 @@ jobs:
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          echo "🛠️ Étape 1 : Génération de la configuration..."
+          echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "⚙️ Configuration des options standards..."
-          {
-            echo "CONFIG_DRM_PANEL_NOTIFIER=y"
-            echo "CONFIG_INPUT_TOUCHSCREEN=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-
-          echo "💉 CORRECTIF STRNSTR SANS MASQUAGE 💉"
+          echo "💉 CORRECTIF HISTORIQUE STRNSTR DANS LE TECHPACK 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
           fi
 
-          echo "💉 LE PONT DE NOTIFICATION UNIVERSEL DRIVER-TO-MODULE (BUILD 118) 💉"
-          if [ -f "drivers/video/fbdev/core/fbmem.c" ]; then
-            sed -i '/#include <linux\/module.h>/a \
-          \
-          /* CODE AUTHENTIQUE ET PUR DE RELAIS POUR LE TACTILE MOTOROLA MMI */\
-          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
-          \
+          echo "💉 INJECTION COMPLÈTE DES FONCTIONS MANQUANTES AU CŒUR DU NOYAU (BUILD 119) 💉"
+          if [ -f "kernel/sys.c" ]; then
+            # On injecte l'infrastructure d'attachement requise par le tactile directement dans le cœur du système linux
+            sed -i '/#include <linux\/export.h>/a \
+            \
+            /* CODE NATIF DE RELAIS POUR LE TACTILE MOTOROLA MMI */\
+            static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\
+            \
           int panel_register_notifier(struct notifier_block *nb) {\
           return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\
           }\
-          EXPORT_SYMBOL_GPL(panel_register_notifier);\
+          EXPORT_SYMBOL(panel_register_notifier);\
           \
           int panel_unregister_notifier(struct notifier_block *nb) {\
           return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\
           }\
-          EXPORT_SYMBOL_GPL(panel_unregister_notifier);' drivers/video/fbdev/core/fbmem.c
+          EXPORT_SYMBOL(panel_unregister_notifier);' kernel/sys.c
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
