@@ -77,10 +77,10 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE MODULE.C (BUILD 128) 🔓"
-          # On force la fonction check_version() du noyau à toujours renvoyer 1 (vrai) au lieu de bloquer sur l'erreur -22
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129) 🔓"
+          # On court-circuicte le blocage de version pour forcer le chargement de TOUS les modules sans erreur -22
           if [ -f "kernel/module.c" ]; then
-            sed -i 's/return check_version(info, symname, mod, crc);/return 1;/g' kernel/module.c
+            sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
 
           echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK 💉"
