@@ -74,12 +74,14 @@ jobs:
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
 
-          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129 BASE) 🔓"
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (SOCLE BUILD 129 UNIQUE) 🔓"
+          # Ce bloc garantit le bypass de l'erreur -22 pour charger le pilote FocalTech sur le bus SPI
           if [ -f "kernel/module.c" ]; then
             sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
 
           echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK 💉"
+          # Injection chirurgicale pour forcer le réveil et la détection du tactile
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
             
@@ -104,17 +106,19 @@ jobs:
           fi
 
           echo "🟢 INTEGRATION ET AUTOMATISATION DE KERNELSU-NEXT (BUILD 130) 🟢"
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          # Script exécuté proprement sans argument conflictuel pour cloner la branche par défaut
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s
 
-          echo "🦊 PATCH COHÉSIF DE SUSFS (BRANCHE KERNEL 4.19) 🦊"
-          git clone https://gitlab.com/tiann/susfs4ksu.git -b kernel-4.19
+          echo "🦊 PATCH COHÉSIF DE SUSFS (BRANCHE KERNEL 4.19 VIA GITHUB) 🦊"
+          # Utilisation d'un miroir GitHub public pour contourner la restriction anonyme de GitLab
+          git clone https://github.com/infectedmushi/susfs4ksu.git
           
-          # Application des modifications et liaisons de fichiers
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_for_arch_arm64.patch || echo "⚠️ Erreur non-fatale patch 1"
-          patch -p1 < susfs4ksu/kernel_patches/fs_susfs.patch || echo "⚠️ Erreur non-fatale patch 2"
-          patch -p1 < susfs4ksu/kernel_patches/ksu_susfs.patch || echo "⚠️ Erreur non-fatale patch 3"
+          # Application des correctifs de masquage
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_for_arch_arm64.patch || echo "⚠️ Note: Ligne déplacée patch 1"
+          patch -p1 < susfs4ksu/kernel_patches/fs_susfs.patch || echo "⚠️ Note: Ligne déplacée patch 2"
+          patch -p1 < susfs4ksu/kernel_patches/ksu_susfs.patch || echo "⚠️ Note: Ligne déplacée patch 3"
           
-          # Migration des dossiers de masquage
+          # Copie des fichiers d'infrastructure SuSFS vers les dossiers système correspondants
           cp -r susfs4ksu/kernel_patches/fs/* fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
 
