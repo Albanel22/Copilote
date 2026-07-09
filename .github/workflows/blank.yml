@@ -63,7 +63,7 @@ jobs:
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
@@ -74,14 +74,12 @@ jobs:
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
 
-          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (SOCLE BUILD 129 UNIQUE) 🔓"
-          # Ce bloc garantit le bypass de l'erreur -22 pour charger le pilote FocalTech sur le bus SPI
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (SOCLE BUILD 129 HISTORIQUE) 🔓"
           if [ -f "kernel/module.c" ]; then
             sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
 
           echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK 💉"
-          # Injection chirurgicale pour forcer le réveil et la détection du tactile
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
             
@@ -105,22 +103,26 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INTEGRATION ET AUTOMATISATION DE KERNELSU-NEXT (BUILD 130) 🟢"
-          # Script exécuté proprement sans argument conflictuel pour cloner la branche par défaut
+          echo "🟢 INTEGRATION DE KERNELSU-NEXT (OK DEPUIS LOGS) 🟢"
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s
 
-          echo "🦊 PATCH COHÉSIF DE SUSFS (BRANCHE KERNEL 4.19 VIA GITHUB) 🦊"
-          # Utilisation d'un miroir GitHub public pour contourner la restriction anonyme de GitLab
-          git clone https://github.com/infectedmushi/susfs4ksu.git
+          echo "Fox TÉLÉCHARGEMENT DIRECT DES PATCHS SUSFS VALIDÉS (BUILD 132) Fox"
+          mkdir -p susfs_patches
           
-          # Application des correctifs de masquage
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_for_arch_arm64.patch || echo "⚠️ Note: Ligne déplacée patch 1"
-          patch -p1 < susfs4ksu/kernel_patches/fs_susfs.patch || echo "⚠️ Note: Ligne déplacée patch 2"
-          patch -p1 < susfs4ksu/kernel_patches/ksu_susfs.patch || echo "⚠️ Note: Ligne déplacée patch 3"
+          # Téléchargement ciblé depuis la branche master officielle de simonpunk
+          curl -fLo susfs_patches/50_add_susfs_for_arch_arm64.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/50_add_susfs_for_arch_arm64.patch"
+          curl -fLo susfs_patches/fs_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/fs_susfs.patch"
+          curl -fLo susfs_patches/ksu_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/ksu_susfs_4.19.y.patch"
           
-          # Copie des fichiers d'infrastructure SuSFS vers les dossiers système correspondants
-          cp -r susfs4ksu/kernel_patches/fs/* fs/
-          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+          # Récupération des fichiers C et H qui complètent le diff des dossiers fs/ et include/
+          mkdir -p fs include/linux
+          curl -fLo fs/susfs.c "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/fs/susfs.c"
+          curl -fLo include/linux/susfs.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/include/linux/susfs.h"
+
+          echo "🚀 APPLICATION CHIRURGICALE DES PATCHS SUSFS 🚀"
+          patch -p1 < susfs_patches/50_add_susfs_for_arch_arm64.patch
+          patch -p1 < susfs_patches/fs_susfs.patch
+          patch -p1 < susfs_patches/ksu_susfs.patch
 
           echo "💾 FORCE-INJECTION DES CONFIGURATIONS INVISIBLES DANS KIEV_PERFECT_DEFCONFIG 💾"
           TARGET_DEFCONFIG="arch/arm64/configs/vendor/kiev_perfect_defconfig"
