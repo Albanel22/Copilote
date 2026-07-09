@@ -77,7 +77,13 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 124) 💉"
+          echo "🔓 DÉSACTIVATION DE LA PROTECTION DES SIGNATURES (ANTI ERR -22) 🔓"
+          # On force le noyau à ignorer la stricte vérification KABI pour accepter tous les modules
+          sed -i 's/CONFIG_ANDROID_KABI_PROTECT=y/CONFIG_ANDROID_KABI_PROTECT=n/g' ${{ env.BUILD_DIR }}/.config
+          echo 'CONFIG_ANDROID_KABI_PROTECT=n' >> ${{ env.BUILD_DIR }}/.config
+          echo 'CONFIG_MODVERSIONS=n' >> ${{ env.BUILD_DIR }}/.config
+
+          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 127) 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
             
@@ -93,6 +99,10 @@ jobs:
             echo '    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);' >> display_patch.tmp
             echo '}' >> display_patch.tmp
             echo 'EXPORT_SYMBOL(panel_unregister_notifier);' >> display_patch.tmp
+            
+            # Ajout de la fonction manquante demandée par Focaltech
+            echo 'void touch_set_state(int state) { return; }' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(touch_set_state);' >> display_patch.tmp
             
             sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
             rm -f display_patch.tmp
