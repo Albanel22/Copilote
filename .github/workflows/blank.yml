@@ -77,17 +77,15 @@ jobs:
           echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
 
-          echo "💉 CORRECTIF HISTORIQUE STRNSTR DANS LE TECHPACK 💉"
+          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK (BUILD 124) 💉"
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
+            # 1. Correctif historique strnstr
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
-          fi
-
-          echo "💉 CRÉATION DU MODULE EXTENSION REQUIS POUR LE TACTILE (BUILD 123) 💉"
-          cat << 'EOF' > drivers/misc/motorola_touch_bridge.c
-
-          /* MODULE RECONSTITUÉ SANS MODIFICATION DE L'IMAGE CENTRALE */
-          #include <linux/module.h>
+            
+            # 2. Ajout du pont d'alimentation directement au début du fichier d'affichage
+            cat << 'EOF' > display_patch.tmp
           #include <linux/notifier.h>
+          #include <linux/module.h>
 
           static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
 
@@ -100,31 +98,13 @@ jobs:
           return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
           }
           EXPORT_SYMBOL(panel_unregister_notifier);
-
-          static int __init touch_bridge_init(void) {
-          pr_info("Motorola Touch Bridge Loaded Successfully\n");
-          return 0;
-          }
-
-          static void __exit touch_bridge_exit(void) {
-          pr_info("Motorola Touch Bridge Unloaded\n");
-          }
-
-          module_init(touch_bridge_init);
-          module_exit(touch_bridge_exit);
-
-          MODULE_LICENSE("GPL");
-          MODULE_AUTHOR("Copilote");
-          MODULE_DESCRIPTION("Motorola Touchscreen Panel Notifier Bridge Module");
           EOF
-
-          echo "⚙️ INCLUSION DU MODULE DANS LE MAKEFILE MISC EN MODE DYNAMIQUE ⚙️"
-          if [ -f "drivers/misc/Makefile" ]; then
-            echo "obj-m += motorola_touch_bridge.o" >> drivers/misc/Makefile
+            sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
+            rm -f display_patch.tmp
           fi
 
           echo "🚀 Étape 2 : Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image modules
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
