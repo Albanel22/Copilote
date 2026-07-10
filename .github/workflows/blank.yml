@@ -103,17 +103,13 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INJECTION MANUELLE SÉCURISÉE DE KERNELSU-NEXT (BRANCHE MAIN) 🟢"
-          # Nettoyage préventif
+          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (BRANCHE STABLE) 🟢"
+          # Nettoyage préventif pour repartir sur des bases saines
           rm -rf drivers/kernelsu
           rm -rf drivers/staging/kernelsu
           
-          # Téléchargement physique des sources sur la branche principale
-          git clone https://github.com/rifsxd/KernelSU-Next.git -b main drivers/kernelsu
-          
-          # Forçage de la prise en compte par le compilateur
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # Utilisation de la commande officielle et de l'URL mise à jour (Branche Stable préconisée)
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
 
           echo "🦊 PRÉPARATION DES SITES DE SÉCURITÉ DE L'INFRASTRUCTURE SUSFS 🦊"
           mkdir -p fs include/linux
