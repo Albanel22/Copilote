@@ -104,16 +104,12 @@ jobs:
           fi
 
           echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (BRANCHE STABLE) 🟢"
-          # Nettoyage préventif pour repartir sur des bases saines
           rm -rf drivers/kernelsu
           rm -rf drivers/staging/kernelsu
-          
-          # Utilisation de la commande officielle et de l'URL mise à jour (Branche Stable préconisée)
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
 
           echo "🦊 PRÉPARATION DES SITES DE SÉCURITÉ DE L'INFRASTRUCTURE SUSFS 🦊"
           mkdir -p fs include/linux
-          
           if [ ! -f "fs/susfs.c" ]; then
             touch fs/susfs.c
           fi
@@ -124,41 +120,38 @@ jobs:
           fi
 
           echo "🚀 APPLICATION CHIRURGICALE DES PATCHS LOCAUX (BUILD 142) 🚀"
-          # 1. On applique le gros patch global en mode forcé
           patch -f -p1 < ../susfs_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-          # 2. On applique le patch KernelSU s'il passe, sinon on continue
           patch -p1 < ../susfs_patches/ksu_susfs.patch || true
 
           echo "🩻 INJECTION MANUELLE (SED) DANS LES FICHIERS DU NOYAU 🩻"
-          # Correction ciblée pour fs/Makefile
           if [ -f "fs/Makefile" ]; then
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
           fi
-
-          # Correction ciblée pour fs/open.c (Hook d'ouverture des fichiers cachés)
           if [ -f "fs/open.c" ]; then
             sed -i '/static long do_sys_openat2/i #ifdef CONFIG_KSU_SUSFS\nextern int susfs_is_sus_path(const char *path);\n#endif' fs/open.c
           fi
-
-          # Correction ciblée pour fs/proc/task_mmu.c (Hook de masquage des cartes mémoire)
           if [ -f "fs/proc/task_mmu.c" ]; then
             sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
           fi
 
-          echo "💾 FORCE-INJECTION DES CONFIGURATIONS INVISIBLES DANS KIEV_PERFECT_DEFCONFIG 💾"
+          echo "💾 FORCE-INJECTION DES CONFIGURATIONS DANS KIEV_PERFECT_DEFCONFIG 💾"
           TARGET_DEFCONFIG="arch/arm64/configs/vendor/kiev_perfect_defconfig"
-          echo "CONFIG_KSU=y" >> "$TARGET_DEFCONFIG"
-          echo "CONFIG_KSU_NEXT=y" >> "$TARGET_DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS=y" >> "$TARGET_DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$TARGET_DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$TARGET_DEFCONFIG"
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$TARGET_DEFCONFIG"
           
-          echo "🛠️ Étape 1 : Génération de la configuration d'origine modifiée..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
+          echo "CONFIG_KSU=y" > ksu_config.tmp
+          echo "CONFIG_KSU_NEXT=y" >> ksu_config.tmp
+          echo "CONFIG_KSU_SUSFS=y" >> ksu_config.tmp
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ksu_config.tmp
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ksu_config.tmp
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ksu_config.tmp
 
-          echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2 + Root Invisible) ..."
+          echo "🛠️ Étape 1 : Fusion forcée et génération de la configuration propre..."
+          rm -rf ${{ env.BUILD_DIR }}
+          mkdir -p ${{ env.BUILD_DIR }}
+
+          ARCH=${{ env.ARCH }} scripts/kconfig/merge_config.sh -m -O ${{ env.BUILD_DIR }} $TARGET_DEFCONFIG ksu_config.tmp
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+
+          echo "🚀 Étape 2 : Compilation finale du noyau (Avec pilotes intégrés) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
