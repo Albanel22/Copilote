@@ -108,42 +108,14 @@ jobs:
           rm -rf drivers/staging/kernelsu
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
 
-          echo "🦊 PRÉPARATION DES SITES DE SÉCURITÉ DE L'INFRASTRUCTURE SUSFS 🦊"
-          mkdir -p fs include/linux
-          if [ ! -f "fs/susfs.c" ]; then
-            touch fs/susfs.c
-          fi
-          if [ ! -f "include/linux/susfs.h" ]; then
-            echo '#ifndef _LINUX_SUSFS_H' > include/linux/susfs.h
-            echo '#define _LINUX_SUSFS_H' >> include/linux/susfs.h
-            echo '#endif' >> include/linux/susfs.h
-          fi
-
-          echo "🚀 APPLICATION CHIRURGICALE DES PATCHS LOCAUX (BUILD 142) 🚀"
-          patch -f -p1 < ../susfs_patches/50_add_susfs_in_kernel-4.19.patch || true
-          patch -p1 < ../susfs_patches/ksu_susfs.patch || true
-
-          echo "🩻 INJECTION MANUELLE (SED) DANS LES FICHIERS DU NOYAU 🩻"
-          if [ -f "fs/Makefile" ]; then
-            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
-          fi
-          if [ -f "fs/open.c" ]; then
-            # CORRECTION : On force l'inclusion de susfs.h tout en haut pour que getname_safe soit reconnu
-            sed -i '1i #include <linux/susfs.h>' fs/open.c
-            sed -i '/static long do_sys_openat2/i #ifdef CONFIG_KSU_SUSFS\nextern int susfs_is_sus_path(const char *path);\n#endif' fs/open.c
-          fi
-          if [ -f "fs/proc/task_mmu.c" ]; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
-
           echo "🛑 FORCE-BYPASS : INJECTION DIRECTE DANS LES MAKEFILES INTERNES 🛑"
-          # On force la compilation brute de KernelSU
+          # On force la compilation de KernelSU directement dans le Makefile des pilotes
           if [ -f "drivers/Makefile" ]; then
             echo "obj-y += kernelsu/" >> drivers/Makefile
           fi
 
-          # On pousse de force les flags de préprocesseur globaux
-          export KCFLAGS="$KCFLAGS -DCONFIG_KSU=1 -DCONFIG_KSU_NEXT=1 -DCONFIG_KSU_SUSFS=1 -DCONFIG_KSU_SUSFS_SUS_PATH=1 -DCONFIG_KSU_SUSFS_SUS_MOUNT=1 -DCONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=1"
+          # On pousse les flags du préprocesseur pour KernelSU uniquement
+          export KCFLAGS="$KCFLAGS -DCONFIG_KSU=1 -DCONFIG_KSU_NEXT=1"
 
           echo "💾 NETTOYAGE ET INJECTION DE FORCE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
@@ -153,10 +125,6 @@ jobs:
             echo "" >> "$config_file"
             echo "CONFIG_KSU=y" >> "$config_file"
             echo "CONFIG_KSU_NEXT=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$config_file"
           done
 
           # Génération de la configuration finale
@@ -165,14 +133,10 @@ jobs:
           echo "" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_NEXT=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
 
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Compilation finale du noyau (Force-Compile activée) ..."
+          echo "🚀 Compilation finale du noyau (Objectif : KSU-Next Seul) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
