@@ -106,23 +106,24 @@ jobs:
           echo "🟢 INTEGRATION DE KERNELSU-NEXT (OK DEPUIS LOGS) 🟢"
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s
 
-          echo "🦊 TÉLÉCHARGEMENT CHIRURGICAL SUSFS SÉCURISÉ (BUILD 135) 🦊"
-          mkdir -p susfs_patches
-          
-          # Téléchargement via le miroir GitHub Raw officiel et stable (Branche 4.19)
-          curl -fLo susfs_patches/50_add_susfs_in_kernel-4.19.patch "https://raw.githubusercontent.com/GDKAnas/susfs4ksu/refs/heads/kernel-4.19/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
-          curl -fLo susfs_patches/fs_susfs.patch "https://raw.githubusercontent.com/GDKAnas/susfs4ksu/refs/heads/kernel-4.19/kernel_patches/fs_susfs.patch"
-          curl -fLo susfs_patches/ksu_susfs.patch "https://raw.githubusercontent.com/GDKAnas/susfs4ksu/refs/heads/kernel-4.19/kernel_patches/ksu_susfs.patch"
-          
-          # Téléchargement des deux fichiers d'infrastructure indispensables
+          echo "🦊 PRÉPARATION DES SITES DE SÉCURITÉ DE L'INFRASTRUCTURE SUSFS 🦊"
           mkdir -p fs include/linux
-          curl -fLo fs/susfs.c "https://raw.githubusercontent.com/GDKAnas/susfs4ksu/refs/heads/kernel-4.19/kernel_patches/fs/susfs.c"
-          curl -fLo include/linux/susfs.h "https://raw.githubusercontent.com/GDKAnas/susfs4ksu/refs/heads/kernel-4.19/kernel_patches/include/linux/susfs.h"
+          
+          # On s'assure d'avoir les stubs requis pour l'architecture si les fichiers n'existent pas encore
+          if [ ! -f "fs/susfs.c" ]; then
+            touch fs/susfs.c
+          fi
+          if [ ! -f "include/linux/susfs.h" ]; then
+            echo '#ifndef _LINUX_SUSFS_H' > include/linux/susfs.h
+            echo '#define _LINUX_SUSFS_H' >> include/linux/susfs.h
+            echo '#endif' >> include/linux/susfs.h
+          fi
 
-          echo "🚀 APPLICATION DES PATCHS STRIPÉS SUSFS 🚀"
-          patch -p1 < susfs_patches/50_add_susfs_in_kernel-4.19.patch
-          patch -p1 < susfs_patches/fs_susfs.patch
-          patch -p1 < susfs_patches/ksu_susfs.patch
+          echo "🚀 APPLICATION DE TES PATCHS GLOBAUX LOCAUX 🚀"
+          # On applique tes trois fichiers stockés localement à la racine
+          patch -p1 < ../susfs_patches/50_add_susfs_in_kernel-4.19.patch
+          patch -p1 < ../susfs_patches/fs_susfs.patch
+          patch -p1 < ../susfs_patches/ksu_susfs.patch
 
           echo "💾 FORCE-INJECTION DES CONFIGURATIONS INVISIBLES DANS KIEV_PERFECT_DEFCONFIG 💾"
           TARGET_DEFCONFIG="arch/arm64/configs/vendor/kiev_perfect_defconfig"
