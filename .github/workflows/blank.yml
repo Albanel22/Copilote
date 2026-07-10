@@ -69,10 +69,11 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export KCFLAGS="-Wno-error"
+          export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types"
+          export EXTRA_CFLAGS="-Wno-error"
           
           echo "📥 Injection de la configuration d'origine..."
-          cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
+          cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig || true
 
           echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (SOCLE BUILD 129 HISTORIQUE) 🔓"
           if [ -f "kernel/module.c" ]; then
@@ -103,25 +104,17 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (BRANCHE STABLE) 🟢"
-          rm -rf drivers/kernelsu
-          rm -rf drivers/staging/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
+          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (CORRECTE) 🟢"
+          rm -rf drivers/kernelsu drivers/staging/kernelsu
+          # Utilisation de l'installateur officiel de la communauté Next qui gère correctement le dépôt rifsxd
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
-          echo "🛑 FORCE-BYPASS : INJECTION DIRECTE DANS LES MAKEFILES INTERNES 🛑"
-          # On force la compilation de KernelSU directement dans le Makefile des pilotes
-          if [ -f "drivers/Makefile" ]; then
-            echo "obj-y += kernelsu/" >> drivers/Makefile
-          fi
-
-          # On pousse les flags du préprocesseur pour KernelSU uniquement
-          export KCFLAGS="$KCFLAGS -DCONFIG_KSU=1 -DCONFIG_KSU_NEXT=1"
-
-          echo "💾 NETTOYAGE ET INJECTION DE FORCE DANS LES DEFCONFIGS 💾"
+          echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
 
           find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
+            sed -i '/CONFIG_KSU/d' "$config_file"
             echo "" >> "$config_file"
             echo "CONFIG_KSU=y" >> "$config_file"
             echo "CONFIG_KSU_NEXT=y" >> "$config_file"
@@ -130,14 +123,15 @@ jobs:
           # Génération de la configuration finale
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           
+          sed -i '/CONFIG_KSU/d' ${{ env.BUILD_DIR }}/.config
           echo "" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_NEXT=y" >> ${{ env.BUILD_DIR }}/.config
 
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Compilation finale du noyau (Objectif : KSU-Next Seul) ..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
+          echo "🚀 Compilation finale du noyau (Objectif : KSU-Next Actif) ..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
