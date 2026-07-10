@@ -105,75 +105,59 @@ jobs:
 
           echo "🥷 INJECTION MANUELLE OFFICIELLE DE KERNELSU 🥷"
           rm -rf KernelSU drivers/kernelsu drivers/staging/kernelsu
-          
-          # 1. On clone le code à la racine exacte de l'arbre
           git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
           
-          echo "🩹 PATCH DE COMPATIBILITÉ KERNEL 4.19 (Suppression de MODULE_IMPORT_NS) 🩹"
+          echo "🩹 PATCHS DE COMPATIBILITÉ KERNEL 4.19 🩹"
           find KernelSU/kernel -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
-
-          echo "🩹 PATCH DE COMPATIBILITÉ VFS (iopoll & remap_file_range) 🩹"
+          
+          # Patch VFS
           FILE_WRAPPER="KernelSU/kernel/infra/file_wrapper.c"
           if [ -f "$FILE_WRAPPER" ]; then
-            # Neutralisation des appels à iopoll
             sed -i 's/return orig->f_op->iopoll.*/return -EINVAL;/g' "$FILE_WRAPPER"
             sed -i 's/p->ops.iopoll.*/\/\/ iopoll removed/g' "$FILE_WRAPPER"
-            
-            # Neutralisation des appels à remap_file_range
             sed -i 's/REMAP_FILE_DEDUP/0/g' "$FILE_WRAPPER"
             sed -i 's/return orig->f_op->remap_file_range.*/return -EINVAL;/g' "$FILE_WRAPPER"
             sed -i 's/p->ops.remap_file_range.*/\/\/ remap_file_range removed/g' "$FILE_WRAPPER"
           fi
-
-          echo "🩹 PATCH DE COMPATIBILITÉ SECCOMP (SECCOMP_ARCH_NATIVE_NR) 🩹"
+          
+          # Patch SECCOMP
           SECCOMP_CACHE="KernelSU/kernel/infra/seccomp_cache.c"
           if [ -f "$SECCOMP_CACHE" ]; then
             sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 1024\n#endif' "$SECCOMP_CACHE"
           fi
-
-          echo "🩹 PATCH DE COMPATIBILITÉ MOUNT_NS (uapi/linux/mount.h) 🩹"
+          
+          # Patch MOUNT
           SU_MOUNT_NS="KernelSU/kernel/infra/su_mount_ns.c"
           if [ -f "$SU_MOUNT_NS" ]; then
             sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>\n#include <linux/fs.h>|g' "$SU_MOUNT_NS"
           fi
+          
+          # Patch FSNOTIFY
+          PKG_OBSERVER="KernelSU/kernel/manager/pkg_observer.c"
+          if [ -f "$PKG_OBSERVER" ]; then
+            sed -i 's/handle_inode_event/handle_event/g' "$PKG_OBSERVER"
+          fi
 
-          # 2. On crée le lien symbolique dans le dossier drivers
+          # 2. Lien symbolique et configuration
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
           cd ..
-
-          echo "🪛 FORCE-LINK DU DRIVER DANS LE MAKEFILE RACINE DES DRIVERS 🪛"
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
-
-          echo "🛠️ INJECTION PROPRE DANS LE KCONFIG DES DRIVERS 🛠️"
           printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
 
-          echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
+          # Nettoyage et Defconfigs
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
-
           find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
             sed -i '/CONFIG_KSU/d' "$config_file"
-            echo "" >> "$config_file"
-            echo "CONFIG_KSU=y" >> "$config_file"
-            echo "CONFIG_KPROBES=y" >> "$config_file"
-            echo "CONFIG_HAVE_KPROBES=y" >> "$config_file"
-            echo "CONFIG_KPROBE_EVENTS=y" >> "$config_file"
+            echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> "$config_file"
           done
 
-          # Génération de la configuration finale
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
-          
-          sed -i '/CONFIG_KSU/d' ${{ env.BUILD_DIR }}/.config
-          echo "" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_HAVE_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KPROBE_EVENTS=y" >> ${{ env.BUILD_DIR }}/.config
-
+          echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> ${{ env.BUILD_DIR }}/.config
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Compilation finale du noyau (Objectif : KernelSU Officiel Actif) ..."
+          echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
       - name: Repack Clean Boot Image
