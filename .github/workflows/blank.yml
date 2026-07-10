@@ -106,21 +106,21 @@ jobs:
           echo "🟢 INTEGRATION DE KERNELSU-NEXT (OK DEPUIS LOGS) 🟢"
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s
 
-          echo "Fox TÉLÉCHARGEMENT DIRECT DES PATCHS SUSFS VALIDÉS (BUILD 132) Fox"
+          echo "🦊 TÉLÉCHARGEMENT EN LIGNE DES PATCHS SUSFS 4.19 (BUILD 133) 🦊"
           mkdir -p susfs_patches
           
-          # Téléchargement ciblé depuis la branche master officielle de simonpunk
-          curl -fLo susfs_patches/50_add_susfs_for_arch_arm64.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/50_add_susfs_for_arch_arm64.patch"
-          curl -fLo susfs_patches/fs_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/fs_susfs.patch"
-          curl -fLo susfs_patches/ksu_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/ksu_susfs_4.19.y.patch"
+          # Téléchargement depuis la branche officielle 'kernel-4.19' avec les noms exacts du dépôt de simonpunk
+          curl -fLo susfs_patches/50_add_susfs_in_kernel-4.19.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.19/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
+          curl -fLo susfs_patches/fs_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.19/kernel_patches/fs_susfs.patch"
+          curl -fLo susfs_patches/ksu_susfs.patch "https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.19/kernel_patches/ksu_susfs.patch"
           
-          # Récupération des fichiers C et H qui complètent le diff des dossiers fs/ et include/
+          # Extraction des fichiers sources requis pour l'infrastructure VFS
           mkdir -p fs include/linux
-          curl -fLo fs/susfs.c "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/fs/susfs.c"
-          curl -fLo include/linux/susfs.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/master/kernel_patches/include/linux/susfs.h"
+          curl -fLo fs/susfs.c "https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.19/kernel_patches/fs/susfs.c"
+          curl -fLo include/linux/susfs.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.19/kernel_patches/include/linux/susfs.h"
 
           echo "🚀 APPLICATION CHIRURGICALE DES PATCHS SUSFS 🚀"
-          patch -p1 < susfs_patches/50_add_susfs_for_arch_arm64.patch
+          patch -p1 < susfs_patches/50_add_susfs_in_kernel-4.19.patch
           patch -p1 < susfs_patches/fs_susfs.patch
           patch -p1 < susfs_patches/ksu_susfs.patch
 
