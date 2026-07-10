@@ -103,13 +103,13 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INJECTION MANUELLE SÉCURISÉE DE KERNELSU-NEXT (BRANCHE NEXT) 🟢"
+          echo "🟢 INJECTION MANUELLE SÉCURISÉE DE KERNELSU-NEXT (BRANCHE MAIN) 🟢"
           # Nettoyage préventif
           rm -rf drivers/kernelsu
           rm -rf drivers/staging/kernelsu
           
-          # Téléchargement physique des sources
-          git clone https://github.com/rifsxd/KernelSU-Next.git -b next drivers/kernelsu
+          # Téléchargement physique des sources sur la branche principale
+          git clone https://github.com/rifsxd/KernelSU-Next.git -b main drivers/kernelsu
           
           # Forçage de la prise en compte par le compilateur
           echo "obj-y += kernelsu/" >> drivers/Makefile
