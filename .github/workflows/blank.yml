@@ -134,38 +134,30 @@ jobs:
             sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
           fi
 
-          echo "💾 SUPPRESSION DU CACHE ET FORCE-INJECTION DANS TOUS LES DEFCONFIGS 💾"
+          echo "🛑 FORCE-BYPASS : INJECTION DIRECTE DANS LES MAKEFILES INTERNES 🛑"
+          # On force la compilation de KernelSU en l'écrivant en dur comme un objet requis (obj-y)
+          # Cela ignore complètement si CONFIG_KSU est à 'y' ou 'n' dans le .config
+          if [ -f "drivers/Makefile" ]; then
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+          fi
+
+          # On force également l'activation des symboles au niveau du préprocesseur global C
+          export KCFLAGS="$KCFLAGS -DCONFIG_KSU=1 -DCONFIG_KSU_NEXT=1 -DCONFIG_KSU_SUSFS=1 -DCONFIG_KSU_SUSFS_SUS_PATH=1 -DCONFIG_KSU_SUSFS_SUS_MOUNT=1 -DCONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=1"
+
+          echo "💾 NETTOYAGE ET COMPILATION DIRECTE 💾"
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
 
-          # On applique les configurations de force dans ABSOLUMENT TOUS les fichiers defconfig de l'architecture arm64
-          # De cette manière, peu importe quel fichier le script global appelle, KSU sera actif.
-          find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
-            echo "" >> "$config_file"
-            echo "CONFIG_KSU=y" >> "$config_file"
-            echo "CONFIG_KSU_NEXT=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$config_file"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$config_file"
-          done
-
-          # On génère la configuration finale (en utilisant kiev_perfect_defconfig comme base principale)
+          # Génération de la config de base
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
-          
-          # On injecte également de force directement dans le fichier .config final généré dans le dossier out/
-          echo "" >> ${{ env.BUILD_DIR }}/.config
+
+          # On pousse les flags directement dans le .config généré au cas où
           echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_NEXT=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_SUSFS=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
-
-          # On valide la configuration pour que le système aligne les dépendances internes
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Compilation finale du noyau (Sécurisé à 100%) ..."
+          echo "🚀 Compilation finale du noyau (Force-Compile activée) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
