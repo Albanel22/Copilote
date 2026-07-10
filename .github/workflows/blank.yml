@@ -125,6 +125,12 @@ jobs:
             sed -i 's/p->ops.remap_file_range.*/\/\/ remap_file_range removed/g' "$FILE_WRAPPER"
           fi
 
+          echo "🩹 PATCH DE COMPATIBILITÉ SECCOMP (SECCOMP_ARCH_NATIVE_NR) 🩹"
+          SECCOMP_CACHE="KernelSU/kernel/infra/seccomp_cache.c"
+          if [ -f "$SECCOMP_CACHE" ]; then
+            sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 1024\n#endif' "$SECCOMP_CACHE"
+          fi
+
           # 2. On crée le lien symbolique dans le dossier drivers
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
