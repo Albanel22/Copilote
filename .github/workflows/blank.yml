@@ -106,11 +106,24 @@ jobs:
           echo "🥷 INJECTION MANUELLE OFFICIELLE DE KERNELSU 🥷"
           rm -rf KernelSU drivers/kernelsu drivers/staging/kernelsu
           
-          # 1. On clone le code à la racine exacte de l'arbre (garde le dossier caché .git)
+          # 1. On clone le code à la racine exacte de l'arbre
           git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
           
           echo "🩹 PATCH DE COMPATIBILITÉ KERNEL 4.19 (Suppression de MODULE_IMPORT_NS) 🩹"
           find KernelSU/kernel -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
+
+          echo "🩹 PATCH DE COMPATIBILITÉ VFS (iopoll & remap_file_range) 🩹"
+          FILE_WRAPPER="KernelSU/kernel/infra/file_wrapper.c"
+          if [ -f "$FILE_WRAPPER" ]; then
+            # Neutralisation des appels à iopoll
+            sed -i 's/return orig->f_op->iopoll.*/return -EINVAL;/g' "$FILE_WRAPPER"
+            sed -i 's/p->ops.iopoll.*/\/\/ iopoll removed/g' "$FILE_WRAPPER"
+            
+            # Neutralisation des appels à remap_file_range
+            sed -i 's/REMAP_FILE_DEDUP/0/g' "$FILE_WRAPPER"
+            sed -i 's/return orig->f_op->remap_file_range.*/return -EINVAL;/g' "$FILE_WRAPPER"
+            sed -i 's/p->ops.remap_file_range.*/\/\/ remap_file_range removed/g' "$FILE_WRAPPER"
+          fi
 
           # 2. On crée le lien symbolique dans le dossier drivers
           cd drivers
