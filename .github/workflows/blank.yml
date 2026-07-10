@@ -128,33 +128,48 @@ jobs:
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
           fi
           if [ -f "fs/open.c" ]; then
+            # CORRECTION : On force l'inclusion de susfs.h tout en haut pour que getname_safe soit reconnu
+            sed -i '1i #include <linux/susfs.h>' fs/open.c
             sed -i '/static long do_sys_openat2/i #ifdef CONFIG_KSU_SUSFS\nextern int susfs_is_sus_path(const char *path);\n#endif' fs/open.c
           fi
           if [ -f "fs/proc/task_mmu.c" ]; then
-            sed -i '1i #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
+            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
           echo "🛑 FORCE-BYPASS : INJECTION DIRECTE DANS LES MAKEFILES INTERNES 🛑"
-          # On force la compilation de KernelSU en l'écrivant en dur comme un objet requis (obj-y)
-          # Cela ignore complètement si CONFIG_KSU est à 'y' ou 'n' dans le .config
+          # On force la compilation brute de KernelSU
           if [ -f "drivers/Makefile" ]; then
             echo "obj-y += kernelsu/" >> drivers/Makefile
           fi
 
-          # On force également l'activation des symboles au niveau du préprocesseur global C
+          # On pousse de force les flags de préprocesseur globaux
           export KCFLAGS="$KCFLAGS -DCONFIG_KSU=1 -DCONFIG_KSU_NEXT=1 -DCONFIG_KSU_SUSFS=1 -DCONFIG_KSU_SUSFS_SUS_PATH=1 -DCONFIG_KSU_SUSFS_SUS_MOUNT=1 -DCONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=1"
 
-          echo "💾 NETTOYAGE ET COMPILATION DIRECTE 💾"
+          echo "💾 NETTOYAGE ET INJECTION DE FORCE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
 
-          # Génération de la config de base
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
+          find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
+            echo "" >> "$config_file"
+            echo "CONFIG_KSU=y" >> "$config_file"
+            echo "CONFIG_KSU_NEXT=y" >> "$config_file"
+            echo "CONFIG_KSU_SUSFS=y" >> "$config_file"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$config_file"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$config_file"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$config_file"
+          done
 
-          # On pousse les flags directement dans le .config généré au cas où
+          # Génération de la configuration finale
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
+          
+          echo "" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_NEXT=y" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU_SUSFS=y" >> ${{ env.BUILD_DIR }}/.config
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ${{ env.BUILD_DIR }}/.config
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ${{ env.BUILD_DIR }}/.config
+
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
           echo "🚀 Compilation finale du noyau (Force-Compile activée) ..."
