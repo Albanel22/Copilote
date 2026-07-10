@@ -103,19 +103,17 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT 🟢"
+          echo "🥷 INJECTION MANUELLE BRUTALE DE KERNELSU (OFFICIEL) 🥷"
           rm -rf drivers/kernelsu drivers/staging/kernelsu
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          
+          # On clone directement les sources officielles de KernelSU sans passer par l'installateur capricieux
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu --depth=1
 
-          echo "🪛 FORCE-LINK DU DRIVER KERNELSU DANS LE MAKEFILE DES DRIVERS 🪛"
-          if [ -d "drivers/kernelsu" ]; then
-            sed -i '1i obj-y += kernelsu/' drivers/Makefile
-          elif [ -d "drivers/staging/kernelsu" ]; then
-            sed -i '1i obj-y += staging/kernelsu/' drivers/Makefile
-          fi
+          echo "🪛 FORCE-LINK DU DRIVER DANS LE MAKEFILE RACINE DES DRIVERS 🪛"
+          sed -i '1i obj-y += kernelsu/' drivers/Makefile
 
-          echo "🛠️ FORCAGE DES OPTIONS KSU DIRECTEMENT DANS LE KCONFIG GLOBAL 🛠️"
-          sed -i '/endmenu/i \nconfig KSU\n\tbool\n\tdefault y\nconfig KSU_NEXT\n\tbool\n\tdefault y' init/Kconfig
+          echo "🛠️ FORCAGE DU KCONFIG GLOBAL POUR EVITER QUE LE DEFCONFIG SAUTE 🛠️"
+          sed -i '/endmenu/i \nconfig KSU\n\tbool\n\tdefault y' init/Kconfig
 
           echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
@@ -125,7 +123,6 @@ jobs:
             sed -i '/CONFIG_KSU/d' "$config_file"
             echo "" >> "$config_file"
             echo "CONFIG_KSU=y" >> "$config_file"
-            echo "CONFIG_KSU_NEXT=y" >> "$config_file"
           done
 
           # Génération de la configuration finale
@@ -134,11 +131,10 @@ jobs:
           sed -i '/CONFIG_KSU/d' ${{ env.BUILD_DIR }}/.config
           echo "" >> ${{ env.BUILD_DIR }}/.config
           echo "CONFIG_KSU=y" >> ${{ env.BUILD_DIR }}/.config
-          echo "CONFIG_KSU_NEXT=y" >> ${{ env.BUILD_DIR }}/.config
 
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
-          echo "🚀 Compilation finale du noyau (Objectif : KSU-Next Actif) ..."
+          echo "🚀 Compilation finale du noyau (Objectif : KernelSU Officiel Actif) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
       - name: Repack Clean Boot Image
