@@ -112,8 +112,9 @@ jobs:
           echo "🪛 FORCE-LINK DU DRIVER DANS LE MAKEFILE RACINE DES DRIVERS 🪛"
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
 
-          echo "🛠️ FORCAGE DU KCONFIG GLOBAL POUR EVITER QUE LE DEFCONFIG SAUTE 🛠️"
-          sed -i '/endmenu/i \nconfig KSU\n\tbool\n\tdefault y' init/Kconfig
+          echo "🛠️ INJECTION PROPRE DANS LE KCONFIG DES DRIVERS 🛠️"
+          # Utilisation de printf pour une injection propre et sans erreur de syntaxe à la fin du Kconfig des drivers
+          printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
 
           echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
