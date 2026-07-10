@@ -106,10 +106,13 @@ jobs:
           echo "🥷 INJECTION MANUELLE OFFICIELLE DE KERNELSU 🥷"
           rm -rf KernelSU drivers/kernelsu drivers/staging/kernelsu
           
-          # 1. On clone le code à la racine exacte de l'arbre (garde le dossier caché .git et les chemins valides)
+          # 1. On clone le code à la racine exacte de l'arbre (garde le dossier caché .git)
           git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
           
-          # 2. On crée le lien symbolique dans le dossier drivers (comme le script officiel)
+          echo "🩹 PATCH DE COMPATIBILITÉ KERNEL 4.19 (Suppression de MODULE_IMPORT_NS) 🩹"
+          find KernelSU/kernel -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
+
+          # 2. On crée le lien symbolique dans le dossier drivers
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
           cd ..
