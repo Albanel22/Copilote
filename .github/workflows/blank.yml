@@ -39,13 +39,12 @@ jobs:
       - name: Clean Stock Kernel Test (No KSU)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🧹 Mode diagnostic actif : Aucun patch appliqué."
-          echo "📝 Configuration du defconfig d'origine..."
+          echo "🧹 Mode diagnostic actif : Préparation de l'arbre source."
           TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           if [ ! -f "$TARGET_CONFIG" ]; then
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
-          echo "✅ Prêt pour un build 100% stock LineageOS."
+          echo "✅ Prêt pour l'application des correctifs."
           
       - name: Setup ccache
         uses: actions/cache@v4
@@ -75,7 +74,7 @@ jobs:
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig || true
 
-          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (SOCLE BUILD 129 HISTORIQUE) 🔓"
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE 🔓"
           if [ -f "kernel/module.c" ]; then
             sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
@@ -104,24 +103,19 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (CORRECTE) 🟢"
-          rm -rf drivers/kernelsu drivers/staging/kernelsu
-          # Utilisation de l'installateur officiel du dépôt KernelSU-Next (par rifsxd)
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-
           echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT 🟢"
           rm -rf drivers/kernelsu drivers/staging/kernelsu
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
           echo "🪛 FORCE-LINK DU DRIVER KERNELSU DANS LE MAKEFILE DES DRIVERS 🪛"
-          # On s'assure que le Makefile des drivers contient l'instruction de build pour kernelsu
           if [ -d "drivers/kernelsu" ]; then
             sed -i '1i obj-y += kernelsu/' drivers/Makefile
           elif [ -d "drivers/staging/kernelsu" ]; then
             sed -i '1i obj-y += staging/kernelsu/' drivers/Makefile
           fi
+
           echo "🛠️ FORCAGE DES OPTIONS KSU DIRECTEMENT DANS LE KCONFIG GLOBAL 🛠️"
-          sed -i '/endmenu/i \\nconfig KSU\n\tbool\n\tdefault y\nconfig KSU_NEXT\n\tbool\n\tdefault y' init/Kconfig
+          sed -i '/endmenu/i \nconfig KSU\n\tbool\n\tdefault y\nconfig KSU_NEXT\n\tbool\n\tdefault y' init/Kconfig
 
           echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
