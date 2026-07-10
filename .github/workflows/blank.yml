@@ -109,6 +109,20 @@ jobs:
           # Utilisation de l'installateur officiel du dépôt KernelSU-Next (par rifsxd)
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
+          echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT 🟢"
+          rm -rf drivers/kernelsu drivers/staging/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+
+          echo "🪛 FORCE-LINK DU DRIVER KERNELSU DANS LE MAKEFILE DES DRIVERS 🪛"
+          # On s'assure que le Makefile des drivers contient l'instruction de build pour kernelsu
+          if [ -d "drivers/kernelsu" ]; then
+            sed -i '1i obj-y += kernelsu/' drivers/Makefile
+          elif [ -d "drivers/staging/kernelsu" ]; then
+            sed -i '1i obj-y += staging/kernelsu/' drivers/Makefile
+          fi
+          echo "🛠️ FORCAGE DES OPTIONS KSU DIRECTEMENT DANS LE KCONFIG GLOBAL 🛠️"
+          sed -i '/endmenu/i \\nconfig KSU\n\tbool\n\tdefault y\nconfig KSU_NEXT\n\tbool\n\tdefault y' init/Kconfig
+
           echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
