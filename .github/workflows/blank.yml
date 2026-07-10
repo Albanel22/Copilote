@@ -106,7 +106,7 @@ jobs:
 
           echo "🟢 INTEGRATION OFFICIELLE DE KERNELSU-NEXT (CORRECTE) 🟢"
           rm -rf drivers/kernelsu drivers/staging/kernelsu
-          # Utilisation de l'installateur officiel de la communauté Next qui gère correctement le dépôt rifsxd
+          # Utilisation de l'installateur officiel du dépôt KernelSU-Next (par rifsxd)
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
           echo "💾 NETTOYAGE ET INJECTION FORCEE DANS LES DEFCONFIGS 💾"
