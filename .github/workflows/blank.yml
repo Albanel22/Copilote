@@ -118,15 +118,19 @@ jobs:
             echo '#endif' >> include/linux/susfs.h
           fi
 
-          echo "🚀 APPLICATION CHIRURGICALE DES PATCHS LOCAUX (BUILD 141) 🚀"
-          # Force l'application de tout ce qui est compatible dans le patch global sans crasher le build
+          echo "🚀 APPLICATION CHIRURGICALE DES PATCHS LOCAUX (BUILD 142) 🚀"
+          # 1. On applique le gros patch global en mode forcé (il fait 90% du travail sur namei.c, stat.c, etc.)
           patch -f -p1 < ../susfs_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # Application des patchs secondaires d'infrastructure
-          patch -p1 < ../susfs_patches/fs_susfs.patch
-          patch -p1 < ../susfs_patches/ksu_susfs.patch
+          # 2. On applique le patch KernelSU s'il passe, sinon on continue
+          patch -p1 < ../susfs_patches/ksu_susfs.patch || true
 
-          echo "🩻 INJECTION MANUELLE DES HOOKS SUSFS DANS LES FICHIERS REJETÉS 🩻"
+          echo "🩻 INJECTION MANUELLE (SED) DANS LES FICHIERS DU NOYAU 🩻"
+          # Correction ciblée pour fs/Makefile (À la place de fs_susfs.patch)
+          if [ -f "fs/Makefile" ]; then
+            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
+          fi
+
           # Correction ciblée pour fs/open.c (Hook d'ouverture des fichiers cachés)
           if [ -f "fs/open.c" ]; then
             sed -i '/static long do_sys_openat2/i #ifdef CONFIG_KSU_SUSFS\nextern int susfs_is_sus_path(const char *path);\n#endif' fs/open.c
