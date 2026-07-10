@@ -1,17 +1,15 @@
-diff --git a/KernelSU/kernel/ksu.c b/KernelSU/kernel/ksu.c
-index abcdef1..2345678 100644
---- a/drivers/kernelsu/ksu.c
-+++ b/drivers/kernelsu/ksu.c
-@@ -10,3 +10,7 @@
- #include "ksu.h"
+diff --git a/KernelSU-Next/kernel/ksu.c b/KernelSU-Next/kernel/ksu.c
+--- a/KernelSU-Next/kernel/ksu.c
++++ b/KernelSU-Next/kernel/ksu.c
+@@ -10,3 +10,6 @@
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs.h>
 +#endif
  
- static int __init ksu_init(void)
+ int __init ksu_init(void)
  {
-+    #ifdef CONFIG_KSU_SUSFS
-+    susfs_init();
-+    #endif
-     return 0;
++	#ifdef CONFIG_KSU_SUSFS
++	susfs_init();
++	#endif
+ 	return 0;
  }
