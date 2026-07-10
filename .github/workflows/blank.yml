@@ -103,15 +103,16 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🥷 INJECTION MANUELLE BRUTALE DE KERNELSU (OFFICIEL) 🥷"
-          rm -rf drivers/kernelsu tmp_ksu
+          echo "🥷 INJECTION MANUELLE OFFICIELLE DE KERNELSU 🥷"
+          rm -rf KernelSU drivers/kernelsu drivers/staging/kernelsu
           
-          # 1. On clone dans un dossier temporaire
-          git clone https://github.com/tiann/KernelSU.git tmp_ksu --depth=1
+          # 1. On clone le code à la racine exacte de l'arbre (garde le dossier caché .git et les chemins valides)
+          git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
           
-          # 2. On isole le bon dossier (celui avec le Makefile du noyau) et on le place dans drivers/
-          mv tmp_ksu/kernel drivers/kernelsu
-          rm -rf tmp_ksu
+          # 2. On crée le lien symbolique dans le dossier drivers (comme le script officiel)
+          cd drivers
+          ln -sf ../KernelSU/kernel kernelsu
+          cd ..
 
           echo "🪛 FORCE-LINK DU DRIVER DANS LE MAKEFILE RACINE DES DRIVERS 🪛"
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
@@ -126,7 +127,6 @@ jobs:
           find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
             sed -i '/CONFIG_KSU/d' "$config_file"
             echo "" >> "$config_file"
-            # On force KSU et toutes ses dépendances vitales
             echo "CONFIG_KSU=y" >> "$config_file"
             echo "CONFIG_KPROBES=y" >> "$config_file"
             echo "CONFIG_HAVE_KPROBES=y" >> "$config_file"
