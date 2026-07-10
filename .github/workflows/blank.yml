@@ -103,8 +103,17 @@ jobs:
             rm -f display_patch.tmp
           fi
 
-          echo "🟢 INTEGRATION DE KERNELSU-NEXT (OK DEPUIS LOGS) 🟢"
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s
+          echo "🟢 INJECTION MANUELLE SÉCURISÉE DE KERNELSU-NEXT (BRANCHE NEXT) 🟢"
+          # Nettoyage préventif
+          rm -rf drivers/kernelsu
+          rm -rf drivers/staging/kernelsu
+          
+          # Téléchargement physique des sources
+          git clone https://github.com/rifsxd/KernelSU-Next.git -b next drivers/kernelsu
+          
+          # Forçage de la prise en compte par le compilateur
+          echo "obj-y += kernelsu/" >> drivers/Makefile
+          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
           echo "🦊 PRÉPARATION DES SITES DE SÉCURITÉ DE L'INFRASTRUCTURE SUSFS 🦊"
           mkdir -p fs include/linux
@@ -119,14 +128,14 @@ jobs:
           fi
 
           echo "🚀 APPLICATION CHIRURGICALE DES PATCHS LOCAUX (BUILD 142) 🚀"
-          # 1. On applique le gros patch global en mode forcé (il fait 90% du travail sur namei.c, stat.c, etc.)
+          # 1. On applique le gros patch global en mode forcé
           patch -f -p1 < ../susfs_patches/50_add_susfs_in_kernel-4.19.patch || true
           
           # 2. On applique le patch KernelSU s'il passe, sinon on continue
           patch -p1 < ../susfs_patches/ksu_susfs.patch || true
 
           echo "🩻 INJECTION MANUELLE (SED) DANS LES FICHIERS DU NOYAU 🩻"
-          # Correction ciblée pour fs/Makefile (À la place de fs_susfs.patch)
+          # Correction ciblée pour fs/Makefile
           if [ -f "fs/Makefile" ]; then
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
           fi
