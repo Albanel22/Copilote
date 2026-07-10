@@ -131,6 +131,12 @@ jobs:
             sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 1024\n#endif' "$SECCOMP_CACHE"
           fi
 
+          echo "🩹 PATCH DE COMPATIBILITÉ MOUNT_NS (uapi/linux/mount.h) 🩹"
+          SU_MOUNT_NS="KernelSU/kernel/infra/su_mount_ns.c"
+          if [ -f "$SU_MOUNT_NS" ]; then
+            sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>\n#include <linux/fs.h>|g' "$SU_MOUNT_NS"
+          fi
+
           # 2. On crée le lien symbolique dans le dossier drivers
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
