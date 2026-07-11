@@ -40,6 +40,8 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
+          # Ajout de --threads=1 pour le linker pour éviter le crash mémoire
+          export LDFLAGS="--threads=1"
           export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types -Wno-int-conversion"
           
           # Injection KernelSU
@@ -61,10 +63,9 @@ jobs:
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          # Compilation avec V=1 (Verbeux) pour voir la VRAIE erreur
-          # Et on désactive temporairement le nettoyage des fichiers pour aider le linker
-          echo "🚀 Compilation avec V=1 pour débogage..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 V=1 Image.gz-dtb
+          echo "🚀 Compilation avec LDFLAGS optimisé pour RAM faible..."
+          # On compile en -j2 pour garder de la RAM pour l'étape de liaison (linker)
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" KCFLAGS="$KCFLAGS" -j2 Image.gz-dtb
 
       - name: Repack Boot Image with Magiskboot
         run: |
