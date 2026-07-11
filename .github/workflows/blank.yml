@@ -61,13 +61,15 @@ jobs:
         run: |
           mkdir -p repack && cp boot-stock.img repack/boot.img
           cd repack
-          # Utilisation d'un lien plus stable ou de la version 27.0 officielle
-          curl -fLo magiskboot https://github.com/topjohnwu/Magisk/releases/download/manager-v27.0/magiskboot
+          # Utilisation de l'URL brute officielle et stable du binaire magiskboot
+          curl -fLo magiskboot https://github.com/topjohnwu/Magisk/raw/master/binary/x86_64/magiskboot
           chmod +x magiskboot
           
           ./magiskboot unpack boot.img
-          # On copie uniquement le noyau (Image.gz) car c'est tout ce qu'on a compilé
+          # Copie de notre noyau compilé
           cp ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz kernel
+          
+          # Repackage de l'image
           ./magiskboot repack boot.img
           mv new-boot.img ../boot.img
 
