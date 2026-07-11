@@ -79,6 +79,9 @@ jobs:
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
+
+          echo "🔧 Activation de KernelSU dans la configuration..."
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
           
           echo "📥 Injection de la configuration d'origine..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
