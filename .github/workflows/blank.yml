@@ -1,37 +1,35 @@
-- name: Patch boot.img with KernelSU
+name: Patch Official Boot with KernelSU
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Patch boot.img
         run: |
           set -euo pipefail
-          
-          # 1. Préparation
-          mkdir -p patch_env && cp boot.img patch_env/boot.img
-          cd patch_env
-          
-          # 2. Extraction fiable de magiskboot depuis l'APK
+          # Téléchargement et préparation
+          curl -fLo boot.img "https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img"
           curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
           unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # 3. Extraction du boot.img
+          # Patch
           ./magiskboot unpack boot.img
-          
-          # 4. Patch avec KernelSU
-          # On utilise le script setup.sh qui patchera le binaire 'kernel' déjà présent dans l'unpack
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 3. Extraction de l'image (pour obtenir les fichiers de config)
-          ./magiskboot unpack boot.img 
-          
-          # 4. Patch KernelSU
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          
-          # 5. Repackage propre avec vérification de l'alignement
-          # On utilise '--dtb' si présent pour conserver l'alignement spécifique Motorola
-          if [ -f dtb ]; then
-            ./magiskboot repack boot.img --dtb dtb
-          else
-            ./magiskboot repack boot.img
-          fi
-          
-          # Vérification de sécurité du fichier généré
-          mv new-boot.img ../patched-boot.img
+          # Repack
+          ./magiskboot repack boot.img
+          mv new-boot.img patched-boot.img
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-ksu-final
+          path: patched-boot.img
