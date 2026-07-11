@@ -40,7 +40,6 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
-          # Ajout de --threads=1 pour le linker pour éviter le crash mémoire
           export LDFLAGS="--threads=1"
           export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types -Wno-int-conversion"
           
@@ -57,14 +56,16 @@ jobs:
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
           printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
           
+          # Config KPROBES et allègement réseau pour économie RAM
           sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          
+          sed -i 's/CONFIG_NET_L2TP=y/CONFIG_NET_L2TP=n/; s/CONFIG_IP_SCTP=y/CONFIG_IP_SCTP=n/; s/CONFIG_IP_DCCP=y/CONFIG_IP_DCCP=n/; s/CONFIG_RDS=y/CONFIG_RDS=n/' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          echo "🚀 Compilation avec LDFLAGS optimisé pour RAM faible..."
-          # On compile en -j2 pour garder de la RAM pour l'étape de liaison (linker)
+          echo "🚀 Compilation ultra-optimisée RAM..."
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" KCFLAGS="$KCFLAGS" -j2 Image.gz-dtb
 
       - name: Repack Boot Image with Magiskboot
