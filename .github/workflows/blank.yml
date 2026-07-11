@@ -39,25 +39,27 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
-          # Optimisation linker pour éviter les crashs OOM (Out of Memory)
           export LDFLAGS="--threads=1"
           
-          # 1. Installation propre de KernelSU v0.9.5 (Built-in)
+          # 1. Installation KernelSU
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 2. Activation des dépendances obligatoires pour KernelSU (KPROBES)
+          # 2. Config KPROBES
           sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # 3. Préparation du noyau
+          # 3. Préparation
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          # 4. Compilation avec limitations de threads pour stabilité RAM
-          # AUCUNE modification réseau appliquée ici pour préserver 100% des fonctions
-          echo "🚀 Compilation KernelSU (kiev) - Full Feature Support"
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz-dtb
+          # 4. Compilation du noyau SEUL (sans les DTBs pour l'instant)
+          echo "🚀 Compilation noyau seul..."
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz
+          
+          # 5. Compilation des Device Trees SEULS (le plus gourmand en RAM)
+          echo "🚀 Compilation Device Trees..."
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE dtbs -j1
 
       - name: Repack Boot Image with Magiskboot
         run: |
