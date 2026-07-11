@@ -70,33 +70,30 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types"
           
-          # 1. Configuration et Techpack
+          echo "📥 Préparation de l'environnement..."
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig || true
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          # 2. Patchs KernelSU
+          echo "🥷 INJECTION DE KERNELSU (Version 4.19 compatible) 🥷"
           rm -rf KernelSU drivers/kernelsu
-          git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
+          git clone https://github.com/midori01/KernelSU.git KernelSU --depth=1 -b ksu-4.19
           
-          # Application de TOUS les patchs 4.19
-          find KernelSU/kernel -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
-          sed -i 's/handle_inode_event/handle_event/g' KernelSU/kernel/manager/pkg_observer.c
-          sed -i 's/return orig->f_op->iopoll.*/return -EINVAL;/g' KernelSU/kernel/infra/file_wrapper.c
-          sed -i 's/p->ops.iopoll.*/\/\/ iopoll removed/g' KernelSU/kernel/infra/file_wrapper.c
-          sed -i 's/REMAP_FILE_DEDUP/0/g' KernelSU/kernel/infra/file_wrapper.c
-          sed -i 's/return orig->f_op->remap_file_range.*/return -EINVAL;/g' KernelSU/kernel/infra/file_wrapper.c
-          sed -i 's/p->ops.remap_file_range.*/\/\/ remap_file_range removed/g' KernelSU/kernel/infra/file_wrapper.c
-          sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 1024\n#endif' KernelSU/kernel/infra/seccomp_cache.c
-          sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>\n#include <linux/fs.h>|g' KernelSU/kernel/infra/su_mount_ns.c
-          
-          # 3. Intégration
+          # Lien symbolique et configuration dans le système de drivers
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
           cd ..
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
           printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
           
+          # Force l'activation des options nécessaires dans les defconfigs
+          echo "💾 Configuration des options KPROBES..."
+          find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
+            sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' "$config_file"
+            echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> "$config_file"
+          done
+          
           # 4. Compilation
+          echo "🛠️ Génération de la configuration..."
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
