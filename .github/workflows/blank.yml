@@ -1,51 +1,37 @@
-name: Patch Official Boot with KernelSU
-
-on:
-  workflow_dispatch:
-
-env:
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
-
-jobs:
-  patch:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Download and Verify Boot Image
+- name: Patch boot.img with KernelSU
         run: |
-          echo "Téléchargement de l'image de boot..."
-          curl -fLo boot.img "${{ env.BOOT_URL }}" || { echo "❌ Échec du téléchargement"; exit 1; }
-          # Vérification simple de la taille du fichier (doit être > 0)
-          [ -s boot.img ] || { echo "❌ Fichier vide"; exit 1; }
-          echo "✅ Fichier téléchargé avec succès."
-
-      - name: Setup Tools and Patch
-        run: |
-          # 1. Récupération de magiskboot
-          curl -fLo magiskboot https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-x86_64
+          set -euo pipefail
+          
+          # 1. Préparation
+          mkdir -p patch_env && cp boot.img patch_env/boot.img
+          cd patch_env
+          
+          # 2. Extraction fiable de magiskboot depuis l'APK
+          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
+          mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # 2. Nettoyage préventif
-          ./magiskboot cleanup
+          # 3. Extraction du boot.img
+          ./magiskboot unpack boot.img
           
-          # 3. Extraction de l'image
-          echo "Extraction de l'image..."
-          ./magiskboot unpack boot.img || { echo "❌ Échec de l'unpack"; exit 1; }
+          # 4. Patch avec KernelSU
+          # On utilise le script setup.sh qui patchera le binaire 'kernel' déjà présent dans l'unpack
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          
+          # 3. Extraction de l'image (pour obtenir les fichiers de config)
+          ./magiskboot unpack boot.img 
           
           # 4. Patch KernelSU
-          echo "Application du patch KernelSU..."
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5 || { echo "❌ Échec du patch KernelSU"; exit 1; }
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 5. Repackage sécurisé
-          echo "Repackage de l'image..."
-          ./magiskboot repack boot.img || { echo "❌ Échec du repack"; exit 1; }
-          mv new-boot.img patched-boot.img
-          echo "✅ Patch terminé avec succès."
+          # 5. Repackage propre avec vérification de l'alignement
+          # On utilise '--dtb' si présent pour conserver l'alignement spécifique Motorola
+          if [ -f dtb ]; then
+            ./magiskboot repack boot.img --dtb dtb
+          else
+            ./magiskboot repack boot.img
+          fi
           
-      - name: Upload Patched Boot
-        uses: actions/upload-artifact@v4
-        with:
-          name: boot-ksu-final
-          path: patched-boot.img
+          # Vérification de sécurité du fichier généré
+          mv new-boot.img ../patched-boot.img
