@@ -53,14 +53,10 @@ jobs:
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          # 4. Compilation du noyau SEUL (sans les DTBs pour l'instant)
-          echo "🚀 Compilation noyau seul..."
+          # 4. Compilation noyau SEUL (on évite dtbs pour éviter le crash 139)
+          echo "🚀 Compilation noyau seul (sans DTB)..."
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz
           
-          # 5. Compilation des Device Trees SEULS (le plus gourmand en RAM)
-          echo "🚀 Compilation Device Trees..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE dtbs -j1
-
       - name: Repack Boot Image with Magiskboot
         run: |
           mkdir -p repack && cp boot-stock.img repack/boot.img
