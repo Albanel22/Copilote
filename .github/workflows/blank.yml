@@ -39,7 +39,6 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export LDFLAGS="--threads=1"
           
           # 1. Installation KernelSU
           rm -rf KernelSU
@@ -53,10 +52,10 @@ jobs:
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          # 4. Compilation noyau SEUL (on évite dtbs pour éviter le crash 139)
-          echo "🚀 Compilation noyau seul (sans DTB)..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz
-          
+          # 4. Compilation noyau (sans DTB pour éviter le crash)
+          echo "🚀 Compilation noyau seul..."
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE -j2 Image
+
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -66,26 +65,28 @@ jobs:
           cp boot-stock.img repack/boot.img
           cd repack
           
-          # Téléchargement de l'APK et extraction du binaire
+          # Extraction de magiskboot
           curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
           unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
-          # Déballage
+          # Unpack
           ./magiskboot unpack boot.img
           
-          # Copie du nouveau noyau
-          # Note : J'utilise ta variable pour le chemin absolu
-          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          cp -v "$ABS_IMAGE_ARM64" kernel
+          # Localisation dynamique du noyau compilé
+          echo "🔍 Recherche du noyau..."
+          IMAGE_PATH=$(find "${{ github.workspace }}/${{ env.BUILD_DIR }}" -name "Image" | head -n 1)
+          
+          if [ -z "$IMAGE_PATH" ]; then
+            echo "❌ Erreur : Fichier Image non trouvé dans ${{ env.BUILD_DIR }}"
+            exit 1
+          fi
+          
+          echo "✅ Noyau trouvé à : $IMAGE_PATH"
+          cp -v "$IMAGE_PATH" kernel
           
           # Repackage
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../boot.img
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: boot-kernelsu
-          path: boot.img
+      
