@@ -74,25 +74,31 @@ jobs:
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig || true
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          echo "🥷 INJECTION DE KERNELSU (Version 4.19 compatible) 🥷"
+          echo "🥷 INJECTION DE KERNELSU (Tentative de clonage générique) 🥷"
           rm -rf KernelSU drivers/kernelsu
-          git clone https://github.com/midori01/KernelSU.git KernelSU --depth=1 -b ksu-4.19
+          # On clone sans forcer la branche pour éviter l'erreur 128
+          git clone https://github.com/midori01/KernelSU.git KernelSU --depth=1
           
-          # Lien symbolique et configuration dans le système de drivers
+          # Si le dépôt a des branches cachées, on cherche celle qui contient '4.19'
+          cd KernelSU
+          BRANCH=$(git branch -r | grep 4.19 | head -n 1 | cut -d'/' -f2 || echo "main")
+          git checkout "$BRANCH"
+          cd ..
+          
+          # Lien symbolique et configuration
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
           cd ..
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
           printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
           
-          # Force l'activation des options nécessaires dans les defconfigs
-          echo "💾 Configuration des options KPROBES..."
+          # Options KPROBES
           find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
             sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' "$config_file"
             echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> "$config_file"
           done
           
-          # 4. Compilation
+          # Compilation
           echo "🛠️ Génération de la configuration..."
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
