@@ -11,7 +11,6 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  # Utilise un lien stable ici, idéalement ton propre fichier boot.img
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
@@ -40,25 +39,26 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
+          # Optimisation linker pour éviter les crashs OOM (Out of Memory)
           export LDFLAGS="--threads=1"
           
-          # 1. Utilisation de la méthode d'intégration officielle "Built-in"
+          # 1. Installation propre de KernelSU v0.9.5 (Built-in)
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 2. Configurer KPROBES (obligatoire pour KernelSU)
+          # 2. Activation des dépendances obligatoires pour KernelSU (KPROBES)
           sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # 3. Allègement réseau sécurisé (Bluetooth préservé)
-          sed -i 's/CONFIG_NET_L2TP=y/CONFIG_NET_L2TP=n/; s/CONFIG_IP_SCTP=y/CONFIG_IP_SCTP=n/; s/CONFIG_IP_DCCP=y/CONFIG_IP_DCCP=n/; s/CONFIG_RDS=y/CONFIG_RDS=n/' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          
-          # 4. Compilation
+          # 3. Préparation du noyau
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          echo "🚀 Compilation avec intégration automatique KernelSU..."
+          # 4. Compilation avec limitations de threads pour stabilité RAM
+          # AUCUNE modification réseau appliquée ici pour préserver 100% des fonctions
+          echo "🚀 Compilation KernelSU (kiev) - Full Feature Support"
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz-dtb
+
       - name: Repack Boot Image with Magiskboot
         run: |
           mkdir -p repack && cp boot-stock.img repack/boot.img
@@ -67,10 +67,8 @@ jobs:
           chmod +x magiskboot
           
           ./magiskboot unpack boot.img
-          # Important : on utilise le fichier compressé avec DTB
           cp ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz-dtb kernel
           ./magiskboot repack boot.img
-          # On renomme directement en boot.img
           mv new-boot.img ../boot.img
 
       - name: Upload Artifact
