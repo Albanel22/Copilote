@@ -74,16 +74,13 @@ jobs:
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig || true
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          echo "🥷 INJECTION DE KERNELSU (Tentative de clonage générique) 🥷"
+          echo "🥷 INJECTION DE KERNELSU (Version 4.19 compatible) 🥷"
           rm -rf KernelSU drivers/kernelsu
-          # On clone sans forcer la branche pour éviter l'erreur 128
-          git clone https://github.com/midori01/KernelSU.git KernelSU --depth=1
+          git clone https://github.com/midori01/KernelSU.git KernelSU --depth=1 -b ksu-4.19
           
-          # Si le dépôt a des branches cachées, on cherche celle qui contient '4.19'
-          cd KernelSU
-          BRANCH=$(git branch -r | grep 4.19 | head -n 1 | cut -d'/' -f2 || echo "main")
-          git checkout "$BRANCH"
-          cd ..
+          # --- NOUVEAU : NEUTRALISATION DE MODULE_IMPORT_NS ---
+          find KernelSU -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
+          # ----------------------------------------------------
           
           # Lien symbolique et configuration
           cd drivers
@@ -92,21 +89,20 @@ jobs:
           sed -i '1i obj-y += kernelsu/' drivers/Makefile
           printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
           
-          # Options KPROBES
+          # Configuration KPROBES
           find arch/arm64/configs/ -type f -name "*defconfig" | while read -r config_file; do
             sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' "$config_file"
             echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> "$config_file"
           done
           
           # Compilation
-          echo "🛠️ Génération de la configuration..."
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
           echo "🚀 Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image || exit 1
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image.gz-dtb || exit 1
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
