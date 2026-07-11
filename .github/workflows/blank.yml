@@ -1,98 +1,51 @@
-name: Kernel CI — build & package
+name: Patch Official Boot with KernelSU
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 env:
-  KERNEL_PATH: kernel_src
-  BUILD_DIR: out
-  ARCH: arm64
-  DEFCONFIG: lito-perf_defconfig
-  CCACHE_SIZE: 5G
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
-  build:
+  patch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Download and Verify Boot Image
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
+          echo "Téléchargement de l'image de boot..."
+          curl -fLo boot.img "${{ env.BOOT_URL }}" || { echo "❌ Échec du téléchargement"; exit 1; }
+          # Vérification simple de la taille du fichier (doit être > 0)
+          [ -s boot.img ] || { echo "❌ Fichier vide"; exit 1; }
+          echo "✅ Fichier téléchargé avec succès."
 
-      - name: Download Stock Boot Image
+      - name: Setup Tools and Patch
         run: |
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort"; exit 1; }
-
-      - name: Clone Kernel Source
-        run: |
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
-      - name: Multi-stage Kernel Compilation
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euo pipefail
-          export ARCH=${{ env.ARCH }}
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          # 1. Installation KernelSU v0.9.5
-          rm -rf KernelSU
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          
-          # 2. Config KPROBES
-          sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          
-          # 3. Préparation
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          
-          # 4. Compilation noyau
-          echo "🚀 Compilation noyau..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) Image.gz
-
-      - name: Repack Clean Boot Image
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p repack
-          cp boot-stock.img repack/boot.img
-          cd repack
-          
-          # Extraction de magiskboot
-          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
-          mv libmagiskboot.so magiskboot
+          # 1. Récupération de magiskboot
+          curl -fLo magiskboot https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-x86_64
           chmod +x magiskboot
           
-          # Unpack
-          ./magiskboot unpack boot.img
+          # 2. Nettoyage préventif
+          ./magiskboot cleanup
           
-          # Localisation dynamique du noyau
-          echo "🔍 Recherche du noyau..."
-          IMAGE_PATH=$(find "${{ github.workspace }}/${{ env.BUILD_DIR }}" -name "Image.gz" | head -n 1)
+          # 3. Extraction de l'image
+          echo "Extraction de l'image..."
+          ./magiskboot unpack boot.img || { echo "❌ Échec de l'unpack"; exit 1; }
           
-          if [ -z "$IMAGE_PATH" ]; then
-            echo "❌ Erreur : Fichier Image.gz non trouvé dans ${{ env.BUILD_DIR }}"
-            ls -R "${{ github.workspace }}/${{ env.BUILD_DIR }}/arch/arm64/boot/"
-            exit 1
-          fi
+          # 4. Patch KernelSU
+          echo "Application du patch KernelSU..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5 || { echo "❌ Échec du patch KernelSU"; exit 1; }
           
-          echo "✅ Noyau trouvé à : $IMAGE_PATH"
-          cp -v "$IMAGE_PATH" kernel
+          # 5. Repackage sécurisé
+          echo "Repackage de l'image..."
+          ./magiskboot repack boot.img || { echo "❌ Échec du repack"; exit 1; }
+          mv new-boot.img patched-boot.img
+          echo "✅ Patch terminé avec succès."
           
-          # Repackage
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../boot.img
-          
-      - name: Upload Artifact
+      - name: Upload Patched Boot
         uses: actions/upload-artifact@v4
         with:
-          name: boot-patched
-          path: boot.img
+          name: boot-ksu-final
+          path: patched-boot.img
