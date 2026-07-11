@@ -57,20 +57,31 @@ jobs:
           echo "🚀 Compilation noyau seul (sans DTB)..."
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE LDFLAGS="$LDFLAGS" -j2 Image.gz
           
-      - name: Repack Boot Image with Magiskboot
+      - name: Repack Clean Boot Image
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
-          mkdir -p repack && cp boot-stock.img repack/boot.img
+          set -euo pipefail
+          mkdir -p repack
+          cp boot-stock.img repack/boot.img
           cd repack
-          # Utilisation de l'URL brute officielle et stable du binaire magiskboot
-          curl -fLo magiskboot https://github.com/topjohnwu/Magisk/raw/master/binary/x86_64/magiskboot
+          
+          # Téléchargement de l'APK et extraction du binaire
+          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
+          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
+          mv libmagiskboot.so magiskboot
           chmod +x magiskboot
           
+          # Déballage
           ./magiskboot unpack boot.img
-          # Copie de notre noyau compilé
-          cp ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz kernel
           
-          # Repackage de l'image
-          ./magiskboot repack boot.img
+          # Copie du nouveau noyau
+          # Note : J'utilise ta variable pour le chemin absolu
+          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          cp -v "$ABS_IMAGE_ARM64" kernel
+          
+          # Repackage
+          ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../boot.img
 
       - name: Upload Artifact
