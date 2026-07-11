@@ -52,9 +52,9 @@ jobs:
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          # 4. Compilation noyau (sans DTB pour éviter le crash)
-          echo "🚀 Compilation noyau seul..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE -j2 Image
+          # 4. Compilation noyau
+          echo "🚀 Compilation noyau..."
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) Image.gz
 
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
@@ -74,12 +74,14 @@ jobs:
           # Unpack
           ./magiskboot unpack boot.img
           
-          # Localisation dynamique du noyau compilé
+          # Localisation dynamique du noyau (on cherche Image.gz)
           echo "🔍 Recherche du noyau..."
-          IMAGE_PATH=$(find "${{ github.workspace }}/${{ env.BUILD_DIR }}" -name "Image" | head -n 1)
+          IMAGE_PATH=$(find "${{ github.workspace }}/${{ env.BUILD_DIR }}" -name "Image.gz" | head -n 1)
           
           if [ -z "$IMAGE_PATH" ]; then
-            echo "❌ Erreur : Fichier Image non trouvé dans ${{ env.BUILD_DIR }}"
+            echo "❌ Erreur : Fichier Image.gz non trouvé dans ${{ env.BUILD_DIR }}"
+            # Debug : on liste le contenu pour comprendre pourquoi
+            ls -R "${{ github.workspace }}/${{ env.BUILD_DIR }}/arch/arm64/boot/"
             exit 1
           fi
           
@@ -89,4 +91,9 @@ jobs:
           # Repackage
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../boot.img
-      
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-patched
+          path: boot.img
