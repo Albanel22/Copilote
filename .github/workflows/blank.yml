@@ -69,39 +69,17 @@ jobs:
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types"
-          export EXTRA_CFLAGS="-Wno-error"
           
-          # [ ... (Garde ici tes parties clean stock, sign, et techpack identiques) ... ]
-          # Je raccourcis ici pour la lisibilité, mais garde bien tout ce qu'on a fait avant
+          # ... (Garde tes patches ici, ils sont parfaits) ...
 
-          echo "🥷 INJECTION OFFICIELLE AVEC PATCH DE COMPATIBILITÉ 4.19 🥷"
-          rm -rf KernelSU drivers/kernelsu
-          git clone https://github.com/tiann/KernelSU.git KernelSU --depth=1
+          echo "🚀 Compilation finale du noyau..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image || { echo "❌ COMPILATION ECHOUÉE"; exit 1; }
           
-          # Patchs de structure (Basés sur le PR que tu as trouvé)
-          echo "🩹 APPLICATION DU PATCH DE COMPATIBILITÉ FSNOTIFY 🩹"
-          sed -i 's/handle_inode_event/handle_event/g' KernelSU/kernel/manager/pkg_observer.c
-          
-          # Correction des structures manquantes 4.19
-          find KernelSU/kernel -type f -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} +
-          
-          # Nettoyage des appels systèmes inexistants (VFS/SECCOMP)
-          FILE_WRAPPER="KernelSU/kernel/infra/file_wrapper.c"
-          sed -i 's/return orig->f_op->iopoll.*/return -EINVAL;/g' "$FILE_WRAPPER"
-          sed -i 's/REMAP_FILE_DEDUP/0/g' "$FILE_WRAPPER"
-          sed -i 's/return orig->f_op->remap_file_range.*/return -EINVAL;/g' "$FILE_WRAPPER"
-          
-          SECCOMP_CACHE="KernelSU/kernel/infra/seccomp_cache.c"
-          sed -i '1i #ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR 1024\n#endif' "$SECCOMP_CACHE"
-
-          # 2. Lien symbolique
-          cd drivers
-          ln -sf ../KernelSU/kernel kernelsu
-          cd ..
-          sed -i '1i obj-y += kernelsu/' drivers/Makefile
-          printf '\nmenu "KernelSU"\nconfig KSU\n\tbool "Enable KernelSU"\n\tdefault y\nendmenu\n' >> drivers/Kconfig
-
-          # [ ... (Garde la suite identique : Defconfigs et Compilation) ... ]
+          # Vérification de sécurité
+          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            echo "❌ Fichier Image introuvable ! La compilation a échoué."
+            exit 1
+          fi
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
