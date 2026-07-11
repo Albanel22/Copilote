@@ -40,16 +40,17 @@ jobs:
           set -euo pipefail
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types"
+          # Ajout de -Wno-int-conversion pour calmer les erreurs de KernelSU sur 4.19
+          export KCFLAGS="-Wno-error -Wno-incompatible-pointer-types -Wno-int-conversion"
           
-          # Injection KernelSU (Commit 4.19 stable)
+          # Injection KernelSU
           rm -rf KernelSU drivers/kernelsu
           git clone https://github.com/midori01/KernelSU.git KernelSU
           cd KernelSU
           git checkout 25a3c38b9890afc3b2971b4cf0ad958a1a43603d
           cd ..
           
-          # Configuration KernelSU
+          # Lien et config
           cd drivers
           ln -sf ../KernelSU/kernel kernelsu
           cd ..
@@ -60,18 +61,13 @@ jobs:
           sed -i '/CONFIG_KSU/d; /CONFIG_KPROBES/d; /CONFIG_HAVE_KPROBES/d; /CONFIG_KPROBE_EVENTS/d' arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           echo -e "\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # Compilation sécurisée (parallélisme réduit à 4 pour la RAM)
+          # Compilation propre
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/${{ env.DEFCONFIG }}
           make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           
-          echo "🚀 Compilation noyau (Phase 1)..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j4 Image.gz
-          
-          echo "🚀 Compilation Device Trees (Phase 2)..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j4 dtbs
-          
-          echo "🚀 Assemblage final Image.gz-dtb..."
-          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" Image.gz-dtb
+          # On tente une compilation en un seul bloc avec une tolérance accrue aux erreurs
+          echo "🚀 Compilation unifiée avec tolérance..."
+          make O=../${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j$(nproc) Image.gz-dtb
 
       - name: Repack Boot Image with Magiskboot
         run: |
