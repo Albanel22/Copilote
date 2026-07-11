@@ -40,7 +40,7 @@ jobs:
           export ARCH=${{ env.ARCH }}
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # 1. Installation KernelSU
+          # 1. Installation KernelSU v0.9.5
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
@@ -74,13 +74,12 @@ jobs:
           # Unpack
           ./magiskboot unpack boot.img
           
-          # Localisation dynamique du noyau (on cherche Image.gz)
+          # Localisation dynamique du noyau
           echo "🔍 Recherche du noyau..."
           IMAGE_PATH=$(find "${{ github.workspace }}/${{ env.BUILD_DIR }}" -name "Image.gz" | head -n 1)
           
           if [ -z "$IMAGE_PATH" ]; then
             echo "❌ Erreur : Fichier Image.gz non trouvé dans ${{ env.BUILD_DIR }}"
-            # Debug : on liste le contenu pour comprendre pourquoi
             ls -R "${{ github.workspace }}/${{ env.BUILD_DIR }}/arch/arm64/boot/"
             exit 1
           fi
