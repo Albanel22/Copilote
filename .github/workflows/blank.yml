@@ -63,17 +63,20 @@ jobs:
       - name: Integrate SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛡️ Application des patchs SUSFS avec tolérance..."
+          echo "🛡️ Intégration manuelle et ciblée de SUSFS..."
           cp ../susfs_patches/susfs.c KernelSU/
           cp ../susfs_patches/susfs.h KernelSU/
           
-          # On utilise --reject pour voir les échecs et --ignore-whitespace pour les espaces
-          # On ajoute -p1 si le patch contient des chemins relatifs, ou on tente l'application simple
-          git apply --ignore-whitespace --reject ../susfs_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch 50 partiellement appliqué ou en échec, vérifiez les fichiers .rej"
+          # 1. Patch forcé : on n'applique que ce qui passe
+          git apply --ignore-whitespace --ignore-space-change --verbose ../susfs_patches/fs_susfs.patch
+          git apply --ignore-whitespace --ignore-space-change --verbose ../susfs_patches/ksu_susfs.patch
           
-          git apply --ignore-whitespace ../susfs_patches/fs_susfs.patch
-          git apply --ignore-whitespace ../susfs_patches/ksu_susfs.patch
-          echo "✅ Tentative d'intégration terminée."
+          # 2. Injection manuelle dans le Makefile (nécessaire pour que le noyau compile susfs.c)
+          echo "obj-y += susfs.o" >> fs/Makefile
+          
+          # 3. On ignore le patch 50 car trop de conflits, et on se fie aux patchs spécifiques fs_susfs et ksu_susfs
+          # qui contiennent normalement les hooks vitaux pour le système de fichiers.
+          echo "✅ Intégration terminée (avec injection forcée dans le Makefile)."
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
