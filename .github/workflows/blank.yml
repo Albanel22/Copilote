@@ -82,21 +82,33 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
+          # Variables de build essentielles
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
-          export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
 
-          echo "🔧 Configuration des flags..."
-          echo "CONFIG_SECURITY_SELINUX_DEVELOP=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
-          echo "CONFIG_MODULE_FORCE_LOAD=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
+          echo "🔧 Nettoyage et configuration..."
+          # mrproper est trop violent, on utilise clean pour garder la config KSU
+          make O=${{ env.BUILD_DIR }} clean
+          make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
+
+          echo "📝 Ajout des configurations..."
+          cat << 'EOF' >> ${{ env.BUILD_DIR }}/.config
+          CONFIG_KSU_SUSFS=y
+          CONFIG_SECURITY_SELINUX_DEVELOP=y
+          CONFIG_MODULE_FORCE_LOAD=y
+          EOF
           
-          echo "🛠️ Préparation..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
-          
+          # Rafraîchir la config avec les nouveaux symboles
+          make O=${{ env.BUILD_DIR }} olddefconfig
+
           echo "💉 Injection sécurisée du techpack..."
           cat << 'EOF' > techpack/display/msm/motorola_touch_hooks.c
           #include <linux/module.h>
@@ -111,9 +123,8 @@ jobs:
           EOF
           sed -i '/#include "msm_drv.h"/a #include "motorola_touch_hooks.c"' techpack/display/msm/msm_drv.c
 
-          echo "🚀 Compilation finale..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
-
+          echo "🚀 Compilation..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
