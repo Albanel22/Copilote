@@ -52,21 +52,28 @@ jobs:
       - name: Integrate KernelSU and SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration de KernelSU..."
+          echo "📥 Téléchargement et intégration de KernelSU..."
+          # Installation standard de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          echo "🛡️ Intégration de SUSFS..."
+          # Vérification de sécurité : KernelSU crée souvent le dossier "KernelSU" à la racine du kernel
+          if [ ! -d "KernelSU" ]; then
+            echo "❌ Dossier KernelSU introuvable après setup.sh !"
+            exit 1
+          fi
+
+          echo "🛡️ Intégration manuelle de SUSFS..."
           cp ../susfs_patches/susfs.c KernelSU/
           cp ../susfs_patches/susfs.h KernelSU/
           
-          # Appliquer ksu_susfs.patch uniquement si le répertoire est bien KernelSU
-          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ Attention: ksu_susfs.patch a échoué."
+          # Application des patchs spécifiques à KernelSU
+          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch
           
-          # Ajout manuel dans le Makefile (méthode robuste)
+          # Ajout de SUSFS dans le Makefile de KernelSU
+          # On s'assure qu'il est ajouté après ksu.o pour éviter tout problème de dépendance
           echo "obj-y += susfs.o" >> KernelSU/Makefile
-          sed -i '/kernel\/ksu.o/a obj-y += susfs.o' KernelSU/Makefile
           
-          echo "✅ Intégration terminée."
+          echo "✅ Intégration KernelSU et SUSFS terminée."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -80,21 +87,23 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export LD=ld.lld
-          
-          # Trouver le bon defconfig (recherche récursive)
+
           echo "🔍 Recherche du defconfig..."
-          TARGET_DEFCONFIG=$(find arch/arm64/configs/ -name "${{ env.DEFCONFIG }}")
+          # On cherche dans tout le répertoire configs pour être sûr
+          # Le nom est souvent kiev_defconfig ou sm8250_defconfig pour votre appareil
+          TARGET_DEFCONFIG=$(find arch/arm64/configs/ -name "*defconfig" | head -n 1)
+          
           if [ -z "$TARGET_DEFCONFIG" ]; then
-             echo "❌ Defconfig introuvable. Liste des fichiers disponibles :"
-             find arch/arm64/configs/ -maxdepth 2
+             echo "❌ Aucun defconfig trouvé ! Voici le contenu du dossier :"
+             ls -R arch/arm64/configs/
              exit 1
           fi
-          echo "✅ Defconfig trouvé : $TARGET_DEFCONFIG"
           
+          echo "✅ Utilisation du defconfig : $TARGET_DEFCONFIG"
           make O=${{ env.BUILD_DIR }} clean
           make O=${{ env.BUILD_DIR }} $(basename $TARGET_DEFCONFIG)
 
-          echo "📝 Ajout des configurations..."
+          echo "📝 Ajout des configurations SUSFS..."
           cat << 'EOF' >> ${{ env.BUILD_DIR }}/.config
           CONFIG_KSU_SUSFS=y
           CONFIG_SECURITY_SELINUX_DEVELOP=y
@@ -103,6 +112,7 @@ jobs:
           make O=${{ env.BUILD_DIR }} olddefconfig
 
           echo "💉 Injection sécurisée du techpack..."
+          # Bloc techpack préservé
           cat << 'EOF' > techpack/display/msm/motorola_touch_hooks.c
           #include <linux/module.h>
           #include <linux/notifier.h>
