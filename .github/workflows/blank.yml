@@ -49,55 +49,50 @@ jobs:
           mkdir -p ~/.cache/ccache
           echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
 
-      - name: Integrate KernelSU
+      - name: Integrate KernelSU and SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
+          echo "📥 Intégration de KernelSU..."
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          if [ -d "KernelSU" ]; then
-            echo "✅ KernelSU intégré avec succès."
-          else
-            echo "❌ Échec de l'intégration de KernelSU."
-            exit 1
-          fi
-
-      - name: Integrate SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🛡️ Intégration manuelle forcée de SUSFS..."
+          
+          echo "🛡️ Intégration de SUSFS..."
           cp ../susfs_patches/susfs.c KernelSU/
           cp ../susfs_patches/susfs.h KernelSU/
           
-          # On applique seulement les patchs qui ne touchent pas aux fichiers systèmes complexes
-          # On laisse tomber le patch 50 car il échoue partout
-          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/fs_susfs.patch || echo "⚠️ fs_susfs warning"
-          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ ksu_susfs warning"
+          # Appliquer ksu_susfs.patch uniquement si le répertoire est bien KernelSU
+          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ Attention: ksu_susfs.patch a échoué."
           
-          # Force l'ajout de susfs.o dans le Makefile sans utiliser patch
-          # On cherche la liste des objets (obj-y) et on ajoute susfs.o
-          sed -i '/obj-y +=/a obj-y += susfs.o' fs/Makefile
+          # Ajout manuel dans le Makefile (méthode robuste)
+          echo "obj-y += susfs.o" >> KernelSU/Makefile
+          sed -i '/kernel\/ksu.o/a obj-y += susfs.o' KernelSU/Makefile
           
           echo "✅ Intégration terminée."
-          
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          # Variables de build essentielles
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          export KCFLAGS="-Wno-error"
-
-          echo "🔧 Nettoyage et configuration..."
-          # mrproper est trop violent, on utilise clean pour garder la config KSU
+          export LLVM=1
+          export LLVM_IAS=1
+          export LD=ld.lld
+          
+          # Trouver le bon defconfig (recherche récursive)
+          echo "🔍 Recherche du defconfig..."
+          TARGET_DEFCONFIG=$(find arch/arm64/configs/ -name "${{ env.DEFCONFIG }}")
+          if [ -z "$TARGET_DEFCONFIG" ]; then
+             echo "❌ Defconfig introuvable. Liste des fichiers disponibles :"
+             find arch/arm64/configs/ -maxdepth 2
+             exit 1
+          fi
+          echo "✅ Defconfig trouvé : $TARGET_DEFCONFIG"
+          
           make O=${{ env.BUILD_DIR }} clean
-          make O=${{ env.BUILD_DIR }} ${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} $(basename $TARGET_DEFCONFIG)
 
           echo "📝 Ajout des configurations..."
           cat << 'EOF' >> ${{ env.BUILD_DIR }}/.config
@@ -105,8 +100,6 @@ jobs:
           CONFIG_SECURITY_SELINUX_DEVELOP=y
           CONFIG_MODULE_FORCE_LOAD=y
           EOF
-          
-          # Rafraîchir la config avec les nouveaux symboles
           make O=${{ env.BUILD_DIR }} olddefconfig
 
           echo "💉 Injection sécurisée du techpack..."
@@ -123,8 +116,9 @@ jobs:
           EOF
           sed -i '/#include "msm_drv.h"/a #include "motorola_touch_hooks.c"' techpack/display/msm/msm_drv.c
 
-          echo "🚀 Compilation..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          echo "🚀 Compilation finale..."
+          make O=${{ env.BUILD_DIR }} KCFLAGS="-Wno-error" -j$(nproc) Image
+          
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
