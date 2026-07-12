@@ -1,4 +1,4 @@
-name: Kernel CI — build & package
+Name: Kernel CI — build & package
 
 on:
   push:
@@ -24,26 +24,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img stock officiel..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
+
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-      - name: Clean Stock Kernel Test (No KSU)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🧹 Mode diagnostic actif : Aucun patch appliqué."
-          echo "📝 Configuration du defconfig d'origine..."
-          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
-          if [ ! -f "$TARGET_CONFIG" ]; then
-            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
-          fi
-          echo "✅ Prêt pour un build 100% stock LineageOS."
-          
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -51,6 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: |
             ${{ runner.os }}-ccache-
+
       - name: Configure ccache Size
         run: |
           mkdir -p ~/.cache/ccache
@@ -59,16 +52,25 @@ jobs:
       - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # Téléchargement et intégration de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          # Vérification que le dossier KernelSU existe
           if [ -d "KernelSU" ]; then
-            echo "✅ KernelSU intégré avec succès dans les sources."
+            echo "✅ KernelSU intégré avec succès."
           else
             echo "❌ Échec de l'intégration de KernelSU."
             exit 1
-          fi  
-          
+          fi
+
+      - name: Integrate SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛡️ Application des patchs SUSFS..."
+          cp ../susfs_patches/susfs.c KernelSU/
+          cp ../susfs_patches/susfs.h KernelSU/
+          git apply ../susfs_patches/50_add_susfs_in_kernel-4.19.patch
+          git apply ../susfs_patches/fs_susfs.patch
+          git apply ../susfs_patches/ksu_susfs.patch
+          echo "✅ SUSFS intégré avec succès."
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -80,17 +82,15 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
 
-          echo "🔧 Configuration des flags de sécurité et de compatibilité..."
-          # Activation mode permissif pour contourner les blocages SELinux sur libsecureui.so
+          echo "🔧 Configuration des flags..."
           echo "CONFIG_SECURITY_SELINUX_DEVELOP=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
-          # Forcer le chargement des modules même en cas de mismatch de version
           echo "CONFIG_MODULE_FORCE_LOAD=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          echo "🛠️ Étape 1 : Build avec LLVM et LLD..."
+          echo "🛠️ Préparation..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           
           echo "💉 Injection sécurisée du techpack..."
-          # On utilise un fichier séparé pour les hooks tactiles afin de ne pas corrompre msm_drv.c
           cat << 'EOF' > techpack/display/msm/motorola_touch_hooks.c
           #include <linux/module.h>
           #include <linux/notifier.h>
@@ -102,12 +102,11 @@ jobs:
           void touch_set_state(int state) { return; }
           EXPORT_SYMBOL(touch_set_state);
           EOF
-          # Ajouter l'inclusion dans msm_drv.c de manière minimale
           sed -i '/#include "msm_drv.h"/a #include "motorola_touch_hooks.c"' techpack/display/msm/msm_drv.c
 
-          echo "🚀 Étape 2 : Compilation finale..."
+          echo "🚀 Compilation finale..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
-      
+
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -119,17 +118,17 @@ jobs:
           unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
-          
           ./magiskboot unpack boot.img
-          
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           cp -v "$ABS_IMAGE_ARM64" kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img "${{ github.workspace }}/boot.img"
+
       - name: Organize Final Output Artifacts
         run: |
           mkdir -p final_output
           mv "${{ github.workspace }}/boot.img" final_output/boot.img
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
