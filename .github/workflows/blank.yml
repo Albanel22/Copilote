@@ -52,10 +52,9 @@ jobs:
       - name: Integrate KernelSU and SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Téléchargement et intégration de KernelSU..."
+          echo "📥 Téléchargement et intégration de KernelSU v0.9.5..."
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # Vérification de sécurité
           if [ ! -d "KernelSU" ]; then
             echo "❌ Dossier KernelSU introuvable !"
             exit 1
@@ -65,14 +64,14 @@ jobs:
           cp ../susfs_patches/susfs.c KernelSU/
           cp ../susfs_patches/susfs.h KernelSU/
           
-          # CORRECTION : On pointe le patch vers le bon dossier
-          # La plupart des patchs susfs ont un préfixe "KernelSU-Next/". 
-          # On va utiliser "sed" pour remplacer ce préfixe par "KernelSU/" avant d'appliquer.
+          # CORRECTION DE MON ERREUR : On télécharge le patch compatible v0.9.5 pour écraser l'ancien
+          echo "📥 Téléchargement du bon ksu_susfs.patch..."
+          curl -LSs "https://gitlab.com/simonpunk/susfs4ksu/-/raw/12384c1e6e89d7a35da458cd4b720a024beee007/kernel_patches/ksu_susfs.patch" > ../susfs_patches/ksu_susfs.patch
+          
           sed -i 's|KernelSU-Next/|KernelSU/|g' ../susfs_patches/ksu_susfs.patch
           
           git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ Attention: ksu_susfs.patch a échoué."
           
-          # Ajout de SUSFS dans le Makefile
           echo "obj-y += susfs.o" >> KernelSU/Makefile
           
           echo "✅ Intégration KernelSU et SUSFS terminée."
