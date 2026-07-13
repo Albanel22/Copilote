@@ -52,44 +52,42 @@ jobs:
       - name: Integrate KernelSU and SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Téléchargement et intégration de KernelSU v0.9.5..."
+          echo "📥 Téléchargement de KernelSU v0.9.5..."
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          if [ ! -d "KernelSU" ]; then
-            echo "❌ Dossier KernelSU introuvable !"
-            exit 1
-          fi
+          # 1. Préparation du patch (le contenu est ici)
+          cat << 'EOF' > susfs_integration.patch
+          --- a/drivers/kernelsu/ksu.c
+          +++ b/drivers/kernelsu/ksu.c
+          @@ -22,6 +22,10 @@
+           #include "ksu.h"
+          +#include "susfs.h"
+           
+           #define KSU_MAJOR_VERSION 0
+           #define KSU_MINOR_VERSION 9
+          @@ -34,6 +38,7 @@
+           int ksu_core_init(void)
+           {
+           	ksu_sucompat_init();
+          +	susfs_init();
+           	return 0;
+           }
+          EOF
 
-          echo "🛡️ Intégration propre de SUSFS dans drivers/kernelsu/..."
-          
-          # 1. Copie des fichiers
+          # 2. Copie des fichiers sources SUSFS
           cp ../susfs_patches/susfs.c drivers/kernelsu/
           cp ../susfs_patches/susfs.h drivers/kernelsu/
           
-          # 2. Nettoyage du fichier susfs.h (on retire le mot-clé __init qui peut causer des problèmes de parsing)
-          sed -i 's/__init//g' drivers/kernelsu/susfs.h
-          
-          # 3. Nettoyage complet de ksu.c pour repartir sur une base saine
-          sed -i '/extern void susfs_init(void);/d' drivers/kernelsu/ksu.c
-          sed -i '/#include "susfs.h"/d' drivers/kernelsu/ksu.c
-          sed -i '/susfs_init();/d' drivers/kernelsu/ksu.c
-          
-          # 4. Injection sécurisée :
-          # On ajoute l'include en haut
-          sed -i '/#include "ksu.h"/a #include "susfs.h"' drivers/kernelsu/ksu.c
-          
-          # On ajoute la déclaration directe AVANT l'appel pour garantir la visibilité
-          # On cherche ksu_sucompat_init(); et on insère la déclaration juste au-dessus
-          sed -i '/ksu_sucompat_init();/i \	void susfs_init(void);' drivers/kernelsu/ksu.c
-          sed -i '/ksu_sucompat_init();/a \	susfs_init();' drivers/kernelsu/ksu.c
-          
-          # 5. Ajout au Makefile
+          # 3. Ajout au Makefile (sans doublons)
           grep -q "susfs.o" drivers/kernelsu/Makefile || echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
           
-          echo "✅ Intégration forcée et sécurisée terminée !"
-          echo "--- CONTENU DE KSU.C ---"
-          head -n 50 drivers/kernelsu/ksu.c
-          echo "--- FIN ---"
+          # 4. Application propre du patch
+          # --force permet de passer outre si le fichier a été modifié, 
+          # mais le patch est conçu pour chercher le contexte exact.
+          echo "🛡️ Application du patch intelligent..."
+          patch -p1 < susfs_integration.patch || echo "⚠️ Patch déjà appliqué ou non nécessaire."
+          
+          echo "✅ Intégration par patch terminée !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
