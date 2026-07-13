@@ -63,6 +63,11 @@ jobs:
           
           # 3. Application du patch (on ignore les échecs, on les réparera après)
           patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué."
+          # Debug : Voir pourquoi le patch échoue
+          echo "--- Contenu de fs/open.c.rej ---"
+          [ -f fs/open.c.rej ] && cat fs/open.c.rej
+          echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
+          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej
           
           # 4. RÉPARATION MANUELLE (Ce qui a échoué)
           
