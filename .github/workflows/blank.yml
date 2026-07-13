@@ -88,6 +88,36 @@ jobs:
             cat fs/proc/task_mmu.c.rej
           fi
 
+      - name: Manual Injection for SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          # 1. Correction de fs/proc/task_mmu.c (Insertion de l'include manquant)
+          sed -i '/#include "internal.h"/a \
+          #ifdef CONFIG_KSU_SUSFS\
+          #include <linux/susfs.h>\
+          #endif' fs/proc/task_mmu.c
+
+          # 2. Correction de fs/open.c (Injection des variables avant KSU)
+          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/i \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
+          struct filename* fname;\
+          int status;\
+          int error;\
+          #endif' fs/open.c
+
+          # 3. Correction de fs/open.c (Injection du hook après KSU)
+          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/a \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
+          fname = getname_safe(filename);\
+          status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
+          putname_safe(fname);\
+          if (status) {\
+              return error;\
+          }\
+          #endif' fs/open.c
+
+          echo "✅ Injections manuelles de SUSFS appliquées avec succès !"
+
       - name: Inspect Reject Files
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
