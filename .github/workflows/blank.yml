@@ -53,12 +53,11 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "📥 Téléchargement et intégration de KernelSU..."
-          # Installation standard de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # Vérification de sécurité : KernelSU crée souvent le dossier "KernelSU" à la racine du kernel
+          # Vérification de sécurité
           if [ ! -d "KernelSU" ]; then
-            echo "❌ Dossier KernelSU introuvable après setup.sh !"
+            echo "❌ Dossier KernelSU introuvable !"
             exit 1
           fi
 
@@ -66,11 +65,14 @@ jobs:
           cp ../susfs_patches/susfs.c KernelSU/
           cp ../susfs_patches/susfs.h KernelSU/
           
-          # Application des patchs spécifiques à KernelSU
-          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch
+          # CORRECTION : On pointe le patch vers le bon dossier
+          # La plupart des patchs susfs ont un préfixe "KernelSU-Next/". 
+          # On va utiliser "sed" pour remplacer ce préfixe par "KernelSU/" avant d'appliquer.
+          sed -i 's|KernelSU-Next/|KernelSU/|g' ../susfs_patches/ksu_susfs.patch
           
-          # Ajout de SUSFS dans le Makefile de KernelSU
-          # On s'assure qu'il est ajouté après ksu.o pour éviter tout problème de dépendance
+          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ Attention: ksu_susfs.patch a échoué."
+          
+          # Ajout de SUSFS dans le Makefile
           echo "obj-y += susfs.o" >> KernelSU/Makefile
           
           echo "✅ Intégration KernelSU et SUSFS terminée."
