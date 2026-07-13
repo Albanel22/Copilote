@@ -61,22 +61,17 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 3. Application du patch (on ignore les échecs, on les réparera après)
+          # 3. Application du patch (avec tolérance aux erreurs)
           patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué."
-          # Debug : Voir pourquoi le patch échoue
-          echo "--- Contenu de fs/open.c.rej ---"
-          [ -f fs/open.c.rej ] && cat fs/open.c.rej
-          echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
-          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej
           
-          # 4. RÉPARATION MANUELLE (Ce qui a échoué)
+          # 4. RÉPARATION MANUELLE (Chirurgie du code)
           
-          # Réparation de fs/open.c (Ajout de l'include qui a échoué)
+          # Réparation de fs/open.c
           if ! grep -q '#include <linux/susfs.h>' fs/open.c; then
             sed -i '/#include <linux\/defex.h>/a #include <linux/susfs.h>' fs/open.c
           fi
           
-          # Réparation de fs/proc/task_mmu.c (Ajout de l'include qui a échoué)
+          # Réparation de fs/proc/task_mmu.c
           if ! grep -q '#include <linux/susfs.h>' fs/proc/task_mmu.c; then
             sed -i '/#include <asm\/tlbflush.h>/a #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
@@ -95,11 +90,11 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           
-          # Nettoyage profond pour éviter les erreurs de symboles (err -22)
+          # Nettoyage profond pour garantir l'intégrité
           make mrproper
           make O=${{ env.BUILD_DIR }} clean
 
-          # Utilisation du chemin exact pour votre defconfig
+          # Utilisation du defconfig
           echo "✅ Utilisation du defconfig : vendor/lito-perf_defconfig"
           make O=${{ env.BUILD_DIR }} vendor/lito-perf_defconfig
 
@@ -130,7 +125,6 @@ jobs:
           fi
 
           echo "🚀 Compilation finale..."
-          # KCFLAGS désactive les erreurs bloquantes pour passer les warnings
           make O=${{ env.BUILD_DIR }} KCFLAGS="-Wno-error -Wno-implicit-function-declaration" -j$(nproc) Image
           
       - name: Repack Clean Boot Image
