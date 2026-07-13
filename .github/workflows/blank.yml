@@ -60,23 +60,29 @@ jobs:
             exit 1
           fi
 
-          echo "🛡️ Intégration manuelle de SUSFS dans drivers/kernelsu/..."
+          echo "🛡️ Nettoyage et intégration propre de SUSFS dans drivers/kernelsu/..."
           
           # 1. Copie des fichiers
           cp ../susfs_patches/susfs.c drivers/kernelsu/
           cp ../susfs_patches/susfs.h drivers/kernelsu/
           
-          # 2. Ajout au Makefile
-          echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
+          # 2. Ajout au Makefile (si absent)
+          grep -q "susfs.o" drivers/kernelsu/Makefile || echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
           
-          # 3. Injection sécurisée :
-          # On insère la déclaration 'extern' tout en haut du fichier (ligne 1)
-          sed -i '1i extern void susfs_init(void);' drivers/kernelsu/ksu.c
+          # 3. NETTOYAGE : On supprime les anciennes injections ratées
+          sed -i '/extern void susfs_init(void);/d' drivers/kernelsu/ksu.c
+          sed -i '/#include "susfs.h"/d' drivers/kernelsu/ksu.c
+          # On supprime les doublons d'appel susfs_init()
+          sed -i '/susfs_init();/d' drivers/kernelsu/ksu.c
           
-          # On insère l'appel après ksu_sucompat_init()
+          # 4. INJECTION PROPRE
+          # On ajoute l'include juste après ksu.h
+          sed -i '/#include "ksu.h"/a #include "susfs.h"' drivers/kernelsu/ksu.c
+          
+          # On ajoute l'appel uniquement s'il n'existe pas
           sed -i '/ksu_sucompat_init();/a \	susfs_init();' drivers/kernelsu/ksu.c
           
-          echo "✅ Intégration propre et globale terminée !"
+          echo "✅ Intégration propre terminée !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
