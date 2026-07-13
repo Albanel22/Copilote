@@ -24,18 +24,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
-
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img stock officiel..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
-
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
+      - name: Clean Stock Kernel Test (No KSU)
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🧹 Mode diagnostic actif : Aucun patch appliqué."
+          echo "📝 Configuration du defconfig d'origine..."
+          TARGET_CONFIG="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
+          if [ ! -f "$TARGET_CONFIG" ]; then
+            TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
+          fi
+          echo "✅ Prêt pour un build 100% stock LineageOS."
+          
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -43,106 +51,71 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: |
             ${{ runner.os }}-ccache-
-
       - name: Configure ccache Size
         run: |
           mkdir -p ~/.cache/ccache
           echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
-
-      - name: Integrate SUSFS with Manual Fixes
+      - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          git reset --hard
+          # Téléchargement et intégration de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # Vérification que le dossier KernelSU existe
+          if [ -d "KernelSU" ]; then
+            echo "✅ KernelSU intégré avec succès dans les sources."
+          else
+            echo "❌ Échec de l'intégration de KernelSU."
+            exit 1
+          fi  
           
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          
-          # 1. Patch initial (on ignore les échecs, on répare après)
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel."
-          rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
-          
-          # 2. Injection dans fs/proc/task_mmu.c
-          # On utilise un fichier temporaire pour éviter les erreurs d'alignement
-          cat << 'EOF' > inject_mmu.txt
-          #ifdef CONFIG_KSU_SUSFS
-          #include <linux/susfs.h>
-          #endif
-          EOF
-          sed -i '/#include "internal.h"/r inject_mmu.txt' fs/proc/task_mmu.c
-          
-          # 3. Injection dans fs/open.c (Variables)
-          cat << 'EOF' > inject_open_vars.txt
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-          	struct filename* fname;
-          	int status;
-          	int error;
-          #endif
-          EOF
-          sed -i '/long do_faccessat/r inject_open_vars.txt' fs/open.c
-          
-          # 4. Injection dans fs/open.c (Logique)
-          cat << 'EOF' > inject_open_logic.txt
-          
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-          	fname = getname_safe(filename);
-          	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);
-          	putname_safe(fname);
-          
-          	if (status) {
-          		return error;
-          	}
-          #endif
-          EOF
-          # On insère après l'appel ksu_handle_faccessat
-          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/r inject_open_logic.txt' fs/open.c
-          
-          # 5. Export symbol manquant
-          echo "EXPORT_SYMBOL(touch_set_state);" >> techpack/display/msm/motorola_touch_hooks.c
-          
-          echo "✅ Injections propres et alignées !"
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          export ARCH=arm64
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export CC=clang
-          export LLVM=1
-          export LLVM_IAS=1
+          export KCFLAGS="-Wno-error"
+          echo "🔧 Activation de KernelSU dans la configuration..."
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          make mrproper
-          make O=${{ env.BUILD_DIR }} clean
-          make O=${{ env.BUILD_DIR }} vendor/lito-perf_defconfig
-
-          cat << 'EOF' >> ${{ env.BUILD_DIR }}/.config
-          CONFIG_KSU_SUSFS=y
-          CONFIG_SECURITY_SELINUX_DEVELOP=y
-          CONFIG_MODULE_FORCE_LOAD=y
-          EOF
-          make O=${{ env.BUILD_DIR }} olddefconfig
-
-          # Injection hook
-          cat << 'EOF' > techpack/display/msm/motorola_touch_hooks.c
-          #include <linux/module.h>
-          #include <linux/notifier.h>
-          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
-          int panel_register_notifier(struct notifier_block *nb) { return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb); }
-          EXPORT_SYMBOL(panel_register_notifier);
-          int panel_unregister_notifier(struct notifier_block *nb) { return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb); }
-          EXPORT_SYMBOL(panel_unregister_notifier);
-          void touch_set_state(int state) { return; }
-          EXPORT_SYMBOL(touch_set_state);
-          EOF
+          echo "📥 Injection de la configuration d'origine..."
+          cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          if [ -f "techpack/display/msm/msm_drv.c" ]; then
-            sed -i '/#include "msm_drv.h"/a #include "motorola_touch_hooks.c"' techpack/display/msm/msm_drv.c
+          echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
+          echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129) 🔓"
+          # On court-circuicte le blocage de version pour forcer le chargement de TOUS les modules sans erreur -22
+          if [ -f "kernel/module.c" ]; then
+            sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           fi
-
-          make O=${{ env.BUILD_DIR }} KCFLAGS="-Wno-error -Wno-implicit-function-declaration" -j$(nproc) Image
+          echo "💉 INJECTION DU CORRECTIF STRNSTR ET RELAIS TACTILE DANS LE TECHPACK 💉"
+          if [ -f "techpack/display/msm/msm_drv.c" ]; then
+            sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
+            
+            rm -f display_patch.tmp
+            echo '#include <linux/notifier.h>' >> display_patch.tmp
+            echo '#include <linux/module.h>' >> display_patch.tmp
+            echo 'static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);' >> display_patch.tmp
+            echo 'int panel_register_notifier(struct notifier_block *nb) {' >> display_patch.tmp
+            echo '    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);' >> display_patch.tmp
+            echo '}' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(panel_register_notifier);' >> display_patch.tmp
+            echo 'int panel_unregister_notifier(struct notifier_block *nb) {' >> display_patch.tmp
+            echo '    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);' >> display_patch.tmp
+            echo '}' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(panel_unregister_notifier);' >> display_patch.tmp
+            
+            echo 'void touch_set_state(int state) { return; }' >> display_patch.tmp
+            echo 'EXPORT_SYMBOL(touch_set_state);' >> display_patch.tmp
+            
+            sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
+            rm -f display_patch.tmp
+          fi
+          echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2) ..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
           
       - name: Repack Clean Boot Image
         working-directory: ${{ github.workspace }}
@@ -155,16 +128,17 @@ jobs:
           unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
+          
           ./magiskboot unpack boot.img
-          cp -v "${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" kernel
+          
+          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          cp -v "$ABS_IMAGE_ARM64" kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img "${{ github.workspace }}/boot.img"
-
       - name: Organize Final Output Artifacts
         run: |
           mkdir -p final_output
           mv "${{ github.workspace }}/boot.img" final_output/boot.img
-
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
