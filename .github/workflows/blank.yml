@@ -49,45 +49,31 @@ jobs:
           mkdir -p ~/.cache/ccache
           echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
 
-      - name: Integrate KernelSU and SUSFS
+      - name: Integrate Official SUSFS Patch
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Téléchargement de KernelSU v0.9.5..."
+          # 1. NETTOYAGE TOTAL : On annule toutes les modifications manuelles précédentes
+          # Cela remet le noyau dans l'état original avant qu'on commence à bricoler.
+          git reset --hard
+          
+          # 2. Téléchargement de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 1. Préparation du patch (le contenu est ici)
-          cat << 'EOF' > susfs_integration.patch
-          --- a/drivers/kernelsu/ksu.c
-          +++ b/drivers/kernelsu/ksu.c
-          @@ -22,6 +22,10 @@
-           #include "ksu.h"
-          +#include "susfs.h"
-           
-           #define KSU_MAJOR_VERSION 0
-           #define KSU_MINOR_VERSION 9
-          @@ -34,6 +38,7 @@
-           int ksu_core_init(void)
-           {
-           	ksu_sucompat_init();
-          +	susfs_init();
-           	return 0;
-           }
+          # 3. Création du fichier patch officiel
+          cat << 'EOF' > 50_add_susfs_in_kernel-4.19.patch
+          [COLLE ICI LE CONTENU DU PATCH QUE TU M'AS DONNÉ]
           EOF
-
-          # 2. Copie des fichiers sources SUSFS
-          cp ../susfs_patches/susfs.c drivers/kernelsu/
-          cp ../susfs_patches/susfs.h drivers/kernelsu/
           
-          # 3. Ajout au Makefile (sans doublons)
-          grep -q "susfs.o" drivers/kernelsu/Makefile || echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
+          # 4. Copie des fichiers sources de SUSFS (il faut qu'ils soient là pour que le patch fonctionne)
+          # Assure-toi que ces deux fichiers sont bien présents dans ton dossier de travail
+          cp ../susfs_patches/susfs.c fs/
+          cp ../susfs_patches/susfs.h include/linux/
           
-          # 4. Application propre du patch
-          # --force permet de passer outre si le fichier a été modifié, 
-          # mais le patch est conçu pour chercher le contexte exact.
-          echo "🛡️ Application du patch intelligent..."
-          patch -p1 < susfs_integration.patch || echo "⚠️ Patch déjà appliqué ou non nécessaire."
+          # 5. Application du patch officiel
+          echo "🛡️ Application du patch officiel..."
+          patch -p1 < 50_add_susfs_in_kernel-4.19.patch
           
-          echo "✅ Intégration par patch terminée !"
+          echo "✅ Patch appliqué avec succès !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
