@@ -52,26 +52,24 @@ jobs:
       - name: Integrate Official SUSFS Patch
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. NETTOYAGE TOTAL : On annule toutes les modifications manuelles précédentes
-          # Cela remet le noyau dans l'état original avant qu'on commence à bricoler.
+          # 1. NETTOYAGE TOTAL
           git reset --hard
           
           # 2. Téléchargement de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 3. Création du fichier patch officiel
-          cat << 'EOF' > 50_add_susfs_in_kernel-4.19.patch
-          [COLLE ICI LE CONTENU DU PATCH QUE TU M'AS DONNÉ]
-          EOF
+          # 3. Récupération du patch officiel depuis la source (GitLab)
+          echo "📥 Téléchargement des patchs officiels..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git
           
-          # 4. Copie des fichiers sources de SUSFS (il faut qu'ils soient là pour que le patch fonctionne)
-          # Assure-toi que ces deux fichiers sont bien présents dans ton dossier de travail
-          cp ../susfs_patches/susfs.c fs/
-          cp ../susfs_patches/susfs.h include/linux/
+          # 4. Copie des fichiers sources de SUSFS (requis pour le patch)
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 5. Application du patch officiel
-          echo "🛡️ Application du patch officiel..."
-          patch -p1 < 50_add_susfs_in_kernel-4.19.patch
+          # 5. Application du patch 
+          # On s'assure de cibler le bon fichier de patch (4.19)
+          echo "🛡️ Application du patch..."
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch
           
           echo "✅ Patch appliqué avec succès !"
           
