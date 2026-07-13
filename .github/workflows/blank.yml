@@ -86,7 +86,15 @@ jobs:
           # (À faire seulement si le patch ne le fait pas automatiquement)
           # echo "obj-y += susfs.o" >> fs/Makefile
           
-          echo "✅ SUSFS intégré via patch propre." 
+          echo "✅ SUSFS intégré via patch propre."
+
+      - name: Inspect Reject Files
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "--- Contenu de fs/open.c.rej ---"
+          cat fs/open.c.rej
+          echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
+          cat fs/proc/task_mmu.c.rej
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
