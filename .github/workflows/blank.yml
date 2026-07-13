@@ -68,25 +68,25 @@ jobs:
             exit 1
           fi
           
-      - name: Integrate SUSFS (Method Saine)
+      - name: Integrate SUSFS (Debugging Mode)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Cloner SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          
-          # 2. Copier les fichiers sources nécessaires
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 3. Appliquer le patch principal (C'est le plus important)
-          # On vérifie si le patch s'applique bien avant de continuer
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || exit 1
+          # On tente le patch, mais on ne s'arrête pas s'il échoue
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Le patch a échoué, vérification des fichiers .rej..."
           
-          # 4. Ajout des définitions dans le Kconfig/Makefile si nécessaire
-          # (À faire seulement si le patch ne le fait pas automatiquement)
-          # echo "obj-y += susfs.o" >> fs/Makefile
-          
-          echo "✅ SUSFS intégré via patch propre."
+          # Maintenant, on affiche les erreurs pour analyse
+          if [ -f fs/open.c.rej ]; then
+            echo "--- Contenu de fs/open.c.rej ---"
+            cat fs/open.c.rej
+          fi
+          if [ -f fs/proc/task_mmu.c.rej ]; then
+            echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
+            cat fs/proc/task_mmu.c.rej
+          fi
 
       - name: Inspect Reject Files
         working-directory: ${{ env.KERNEL_PATH }}
