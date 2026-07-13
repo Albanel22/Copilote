@@ -69,15 +69,15 @@ jobs:
           # 2. Ajout au Makefile
           echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
           
-          # 3. Injection globale : On déclare la fonction en haut de ksu.c
-          # On cherche la ligne ksu_core_init pour se placer juste avant
-          sed -i '/ksu_core_init/i extern void susfs_init(void);' drivers/kernelsu/ksu.c
+          # 3. Injection sécurisée :
+          # On insère la déclaration 'extern' tout en haut du fichier (ligne 1)
+          sed -i '1i extern void susfs_init(void);' drivers/kernelsu/ksu.c
           
-          # 4. Injection de l'appel : On place l'appel dans la fonction
+          # On insère l'appel après ksu_sucompat_init()
           sed -i '/ksu_sucompat_init();/a \	susfs_init();' drivers/kernelsu/ksu.c
           
           echo "✅ Intégration propre et globale terminée !"
-
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
