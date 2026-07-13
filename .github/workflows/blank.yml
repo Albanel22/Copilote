@@ -60,21 +60,22 @@ jobs:
             exit 1
           fi
 
-          echo "🛡️ Intégration manuelle de SUSFS..."
-          cp ../susfs_patches/susfs.c KernelSU/
-          cp ../susfs_patches/susfs.h KernelSU/
+          echo "🛡️ Intégration manuelle de SUSFS (Injection directe)..."
           
-          # CORRECTION DE MON ERREUR : On télécharge le patch compatible v0.9.5 pour écraser l'ancien
-          echo "📥 Téléchargement du bon ksu_susfs.patch..."
-          curl -LSs "https://gitlab.com/simonpunk/susfs4ksu/-/raw/12384c1e6e89d7a35da458cd4b720a024beee007/kernel_patches/ksu_susfs.patch" > ../susfs_patches/ksu_susfs.patch
+          # 1. On place les fichiers clés de SUSFS dans le dossier de KernelSU
+          cp ../susfs_patches/susfs.c KernelSU/kernel/
+          cp ../susfs_patches/susfs.h KernelSU/kernel/
           
-          sed -i 's|KernelSU-Next/|KernelSU/|g' ../susfs_patches/ksu_susfs.patch
+          # 2. On injecte l'inclusion du header susfs.h au début de ksu.c
+          sed -i '/#include "ksu.h"/a #include "susfs.h"' KernelSU/kernel/ksu.c
           
-          git apply --ignore-whitespace --ignore-space-change ../susfs_patches/ksu_susfs.patch || echo "⚠️ Attention: ksu_susfs.patch a échoué."
+          # 3. On injecte le démarrage de susfs_init() dans la fonction principale ksu_core_init
+          sed -i '/ksu_sucompat_init();/a \	susfs_init();' KernelSU/kernel/ksu.c
           
-          echo "obj-y += susfs.o" >> KernelSU/Makefile
+          # 4. On ajoute SUSFS au Makefile de KernelSU pour qu'il soit compilé
+          echo "obj-y += susfs.o" >> KernelSU/kernel/Makefile
           
-          echo "✅ Intégration KernelSU et SUSFS terminée."
+          echo "✅ Intégration KernelSU et SUSFS terminée avec succès via injection !"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
