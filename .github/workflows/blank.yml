@@ -60,22 +60,24 @@ jobs:
             exit 1
           fi
 
-          echo "🛡️ Intégration manuelle de SUSFS (Injection directe)..."
+          echo "🛡️ Intégration manuelle de SUSFS dans drivers/kernelsu/..."
           
-          # 1. On place les fichiers clés de SUSFS dans le dossier de KernelSU
-          cp ../susfs_patches/susfs.c KernelSU/kernel/
-          cp ../susfs_patches/susfs.h KernelSU/kernel/
+          # 1. On copie les fichiers dans le bon dossier attendu par le build
+          cp ../susfs_patches/susfs.c drivers/kernelsu/
+          cp ../susfs_patches/susfs.h drivers/kernelsu/
           
-          # 2. On injecte l'inclusion du header susfs.h au début de ksu.c
-          sed -i '/#include "ksu.h"/a #include "susfs.h"' KernelSU/kernel/ksu.c
+          # 2. On injecte l'include en haut de ksu.c (après les autres includes)
+          # On cherche la ligne avec "linux/module.h" pour être sûr d'être au début
+          sed -i '/#include <linux\/module.h>/a #include "susfs.h"' drivers/kernelsu/ksu.c
           
-          # 3. On injecte le démarrage de susfs_init() dans la fonction principale ksu_core_init
-          sed -i '/ksu_sucompat_init();/a \	susfs_init();' KernelSU/kernel/ksu.c
+          # 3. On injecte l'appel de fonction susfs_init()
+          # On cherche ksu_sucompat_init et on insère juste après
+          sed -i '/ksu_sucompat_init();/a \	susfs_init();' drivers/kernelsu/ksu.c
           
-          # 4. On ajoute SUSFS au Makefile de KernelSU pour qu'il soit compilé
-          echo "obj-y += susfs.o" >> KernelSU/kernel/Makefile
+          # 4. On ajoute SUSFS au Makefile de drivers/kernelsu
+          echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
           
-          echo "✅ Intégration KernelSU et SUSFS terminée avec succès via injection !"
+          echo "✅ Intégration terminée dans drivers/kernelsu !"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
