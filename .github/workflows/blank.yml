@@ -87,6 +87,9 @@ jobs:
           grep -q "susfs.o" drivers/kernelsu/Makefile || echo "obj-y += susfs.o" >> drivers/kernelsu/Makefile
           
           echo "✅ Intégration forcée et sécurisée terminée !"
+          echo "--- CONTENU DE KSU.C ---"
+          head -n 50 drivers/kernelsu/ksu.c
+          echo "--- FIN ---"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
