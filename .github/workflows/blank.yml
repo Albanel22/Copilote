@@ -59,22 +59,49 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # Application du patch
+          # 1. Patch initial (on ignore les échecs, on répare après)
           patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel."
+          rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
           
-          # DEBUG : Afficher ce qui a échoué si les .rej existent
-          [ -f fs/open.c.rej ] && cat fs/open.c.rej
-          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej
+          # 2. Injection dans fs/proc/task_mmu.c
+          # On utilise un fichier temporaire pour éviter les erreurs d'alignement
+          cat << 'EOF' > inject_mmu.txt
+          #ifdef CONFIG_KSU_SUSFS
+          #include <linux/susfs.h>
+          #endif
+          EOF
+          sed -i '/#include "internal.h"/r inject_mmu.txt' fs/proc/task_mmu.c
           
-          # CORRECTION ROBUSTE
-          # On cherche un include très commun pour être sûr de l'injection
-          sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/open.c
-          sed -i '/#include <linux\/mm.h>/a #include <linux/susfs.h>' fs/proc/task_mmu.c
+          # 3. Injection dans fs/open.c (Variables)
+          cat << 'EOF' > inject_open_vars.txt
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+          	struct filename* fname;
+          	int status;
+          	int error;
+          #endif
+          EOF
+          sed -i '/long do_faccessat/r inject_open_vars.txt' fs/open.c
           
-          # Export symbol manquant
+          # 4. Injection dans fs/open.c (Logique)
+          cat << 'EOF' > inject_open_logic.txt
+          
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+          	fname = getname_safe(filename);
+          	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);
+          	putname_safe(fname);
+          
+          	if (status) {
+          		return error;
+          	}
+          #endif
+          EOF
+          # On insère après l'appel ksu_handle_faccessat
+          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/r inject_open_logic.txt' fs/open.c
+          
+          # 5. Export symbol manquant
           echo "EXPORT_SYMBOL(touch_set_state);" >> techpack/display/msm/motorola_touch_hooks.c
           
-          echo "✅ Corrections appliquées."
+          echo "✅ Injections propres et alignées !"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
