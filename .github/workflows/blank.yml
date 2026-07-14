@@ -62,7 +62,16 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-
+          
+      - name: Clean Failed Patch Artifacts
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🧹 Nettoyage des résidus de patch..."
+          rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
+          # Note : Si le patch a partiellement modifié les fichiers, 
+          # les sed suivants sont assez intelligents pour ignorer les doublons 
+          # s'ils sont bien codés, mais il est préférable de ne pas avoir de fichiers .rej qui traînent.
+          
       - name: Surgical Injection for SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
