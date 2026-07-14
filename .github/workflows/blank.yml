@@ -146,6 +146,25 @@ jobs:
             echo "❌ ERREUR CRITIQUE: Code SUSFS non trouvé dans fs/proc/task_mmu.c"
             exit 1
           fi
+
+      - name: Enforce KernelSU and SUSFS Config
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          CONFIG_FILE="arch/arm64/configs/vendor/kiev_perfect_defconfig"
+          
+          echo "🛠️ Nettoyage et injection des flags dans $CONFIG_FILE..."
+          
+          # 1. On supprime les entrées si elles existent déjà pour éviter les doublons
+          sed -i '/CONFIG_KSU=/d' $CONFIG_FILE
+          sed -i '/CONFIG_KSU_SUSFS=/d' $CONFIG_FILE
+          sed -i '/CONFIG_KSU_SUSFS_SUS_PATH=/d' $CONFIG_FILE
+          
+          # 2. On ajoute les options obligatoires
+          echo "CONFIG_KSU=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $CONFIG_FILE
+          
+          echo "✅ Flags ajoutés avec succès."
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
