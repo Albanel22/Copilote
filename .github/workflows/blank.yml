@@ -134,7 +134,10 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # Configuration correcte sans copie inutile
+          # 1. Copier le defconfig à l'emplacement attendu par le Makefile
+          echo "📂 Préparation du defconfig..."
+          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          
           CONFIG_FILE="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
           
           echo "🔧 Activation de KernelSU et SUSFS dans $CONFIG_FILE..."
@@ -153,28 +156,19 @@ jobs:
           echo "💉 INJECTION DU CORRECTIF TACTILE..."
           if [ -f "techpack/display/msm/msm_drv.c" ]; then
             sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
-          cat << 'EOF' > display_patch.tmp
-#include <linux/notifier.h>
-#include <linux/module.h>
-static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);
-int panel_register_notifier(struct notifier_block *nb) {
-    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);
-}
-EXPORT_SYMBOL(panel_register_notifier);
-int panel_unregister_notifier(struct notifier_block *nb) {
-    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);
-}
-EXPORT_SYMBOL(panel_unregister_notifier);
-void touch_set_state(int state) { return; }
-EXPORT_SYMBOL(touch_set_state);
-EOF
+            cat <<EOF > display_patch.tmp
+          #include <linux/notifier.h>
+          #include <linux/module.h>
+          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);int panel_register_notifier(struct notifier_block *nb) {return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);}
+          EXPORT_SYMBOL(panel_register_notifier);int panel_unregister_notifier(struct notifier_block *nb) {return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);}
+          EXPORT_SYMBOL(papanel_unregister_notifier9void touch_set_state(int state) { return; }EXPORT_SYMBOL(touch_set_state);
+          EOF
             sed -i '/#include "msm_drv.h"/r display_patch.tmp' techpack/display/msm/msm_drv.c
             rm -f display_patch.tmp
           fi
           
           echo "🚀 Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 vendor/${{ env.DEFCONFIG }} 
-
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
       - name: Package with Magiskboot
         run: |
           echo "📦 Préparation du packaging avec Magiskboot..."
