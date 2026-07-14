@@ -24,15 +24,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img stock officiel..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
+
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Clean Stock Kernel Test (No KSU)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -43,7 +46,7 @@ jobs:
             TARGET_CONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
           fi
           echo "✅ Prêt pour un build 100% stock LineageOS."
-          
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -51,121 +54,62 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: |
             ${{ runner.os }}-ccache-
+
       - name: Configure ccache Size
         run: |
           mkdir -p ~/.cache/ccache
           echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
+
       - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # Téléchargement et intégration de KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          # Vérification que le dossier KernelSU existe
           if [ -d "KernelSU" ]; then
             echo "✅ KernelSU intégré avec succès dans les sources."
           else
             echo "❌ Échec de l'intégration de KernelSU."
             exit 1
           fi
-          
+
       - name: Integrate SUSFS (Debugging Mode)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          
-          # On tente le patch, mais on ne s'arrête pas s'il échoue
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Le patch a échoué, vérification des fichiers .rej..."
-          
-          # Maintenant, on affiche les erreurs pour analyse
-          if [ -f fs/open.c.rej ]; then
-            echo "--- Contenu de fs/open.c.rej ---"
-            cat fs/open.c.rej
-          fi
-          if [ -f fs/proc/task_mmu.c.rej ]; then
-            echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
-            cat fs/proc/task_mmu.c.rej
-          fi
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Manual Injection for SUSFS
+      - name: Surgical Injection for SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Correction de fs/proc/task_mmu.c (Insertion de l'include manquant)
-          sed -i '/#include "internal.h"/a \
+          # 1. Fixer fs/proc/task_mmu.c
+          sed -i '/#include <asm\/tlbflush.h>/a \
           #ifdef CONFIG_KSU_SUSFS\
           #include <linux/susfs.h>\
           #endif' fs/proc/task_mmu.c
 
-          # 2. Correction de fs/open.c (Injection des variables avant KSU)
-          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/i \
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
-          struct filename* fname;\
-          int status;\
-          int error;\
-          #endif' fs/open.c
+          # 2. Fixer fs/open.c (Injection du header)
+          sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/,/^$/ {
+            /^\tstruct vfsmount \*mnt;/i \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\struct filename* fname;\int status;\int error;\
+          #endif
+          }' fs/open.c
 
-          # 3. Correction de fs/open.c (Injection du hook après KSU)
+          # 3. Fixer fs/open.c (Injection de l'appel)
           sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/a \
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
-          fname = getname_safe(filename);\
-          status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
-          putname_safe(fname);\
-          if (status) {\
-              return error;\
-          }\
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\fname = getname_safe(filename);\status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\putname_safe(fname);\if (status) {\return error;\}\
           #endif' fs/open.c
-
-          echo "✅ Injections manuelles de SUSFS appliquées avec succès !"
-
-      - name: Inspect Reject Files
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "--- Contenu de fs/open.c.rej ---"
-          cat fs/open.c.rej
-          echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
-          cat fs/proc/task_mmu.c.rej
+          echo "✅ Injections chirurgicales SUSFS appliquées avec succès !"
 
       - name: Verify Patch Injection
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "🔍 Vérification de fs/open.c..."
-          # On vérifie si notre injection de SUSFS est présente dans le fichier
-          if grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
-            echo "✅ Code SUSFS trouvé dans fs/open.c"
-          else
-            echo "❌ ERREUR CRITIQUE: Code SUSFS non trouvé dans fs/open.c"
-            exit 1
-          fi
-
+          grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c || { echo "❌ ERREUR: Code SUSFS non trouvé dans fs/open.c"; exit 1; }
           echo "🔍 Vérification de fs/proc/task_mmu.c..."
-          # On vérifie si notre injection est présente dans le fichier
-          if grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c; then
-            echo "✅ Code SUSFS trouvé dans fs/proc/task_mmu.c"
-          else
-            echo "❌ ERREUR CRITIQUE: Code SUSFS non trouvé dans fs/proc/task_mmu.c"
-            exit 1
-          fi
+          grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c || { echo "❌ ERREUR: Code SUSFS non trouvé dans fs/proc/task_mmu.c"; exit 1; }
+          echo "✅ Injections vérifiées avec succès."
 
-      - name: Enforce KernelSU and SUSFS Config
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          CONFIG_FILE="arch/arm64/configs/vendor/kiev_perfect_defconfig"
-          
-          echo "🛠️ Nettoyage et injection des flags dans $CONFIG_FILE..."
-          
-          # 1. On supprime les entrées si elles existent déjà pour éviter les doublons
-          sed -i '/CONFIG_KSU=/d' $CONFIG_FILE
-          sed -i '/CONFIG_KSU_SUSFS=/d' $CONFIG_FILE
-          sed -i '/CONFIG_KSU_SUSFS_SUS_PATH=/d' $CONFIG_FILE
-          
-          # 2. On ajoute les options obligatoires
-          echo "CONFIG_KSU=y" >> $CONFIG_FILE
-          echo "CONFIG_KSU_SUSFS=y" >> $CONFIG_FILE
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $CONFIG_FILE
-          
-          echo "✅ Flags ajoutés avec succès."
-          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -232,6 +176,3 @@ jobs:
         with:
           name: kernel-motorola_one_5g_ace-latest
           path: final_output/
-    
-      
-      
