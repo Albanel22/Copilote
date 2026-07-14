@@ -174,31 +174,24 @@ jobs:
           fi
           echo "🚀 Étape 2 : Compilation finale du noyau (Sécurisée V2) ..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE KCFLAGS="$KCFLAGS" -j2 Image
-          
-      - name: Repack Clean Boot Image
-        working-directory: ${{ github.workspace }}
-        shell: bash
+
+      - name: Package with AnyKernel3
         run: |
-          set -euo pipefail
-          mkdir -p repack && cp boot-stock.img repack/boot.img
-          cd repack
-          curl -fLo magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk"
-          unzip -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
-          mv libmagiskboot.so magiskboot
-          chmod +x magiskboot
-          
-          ./magiskboot unpack boot.img
-          
-          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          cp -v "$ABS_IMAGE_ARM64" kernel
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img "${{ github.workspace }}/boot.img"
+          git clone https://github.com/osm0sis/AnyKernel3 -b master --depth=1 anykernel
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/
+          cd anykernel
+          zip -r9 ../kernel-build-234.zip *
+
       - name: Organize Final Output Artifacts
         run: |
           mkdir -p final_output
-          mv "${{ github.workspace }}/boot.img" final_output/boot.img
+          mv kernel-build-234.zip final_output/
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola_one_5g_ace-latest
           path: final_output/
+    
+      
+      
