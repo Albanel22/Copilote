@@ -173,7 +173,7 @@ jobs:
           fi
           
           echo "🚀 Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 vendor/${{ env.DEFCONFIG }} 
 
       - name: Package with Magiskboot
         run: |
