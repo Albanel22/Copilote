@@ -128,9 +128,6 @@ jobs:
           echo "🔧 Activation de KernelSU dans la configuration..."
           echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/kiev_perfect_defconfig
           
-          echo "📥 Injection de la configuration d'origine..."
-          cp ../lito-perf_defconfig arch/arm64/configs/vendor/lito-perf_defconfig
-          
           echo "🛠️ Étape 1 : Génération de la configuration d'origine pure..."
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=$CROSS_COMPILE vendor/kiev_perfect_defconfig
           echo "🔓 FORCE-PASS DES SIGNATURES DANS LE CODE SOURCE (BUILD 129) 🔓"
