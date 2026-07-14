@@ -125,6 +125,27 @@ jobs:
           cat fs/open.c.rej
           echo "--- Contenu de fs/proc/task_mmu.c.rej ---"
           cat fs/proc/task_mmu.c.rej
+
+      - name: Verify Patch Injection
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔍 Vérification de fs/open.c..."
+          # On vérifie si notre injection de SUSFS est présente dans le fichier
+          if grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
+            echo "✅ Code SUSFS trouvé dans fs/open.c"
+          else
+            echo "❌ ERREUR CRITIQUE: Code SUSFS non trouvé dans fs/open.c"
+            exit 1
+          fi
+
+          echo "🔍 Vérification de fs/proc/task_mmu.c..."
+          # On vérifie si notre injection est présente dans le fichier
+          if grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c; then
+            echo "✅ Code SUSFS trouvé dans fs/proc/task_mmu.c"
+          else
+            echo "❌ ERREUR CRITIQUE: Code SUSFS non trouvé dans fs/proc/task_mmu.c"
+            exit 1
+          fi
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
