@@ -32,7 +32,7 @@ jobs:
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
       - name: Clone Kernel Source
         run: |
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
       - name: Clean Stock Kernel Test (No KSU)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
