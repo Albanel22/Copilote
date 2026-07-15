@@ -69,39 +69,48 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
+          # Vider le cache pour forcer une recompilation totale
+          ccache -C
+          
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linix-gnueabi-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # 1. Préparation CONFIG (CRUCIAL : avant la génération de la config)
-          echo "📂 Préparation du defconfig..."
-          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG }}"
+          # 1. Génération de la configuration de base
+          echo "📂 Génération de la config de base..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          echo "🔧 Injection des flags KSU/SUSFS dans $CONFIG_FILE..."
+          # 2. Injection forcée dans le .config généré
+          echo "🔧 Injection forcée des flags KSU/SUSFS dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-          } >> $CONFIG_FILE
+          } >> ${{ env.BUILD_DIR }}/.config
           
-          # 2. Génération de la configuration
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          # 3. Mise à jour des dépendances (crucial pour valider les nouveaux flags)
+          echo "⚡ Mise à jour de la configuration avec olddefconfig..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 3. Patchs post-config (Signatures & Tactile)
-          echo "🔓 FORCE-PASS DES SIGNATURES..."
+          # 4. Vérification critique
+          echo "🔍 Vérification des flags dans .config final..."
+          grep "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
+          
+          # 5. Correctifs signatures & Tactile
+          echo "🔓 Force-pass des signatures..."
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          echo "💉 INJECTION DU CORRECTIF TACTILE..."
+          echo "💉 Injection patch tactile..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          # 4. Compilation finale
+          # 6. Compilation finale
+          echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
-
+          
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
