@@ -179,9 +179,11 @@ jobs:
           fi
           cp boot-stock.img repack/boot.img
           
-          # 2. Téléchargement de l'APK Magisk
-          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
-          
+      - name: Télécharger magiskboot
+        run: |
+          wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-x86_64 -O magiskboot
+          chmod +x magiskboot
+      
           # 3. Extraction dynamique du binaire (cherche libmagiskboot.so peu importe le dossier)
           # Cela évite les erreurs de chemin introuvable
           BIN_PATH=$(unzip -l Magisk-v27.0.apk | grep "libmagiskboot.so" | head -n1 | awk '{print $4}')
