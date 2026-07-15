@@ -45,17 +45,25 @@ jobs:
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # KernelSU
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # ... (ton code de clonage et de copie)
           
-          # SUSFS
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          # On ajoute || true ici pour que le build ne plante pas immédiatement
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+
+      - name: Debug and Print Patch Failures
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "--- CONTENU DE fs/open.c.rej ---"
+          [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
           
-          # Application propre du patch
-          # Si le patch échoue, on arrête le build immédiatement pour éviter un système corrompu
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch
+          echo "--- CONTEXTE DE fs/open.c (Lignes 370-400) ---"
+          sed -n '370,400p' fs/open.c
+          
+          echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
+          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Fichier fs/proc/task_mmu.c.rej introuvable"
+          
+          echo "--- CONTEXTE DE fs/proc/task_mmu.c (Lignes 10-50) ---"
+          sed -n '10,50p' fs/proc/task_mmu.c
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
