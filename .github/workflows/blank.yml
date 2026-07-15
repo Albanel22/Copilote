@@ -179,17 +179,21 @@ jobs:
           fi
           cp boot-stock.img repack/boot.img
           
-          # 2. Téléchargement stable du binaire magiskboot (URL Raw directe)
-          # Cette URL pointe directement vers le fichier binaire, sans redirection
-          curl -Lo repack/magiskboot https://raw.githubusercontent.com/osm0sis/mkbootimg/master/bin/magiskboot
+          # 2. Téléchargement de l'APK Magisk
+          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          
+          # 3. Extraction dynamique du binaire (cherche libmagiskboot.so peu importe le dossier)
+          # Cela évite les erreurs de chemin introuvable
+          BIN_PATH=$(unzip -l Magisk-v27.0.apk | grep "libmagiskboot.so" | head -n1 | awk '{print $4}')
+          unzip -p Magisk-v27.0.apk "$BIN_PATH" > repack/magiskboot
           chmod +x repack/magiskboot
           
-          # 3. Unpack
+          # 4. Unpack
           cd repack
           ./magiskboot unpack boot.img
           
-          # 4. Injecter le kernel
-          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          # 5. Injecter le kernel
+          ABS_IMAGE_ARM64="/home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image"
           
           if [ -f "$ABS_IMAGE_ARM64" ]; then
             cp -v "$ABS_IMAGE_ARM64" kernel
@@ -198,7 +202,7 @@ jobs:
             exit 1
           fi
           
-          # 5. Repack
+          # 6. Repack
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../boot.img
           cd ..
