@@ -1,5 +1,4 @@
 name: Kernel CI — build & package
-
 on:
   push:
     branches: [ main, master ]
@@ -29,8 +28,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "📥 Téléchargement du boot.img stock officiel..."
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Lien mort ou invalide pour le boot.img"; exit 1; }
+          echo "📥 Téléchargement du boot.img..."
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
 
       - name: Clone Kernel Source
         run: |
@@ -41,97 +40,23 @@ jobs:
         with:
           path: ~/.cache/ccache
           key: ${{ runner.os }}-ccache-kernel
-          restore-keys: |
-            ${{ runner.os }}-ccache-
+          restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Configure ccache Size
-        run: |
-          mkdir -p ~/.cache/ccache
-          echo "max_size = ${{ env.CCACHE_SIZE }}" > ~/.cache/ccache/ccache.conf
-
-      - name: Integrate KernelSU
+      - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
+          # KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          [ -d "KernelSU" ] || { echo "❌ Échec KernelSU"; exit 1; }
-
-      - name: Integrate SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
+          
+          # SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # On applique le patch en autorisant l'échec (|| true)
-          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-          # IMPORTANT : On supprime les fichiers .rej créés par les échecs
-          # Cela permet à l'étape suivante (Surgical Injection) de travailler sur des fichiers propres
-          rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
-          echo "✅ Fichiers .rej nettoyés, les injections chirurgicales vont prendre le relais."
-          
-      - name: Debug Patch Artifacts
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🔍 Analyse des échecs de patch..."
-        
-          echo "--- CONTENU DE fs/open.c.rej ---"
-          [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
-        
-          echo "--- CONTEXTE DE fs/open.c (Lignes 370-400) ---"
-          sed -n '370,400p' fs/open.c
-        
-          echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
-          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Fichier fs/proc/task_mmu.c.rej introuvable"
-        
-          echo "--- CONTEXTE DE fs/proc/task_mmu.c (Lignes 10-50) ---"
-          sed -n '10,50p' fs/proc/task_mmu.c
-          # rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
-          echo "✅ Debug terminé, suppression volontairement désactivée."
-          
-      - name: Surgical Injection for SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          # Injection via heredoc (plus stable que sed)
-          cat <<EOF > susfs_patch.h
-          #ifdef CONFIG_KSU_SUSFS
-          #include <linux/susfs.h>
-          #endif
-          EOF
-          # Patch task_mmu.c
-          sed -i '/#include <asm\/tlbflush.h>/r susfs_patch.h' fs/proc/task_mmu.c
-          
-          # Patch open.c - Injection Header
-          cat <<EOF > open_header.h
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-          struct filename* fname;
-          int status;
-          int error;
-          #endif
-          EOF
-          sed -i '/struct vfsmount \*mnt;/r open_header.h' fs/open.c
-          
-          # Patch open.c - Injection Hook
-          cat <<EOF > open_hook.h
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-          fname = getname_safe(filename);
-          status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);
-          putname_safe(fname);
-          if (status) {
-              return error;
-          }
-          #endif
-          EOF
-          echo "✅ Injections chirurgicales SUSFS appliquées !"
+          # Application propre du patch
+          # Si le patch échoue, on arrête le build immédiatement pour éviter un système corrompu
+          patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch
 
-      - name: Verify Patch Injection
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          # Ces commandes vérifient simplement que ton code manuel est présent
-          grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c || { echo "❌ ERREUR: SUSFS non trouvé dans fs/open.c"; exit 1; }
-          grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c || { echo "❌ ERREUR: SUSFS non trouvé dans fs/task_mmu.c"; exit 1; }
-          echo "✅ Injections vérifiées avec succès !"
-          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -141,99 +66,59 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CROSS_COMPILE_ARM32=arm-linix-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # 1. Copier le defconfig à l'emplacement attendu par le Makefile
+          # 1. Préparation CONFIG (CRUCIAL : avant la génération de la config)
           echo "📂 Préparation du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          CONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG }}"
           
-          CONFIG_FILE="arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
+          echo "🔧 Injection des flags KSU/SUSFS dans $CONFIG_FILE..."
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+          } >> $CONFIG_FILE
           
-          echo "🔧 Activation de KernelSU et SUSFS dans $CONFIG_FILE..."
-          echo "CONFIG_KSU=y" >> $CONFIG_FILE
-          echo "CONFIG_KSU_SUSFS=y" >> $CONFIG_FILE
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $CONFIG_FILE
-          
-          echo "🛠️ Génération de la configuration..."
+          # 2. Génération de la configuration
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
+          # 3. Patchs post-config (Signatures & Tactile)
           echo "🔓 FORCE-PASS DES SIGNATURES..."
-          if [ -f "kernel/module.c" ]; then
-            sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          fi
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          echo "💉 INJECTION DU CORRECTIF TACTILE (SÉCURISÉ)..."
-          if [ -f "techpack/display/msm/msm_drv.c" ]; then
-            sed -i 's/strnstr(dev_name(dev), "mdp")/strnstr(dev_name(dev), "mdp", strlen(dev_name(dev)))/g' techpack/display/msm/msm_drv.c
-            
-            # Utilisation de printf pour éviter les problèmes d'indentation EOF
-            printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
-            
-            echo "✅ Patch tactile ajouté à la fin du fichier."
-          fi
+          echo "💉 INJECTION DU CORRECTIF TACTILE..."
+          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          echo "🚀 Compilation finale du noyau..."
+          # 4. Compilation finale
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
-          
-      - name: Repack Clean Boot Image
+
+      - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p repack
-          
-          # 1. S'assurer que le boot-stock existe
-          if [ ! -f "boot-stock.img" ]; then
-             curl -Lo boot-stock.img "${{ env.BOOT_URL }}"
-          fi
           cp boot-stock.img repack/boot.img
           
-      - name: Préparer Magiskboot et Repack du Boot Image
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        run: |
-         set -euo pipefail
-         mkdir -p repack
-        
-         # 1. Télécharger l'APK officiel (remplace le lien mort)
-         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
-        
-         # 2. Extraire magiskboot (la version x86_64 est dans l'APK)
-         unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
-         mv lib/x86_64/libmagiskboot.so repack/magiskboot
-         chmod +x repack/magiskboot
-
-         # 3. Unpack
-         cd repack
-         ./magiskboot unpack boot.img
-
-         # 4. Injecter le kernel
-         ABS_IMAGE_ARM64="/home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image"
-         if [ -f "$ABS_IMAGE_ARM64" ]; then
-            cp -v "$ABS_IMAGE_ARM64" kernel
-         else
-            echo "❌ ERREUR : Kernel image non trouvé à $ABS_IMAGE_ARM64"
-            exit 1
-         fi
-
-         # 5. Repack
-         ./magiskboot repack boot.img new-boot.img
-         mv new-boot.img ../boot.img
-         cd ..
+          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
+          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
+          mv lib/x86_64/libmagiskboot.so repack/magiskboot
+          chmod +x repack/magiskboot
           
-      - name: Organize Final Output Artifacts
-        run: |
-         mkdir -p final_output
-         # On déplace le boot.img généré vers le dossier final
-         if [ -f "boot.img" ]; then
-         mv boot.img final_output/
-         else
-          echo "❌ ERREUR : boot.img introuvable, impossible de finaliser."
-          exit 1
-         fi
+          cd repack
+          ./magiskboot unpack boot.img
+          cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
+          ./magiskboot repack boot.img new-boot.img
+          mv new-boot.img ../final_boot.img
+          cd ..
+          
+          mkdir -p final_output
+          mv final_boot.img final_output/boot.img
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola_one_5g_ace-latest
-          path: final_output/
+          name: kernel-motorola_final
+          path: final_output/boot.img
