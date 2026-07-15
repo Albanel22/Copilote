@@ -70,14 +70,24 @@ jobs:
           rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
           echo "✅ Fichiers .rej nettoyés, les injections chirurgicales vont prendre le relais."
           
-      - name: Clean Failed Patch Artifacts
+      - name: Debug Patch Artifacts
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🧹 Nettoyage des résidus de patch..."
-          rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
-          # Note : Si le patch a partiellement modifié les fichiers, 
-          # les sed suivants sont assez intelligents pour ignorer les doublons 
-          # s'ils sont bien codés, mais il est préférable de ne pas avoir de fichiers .rej qui traînent.
+          echo "🔍 Analyse des échecs de patch..."
+        
+          echo "--- CONTENU DE fs/open.c.rej ---"
+          [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
+        
+          echo "--- CONTEXTE DE fs/open.c (Lignes 370-400) ---"
+          sed -n '370,400p' fs/open.c
+        
+          echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
+          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Fichier fs/proc/task_mmu.c.rej introuvable"
+        
+          echo "--- CONTEXTE DE fs/proc/task_mmu.c (Lignes 10-50) ---"
+          sed -n '10,50p' fs/proc/task_mmu.c
+          # rm -f fs/open.c.rej fs/proc/task_mmu.c.rej
+          echo "✅ Debug terminé, suppression volontairement désactivée."
           
       - name: Surgical Injection for SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
