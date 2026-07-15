@@ -87,7 +87,7 @@ jobs:
           # Copie defconfig
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # Injection MASSIVE des flags (on ne prend aucun risque)
+          # Injection MINIMALISTE des flags
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -95,12 +95,12 @@ jobs:
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_KPROBES_ON_FTRACE=y"
           } >> arch/arm64/configs/${{ env.DEFCONFIG }}
           
           # Compilation
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 -j$(nproc) Image
+
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
