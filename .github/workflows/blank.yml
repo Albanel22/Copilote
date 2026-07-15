@@ -179,9 +179,9 @@ jobs:
           fi
           cp boot-stock.img repack/boot.img
           
-          # 2. Télécharger le binaire magiskboot pour Linux (x64)
-          # Utilisation d'une source stable pour le binaire linux
-          curl -Lo repack/magiskboot https://github.com/osm0sis/mkbootimg/raw/master/bin/magiskboot
+          # 2. Téléchargement stable du binaire magiskboot (URL Raw directe)
+          # Cette URL pointe directement vers le fichier binaire, sans redirection
+          curl -Lo repack/magiskboot https://raw.githubusercontent.com/osm0sis/mkbootimg/master/bin/magiskboot
           chmod +x repack/magiskboot
           
           # 3. Unpack
@@ -189,7 +189,6 @@ jobs:
           ./magiskboot unpack boot.img
           
           # 4. Injecter le kernel
-          # On vérifie bien le chemin source
           ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           
           if [ -f "$ABS_IMAGE_ARM64" ]; then
