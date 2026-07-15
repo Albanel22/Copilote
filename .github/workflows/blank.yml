@@ -214,9 +214,14 @@ jobs:
           
       - name: Organize Final Output Artifacts
         run: |
-          mkdir -p final_output
-          mv kernel-build-234.zip final_output/
-
+         mkdir -p final_output
+         # On déplace le boot.img généré vers le dossier final
+         if [ -f "boot.img" ]; then
+         mv boot.img final_output/
+         else
+          echo "❌ ERREUR : boot.img introuvable, impossible de finaliser."
+          exit 1
+         fi
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
