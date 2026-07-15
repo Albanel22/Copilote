@@ -166,42 +166,43 @@ jobs:
           echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
           
-      - name: Package with Magiskboot
+      - name: Repack Clean Boot Image
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
-          echo "📦 Préparation du packaging avec Magiskboot..."
+          set -euo pipefail
+          mkdir -p repack
           
-          # 1. Téléchargement de Magisk APK et extraction du binaire (méthode fiable)
-          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
-          unzip Magisk-v27.0.apk assets/arm64-v8a/magiskboot
-          mv assets/arm64-v8a/magiskboot ./magiskboot
-          chmod +x magiskboot
-          
-          # 2. Téléchargement du boot stock si manquant
+          # 1. S'assurer que le boot-stock existe
           if [ ! -f "boot-stock.img" ]; then
-            echo "📥 Téléchargement du boot.img stock..."
-            curl -Lo boot-stock.img "${{ env.BOOT_URL }}"
+             curl -Lo boot-stock.img "${{ env.BOOT_URL }}"
           fi
+          cp boot-stock.img repack/boot.img
           
-          # 3. Décompression
-          ./magiskboot unpack boot-stock.img
+          # 2. Télécharger le binaire magiskboot pour Linux (x64)
+          # Utilisation d'une source stable pour le binaire linux
+          curl -Lo repack/magiskboot https://github.com/osm0sis/mkbootimg/raw/master/bin/magiskboot
+          chmod +x repack/magiskboot
           
-          # 4. Remplacement du noyau
-          IMAGE_PATH="kernel_src/out/arch/arm64/boot/Image"
-          if [ -f "$IMAGE_PATH" ]; then
-            cp "$IMAGE_PATH" kernel
-            echo "✅ Noyau injecté dans le boot.img"
+          # 3. Unpack
+          cd repack
+          ./magiskboot unpack boot.img
+          
+          # 4. Injecter le kernel
+          # On vérifie bien le chemin source
+          ABS_IMAGE_ARM64="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          
+          if [ -f "$ABS_IMAGE_ARM64" ]; then
+            cp -v "$ABS_IMAGE_ARM64" kernel
           else
-            echo "❌ ERREUR: Image du noyau non trouvée à $IMAGE_PATH"
+            echo "❌ ERREUR : Kernel image non trouvé à $ABS_IMAGE_ARM64"
             exit 1
           fi
           
-          # 5. Repackage
-          ./magiskboot repack boot-stock.img boot-custom.img
-          
-          # 6. Finalisation
-          mkdir -p final_output
-          mv boot-custom.img final_output/
-          echo "🚀 boot.img généré avec succès dans final_output/"
+          # 5. Repack
+          ./magiskboot repack boot.img new-boot.img
+          mv new-boot.img ../boot.img
+          cd ..
           
       - name: Organize Final Output Artifacts
         run: |
