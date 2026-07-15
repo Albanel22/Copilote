@@ -179,35 +179,38 @@ jobs:
           fi
           cp boot-stock.img repack/boot.img
           
-      - name: Télécharger magiskboot
+      - name: Préparer Magiskboot et Repack du Boot Image
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
-          wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-x86_64 -O magiskboot
-          chmod +x magiskboot
-      
-          # 3. Extraction dynamique du binaire (cherche libmagiskboot.so peu importe le dossier)
-          # Cela évite les erreurs de chemin introuvable
-          BIN_PATH=$(unzip -l Magisk-v27.0.apk | grep "libmagiskboot.so" | head -n1 | awk '{print $4}')
-          unzip -p Magisk-v27.0.apk "$BIN_PATH" > repack/magiskboot
-          chmod +x repack/magiskboot
-          
-          # 4. Unpack
-          cd repack
-          ./magiskboot unpack boot.img
-          
-          # 5. Injecter le kernel
-          ABS_IMAGE_ARM64="/home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image"
-          
-          if [ -f "$ABS_IMAGE_ARM64" ]; then
+         set -euo pipefail
+         mkdir -p repack
+        
+         # 1. Télécharger l'APK officiel (remplace le lien mort)
+         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
+        
+         # 2. Extraire magiskboot (la version x86_64 est dans l'APK)
+         unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
+         mv lib/x86_64/libmagiskboot.so repack/magiskboot
+         chmod +x repack/magiskboot
+
+         # 3. Unpack
+         cd repack
+         ./magiskboot unpack boot.img
+
+         # 4. Injecter le kernel
+         ABS_IMAGE_ARM64="/home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image"
+         if [ -f "$ABS_IMAGE_ARM64" ]; then
             cp -v "$ABS_IMAGE_ARM64" kernel
-          else
+         else
             echo "❌ ERREUR : Kernel image non trouvé à $ABS_IMAGE_ARM64"
             exit 1
-          fi
-          
-          # 6. Repack
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../boot.img
-          cd ..
+         fi
+
+         # 5. Repack
+         ./magiskboot repack boot.img new-boot.img
+         mv new-boot.img ../boot.img
+         cd ..
           
       - name: Organize Final Output Artifacts
         run: |
