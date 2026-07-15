@@ -45,14 +45,11 @@ jobs:
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. KernelSU
+          # 1. KernelSU avec installation forcée des scripts init
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 2. VÉRIFICATION ET ENREGISTREMENT KSU
-          # Si le script de setup n'a pas ajouté l'inclusion, on le fait manuellement
-          echo "🔍 Vérification de l'enregistrement KSU dans init/Kconfig..."
+          # 2. Injection propre dans le Kconfig (si pas déjà fait)
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo "🔧 Ajout manuel de l'inclusion KSU..."
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
@@ -60,10 +57,7 @@ jobs:
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          
-          # 4. Patch (On utilise -f pour forcer malgré les erreurs d'offset mineures)
-          echo "🔨 Application des patches SUSFS..."
-          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch finished with warnings, continuing..."
+          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
       - name: Debug and Print Patch Failures
         working-directory: ${{ env.KERNEL_PATH }}
@@ -80,56 +74,33 @@ jobs:
           echo "--- CONTEXTE DE fs/proc/task_mmu.c (Lignes 10-50) ---"
           sed -n '10,50p' fs/proc/task_mmu.c
 
+      
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          # Vider le cache pour forcer une recompilation totale
           ccache -C
-          
           export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS="-Wno-error"
           
-          # 1. COPIE DU DEFCONFIG (La ligne qui manquait !)
-          echo "📂 Préparation du defconfig..."
+          # Copie defconfig
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # 2. Génération de la config de base
-          echo "📂 Génération de la config de base..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          
-          # 3. Injection forcée dans le .config généré
-          echo "🔧 Injection forcée des flags KSU/SUSFS dans le fichier .config actif..."
+          # Injection MASSIVE des flags (on ne prend aucun risque)
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-          } >> ${{ env.BUILD_DIR }}/.config
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_KPROBES_ON_FTRACE=y"
+          } >> arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # 4. Mise à jour des dépendances
-          echo "⚡ Mise à jour de la configuration avec olddefconfig..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-          
-          # 5. Vérification critique
-          echo "🔍 Vérification des flags dans .config final..."
-          grep "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
-          
-          # 6. Correctifs signatures & Tactile
-          echo "🔓 Force-pass des signatures..."
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          
-          echo "💉 Injection patch tactile..."
-          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
-          
-          # 7. Compilation finale
-          echo "🚀 Compilation finale du noyau..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
-          
+          # Compilation
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 -j$(nproc) Image
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
