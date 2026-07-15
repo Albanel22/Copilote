@@ -112,15 +112,15 @@ jobs:
           }
           #endif
           EOF
-          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/r open_hook.h' fs/open.c
           echo "✅ Injections chirurgicales SUSFS appliquées !"
 
       - name: Verify Patch Injection
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c || { echo "❌ ERREUR: SUSFS fs/open.c"; exit 1; }
-          grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c || { echo "❌ ERREUR: SUSFS fs/task_mmu.c"; exit 1; }
-          echo "✅ Injections vérifiées."
+          # Ces commandes vérifient simplement que ton code manuel est présent
+          grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c || { echo "❌ ERREUR: SUSFS non trouvé dans fs/open.c"; exit 1; }
+          grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c || { echo "❌ ERREUR: SUSFS non trouvé dans fs/task_mmu.c"; exit 1; }
+          echo "✅ Injections vérifiées avec succès !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
