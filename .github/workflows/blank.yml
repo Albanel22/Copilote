@@ -170,22 +170,23 @@ jobs:
         run: |
           echo "📦 Préparation du packaging avec Magiskboot..."
           
-          # 1. Téléchargement de magiskboot (version stable)
-          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-arm64
-          chmod +x magiskboot-arm64
-          mv magiskboot-arm64 magiskboot
+          # 1. Téléchargement de Magisk APK et extraction du binaire (méthode fiable)
+          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          unzip Magisk-v27.0.apk assets/arm64-v8a/magiskboot
+          mv assets/arm64-v8a/magiskboot ./magiskboot
+          chmod +x magiskboot
           
-          # 2. Décompression du boot stock (doit être présent suite au téléchargement)
-          if [ -f "boot-stock.img" ]; then
-            ./magiskboot unpack boot-stock.img
-          else
-            echo "❌ ERREUR: boot-stock.img introuvable !"
-            exit 1
+          # 2. Téléchargement du boot stock si manquant
+          if [ ! -f "boot-stock.img" ]; then
+            echo "📥 Téléchargement du boot.img stock..."
+            curl -Lo boot-stock.img "${{ env.BOOT_URL }}"
           fi
           
-          # 3. Remplacement du noyau stock par notre noyau patché
-          # On vérifie que le fichier Image a bien été généré
-          IMAGE_PATH="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          # 3. Décompression
+          ./magiskboot unpack boot-stock.img
+          
+          # 4. Remplacement du noyau
+          IMAGE_PATH="kernel_src/out/arch/arm64/boot/Image"
           if [ -f "$IMAGE_PATH" ]; then
             cp "$IMAGE_PATH" kernel
             echo "✅ Noyau injecté dans le boot.img"
@@ -194,10 +195,10 @@ jobs:
             exit 1
           fi
           
-          # 4. Repackage
+          # 5. Repackage
           ./magiskboot repack boot-stock.img boot-custom.img
           
-          # 5. Finalisation
+          # 6. Finalisation
           mkdir -p final_output
           mv boot-custom.img final_output/
           echo "🚀 boot.img généré avec succès dans final_output/"
