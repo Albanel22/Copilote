@@ -82,8 +82,8 @@ jobs:
           echo "📂 Génération de la config de base..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
-          echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
+          # 3. Injection forcée des flags (KSU + KPROBES + OVERLAYFS)
+          echo "🔧 Injection forcée des flags requis..."
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -91,6 +91,8 @@ jobs:
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           # 4. Mise à jour des dépendances
@@ -99,8 +101,9 @@ jobs:
           
           # 5. Vérification critique
           echo "🔍 Vérification des flags dans .config final..."
-          grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
-          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré ! Arrêt."; exit 1; }
+          grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré !"; exit 1; }
+          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré !"; exit 1; }
+          grep -q "CONFIG_OVERLAY_FS=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ OVERLAYFS non configuré !"; exit 1; }
           
           # 6. Correctifs signatures & Tactile
           echo "🔓 Force-pass des signatures..."
