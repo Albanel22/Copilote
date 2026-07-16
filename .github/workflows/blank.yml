@@ -48,33 +48,36 @@ jobs:
         run: |
           # 1. Setup KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          
+          # 2. FIX: Copie forcée des headers KernelSU dans le path système
+          # On cherche où est le header et on le copie là où le compilateur le cherche
+          find drivers/kernelsu -name "kernelsu.h" -exec cp {} include/linux/ \;
+          
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # 2. Setup SUSFS
+          # 3. Setup SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 3. FIX: Injection des dépendances pour susfs.h
+          # 4. FIX: Injection des dépendances pour susfs.h
           sed -i '1i #include <linux/mm_types.h>\n#include <linux/fs.h>\n#include <linux/stat.h>' include/linux/susfs.h
           
-          # 4. Sauvegarder task_mmu.c original avant le patch
+          # 5. Sauvegarder task_mmu.c original
           cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
           
-          # 5. Application du patch
+          # 6. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 6. RESTAURATION CIBLÉE (On répare les dégâts du patch sur task_mmu.c)
+          # 7. Restauration task_mmu.c
           mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
           
-          # 7. INJECTION DES HEADERS (Le correctif pour fs/open.c)
-          # On injecte le header manquant pour que les hooks KernelSU soient reconnus
+          # 8. INJECTION DES HEADERS (fs/open.c et task_mmu.c)
           if ! grep -q "#include <linux/kernelsu.h>" fs/open.c; then
             sed -i '1i #include <linux/kernelsu.h>' fs/open.c
           fi
-          # On injecte aussi dans task_mmu.c comme avant
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
