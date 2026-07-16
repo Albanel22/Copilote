@@ -48,54 +48,34 @@ jobs:
         run: |
           set -euo pipefail
           
-          # 1. CLONAGE MANUEL DE KERNELSU (Évite le setup.sh instable)
-          echo "📥 Clonage propre de KernelSU v0.9.5..."
+          # 1. Cloner KernelSU et SUSFS
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
-          
-          # 2. INTÉGRATION SYSTÈME DE KERNELSU
-          echo "🔧 Configuration du système de fichiers pour KernelSU..."
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo "obj-y += kernelsu/" >> drivers/Makefile
-          fi
-          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          fi
-          
-          # COPIE PHYSIQUE DU HEADER (Règle définitivement le "file not found")
-          cp drivers/kernelsu/kernel/kernelsu.h include/linux/kernelsu.h
-          
-          # 3. CONFIGURATION DE SUSFS
-          echo "📥 Clonage de SusFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # Injection des dépendances pour susfs.h
-          sed -i '1i #include <linux/mm_types.h>\n#include <linux/fs.h>\n#include <linux/stat.h>' include/linux/susfs.h
+          # Copie physique du header (Indispensable pour corriger le "file not found")
+          cp drivers/kernelsu/kernel/kernelsu.h include/linux/kernelsu.h
           
-          # 4. SAUVEGARDE ET APPLICATION DU PATCH SUSFS
-          cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
+          # 2. Création du patch de pont "10_enable_susfs_for_ksu.patch" à la volée
+          cat <<'EOF' > 10_enable_susfs_for_ksu.patch
+          # COLLE ICI LE CONTENU DU PATCH QUE TU M'AS DONNÉ
+          # (Assure-toi de mettre tout le contenu du fichier entre EOF)
+          EOF
           
-          echo "🩹 Application du patch SusFS..."
+          # 3. Application du patch officiel
+          echo "🩹 Application du patch de pont officiel..."
+          patch -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
+          
+          # 4. Application du patch SusFS original
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # Restauration de task_mmu.c pour annuler le carnage du patch
-          mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
-          
-          # 5. INJECTIONS CHIRURGICALES DES HEADERS
-          echo "🔧 Injection des headers requis..."
-          if ! grep -q "#include <linux/kernelsu.h>" fs/open.c; then
-            sed -i '1i #include <linux/kernelsu.h>' fs/open.c
-          fi
+          # 5. Réparation minimale pour Motorola (task_mmu.c)
+          # On garde juste l'include, car le patch gère le reste
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
           
-          # 6. RE-DÉCLARATION SÉCURISÉE DES VARIABLES DANS fs/open.c
-          # On force la déclaration de override_cred et old_cred juste avant leur utilisation
-          echo "🔧 Injection chirurgicale des variables creds..."
-          sed -i '/override_cred = prepare_creds();/i \  struct cred *override_cred = NULL;\n  const struct cred *old_cred = NULL;' fs/open.c
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
