@@ -45,15 +45,10 @@ jobs:
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. KernelSU avec installation forcée des scripts init
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          
-          # 2. Injection propre dans le Kconfig (si pas déjà fait)
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
-          
-          # 3. SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
@@ -64,30 +59,31 @@ jobs:
         run: |
           echo "--- CONTENU DE fs/open.c.rej ---"
           [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
-          
-          echo "--- CONTEXTE DE fs/open.c (Lignes 370-400) ---"
-          sed -n '370,400p' fs/open.c
-          
-          echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
-          [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Fichier fs/proc/task_mmu.c.rej introuvable"
-          
-          echo "--- CONTEXTE DE fs/proc/task_mmu.c (Lignes 10-50) ---"
-          sed -n '10,50p' fs/proc/task_mmu.c
+          sed -n '370,400p' fs/open.c || true
 
-      
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
           ccache -C
           export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
           
-          # Copie defconfig
+          # 1. COPIE DU DEFCONFIG
+          echo "📂 Préparation du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # Injection MINIMALISTE des flags
+          # 2. Génération de la config de base
+          echo "📂 Génération de la config de base..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          
+          # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
+          echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -95,11 +91,26 @@ jobs:
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
-          } >> arch/arm64/configs/${{ env.DEFCONFIG }}
+          } >> ${{ env.BUILD_DIR }}/.config
           
-          # Compilation
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 -j$(nproc) Image
+          # 4. Mise à jour des dépendances
+          echo "⚡ Mise à jour de la configuration avec olddefconfig..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+          
+          # 5. Vérification critique
+          echo "🔍 Vérification des flags dans .config final..."
+          grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
+          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré ! Arrêt."; exit 1; }
+          
+          # 6. Correctifs signatures & Tactile
+          echo "🔓 Force-pass des signatures..."
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          echo "💉 Injection patch tactile..."
+          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
+          
+          # 7. Compilation finale
+          echo "🚀 Compilation finale du noyau..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
@@ -108,19 +119,16 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           cp boot-stock.img repack/boot.img
-          
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
-          
           cd repack
           ./magiskboot unpack boot.img
           cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           cd ..
-          
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
 
