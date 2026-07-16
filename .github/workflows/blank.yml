@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS
+    
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
