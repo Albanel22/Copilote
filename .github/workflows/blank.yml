@@ -57,28 +57,17 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 3. Application du patch
+          # 3. NETTOYAGE TOTAL (On remet le fichier dans son état original)
+          git checkout fs/proc/task_mmu.c
+          
+          # 4. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 4. RÉPARATION DÉFENSIVE
-          echo "🔧 Réparation défensive de task_mmu.c et susfs.h..."
-          
-          # A. On s'assure que susfs.h ne contient pas de double définition
-          # On remplace l'ancienne méthode par une insertion conditionnelle propre
-          sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' include/linux/susfs.h
-          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#ifndef SEQ_PUT_DEC\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif\n#endif" >> include/linux/susfs.h
-          
-          # B. Nettoyage de task_mmu.c : suppression des erreurs d'insertion précédentes
-          # On s'assure qu'on a bien l'include en haut
+          # 5. AJOUT MINIMAL (Juste l'include, rien d'autre)
+          echo "🔧 Injection minimale de l'include..."
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
-            sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
+            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
-          
-          # C. Si le build échoue encore à cause de "extraneous )", c'est que la macro est mal interprétée.
-          # On force le remplacement direct dans le fichier problématique si nécessaire.
-          # Cette commande remplace le motif 'SEQ_PUT_DEC' par l'appel direct pour éviter l'expansion macro.
-          # Cela garantit à 100% qu'il n'y a plus d'erreur de parenthèse.
-          sed -i 's/SEQ_PUT_DEC(\([^,]*\), \([^)]*\))/seq_put_decimal_ull_width(m, \1, (\2) << (PAGE_SHIFT-10), 8)/g' fs/proc/task_mmu.c
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
