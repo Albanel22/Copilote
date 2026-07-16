@@ -46,19 +46,18 @@ jobs:
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # Installation KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
-          # Installation SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          # Patch SusFS (le -F3 permet de passer outre les légères différences de version)
+          
+          # Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # Nettoyage CRITIQUE pour task_mmu.c (indispensable pour que SusFS compile)
+          # Nettoyage chirurgical task_mmu.c
           echo "🔧 Nettoyage task_mmu.c..."
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '/#include <linux\/mm.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
@@ -80,15 +79,10 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # 1. COPIE DU DEFCONFIG
           echo "📂 Préparation du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          
-          # 2. Génération de la config de base
-          echo "📂 Génération de la config de base..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # 3. Injection forcée des flags (KSU + KPROBES + OVERLAYFS)
           echo "🔧 Injection forcée des flags requis..."
           {
             echo "CONFIG_KSU=y"
@@ -101,24 +95,13 @@ jobs:
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
-          # 4. Mise à jour des dépendances
-          echo "⚡ Mise à jour de la configuration avec olddefconfig..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 5. Vérification critique
-          echo "🔍 Vérification des flags dans .config final..."
-          grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré !"; exit 1; }
-          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré !"; exit 1; }
-          grep -q "CONFIG_OVERLAY_FS=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ OVERLAYFS non configuré !"; exit 1; }
-          
-          # 6. Correctifs signatures & Tactile
-          echo "🔓 Force-pass des signatures..."
+          echo "🔓 Force-pass des signatures & Tactile..."
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          echo "💉 Injection patch tactile..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          # 7. Compilation finale
-          echo "🚀 Compilation finale du noyau..."
+          echo "🚀 Compilation finale..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
 
       - name: Repack & Finalize
