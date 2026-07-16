@@ -60,26 +60,20 @@ jobs:
           # 3. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 4. NETTOYAGE SÉCURISÉ (sans échappement risqué)
-          echo "🔧 Nettoyage et injection propre dans fs/proc/task_mmu.c..."
+          # 4. INJECTION PROPRE (Sans risques d'indentation)
+          echo "🔧 Nettoyage et injection sécurisée..."
           
-          # On supprime toute tentative précédente pour repartir à zéro
+          # A. On définit la macro dans include/linux/susfs.h (colonne 0 garantie)
+          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif" >> include/linux/susfs.h
+          
+          # B. On s'assure que task_mmu.c inclut bien susfs.h
+          if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
+            # Utilise un sed qui insère en haut de fichier (colonne 0)
+            sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
+          fi
+          
+          # C. On nettoie tout résidu d'injection précédente dans task_mmu.c pour éviter les conflits
           sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' fs/proc/task_mmu.c
-          
-          # On crée un fichier temporaire avec le code exact à insérer
-          cat <<'EOF' > ksu_inject.h
-          #ifdef CONFIG_KSU_SUSFS
-          #include <linux/susfs.h>
-          #define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)
-          #endif
-          EOF
-          
-          # On insère le contenu du fichier après la ligne "#include <linux/mm.h>"
-          # La commande 'r' lit le fichier et l'insère. C'est infaillible.
-          sed -i '/#include <linux\/mm.h>/r ksu_inject.h' fs/proc/task_mmu.c
-          
-          # On nettoie le fichier temporaire
-          rm ksu_inject.h
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
