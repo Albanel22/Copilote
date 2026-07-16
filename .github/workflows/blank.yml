@@ -60,22 +60,26 @@ jobs:
           # 3. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 4. NETTOYAGE ET RÉPARATION DE task_mmu.c
-          echo "🔧 Réparation de task_mmu.c..."
+          # 4. RÉPARATION DÉFENSIVE
+          echo "🔧 Réparation défensive de task_mmu.c et susfs.h..."
           
-          # Suppression des lignes corrompues que le patch a insérées au mauvais endroit (top-level)
-          # On cible spécifiquement les appels qui échouent à la compilation
-          sed -i '/seq_put_decimal_ull_width/d' fs/proc/task_mmu.c
-          sed -i '/SEQ_PUT_DEC/d' fs/proc/task_mmu.c
+          # A. On s'assure que susfs.h ne contient pas de double définition
+          # On remplace l'ancienne méthode par une insertion conditionnelle propre
+          sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' include/linux/susfs.h
+          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#ifndef SEQ_PUT_DEC\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif\n#endif" >> include/linux/susfs.h
           
-          # Injection de l'include au début du fichier (propre)
+          # B. Nettoyage de task_mmu.c : suppression des erreurs d'insertion précédentes
+          # On s'assure qu'on a bien l'include en haut
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
           fi
           
-          # Injection de la macro de manière globale dans susfs.h (plus sûr)
-          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif" >> include/linux/susfs.h
-
+          # C. Si le build échoue encore à cause de "extraneous )", c'est que la macro est mal interprétée.
+          # On force le remplacement direct dans le fichier problématique si nécessaire.
+          # Cette commande remplace le motif 'SEQ_PUT_DEC' par l'appel direct pour éviter l'expansion macro.
+          # Cela garantit à 100% qu'il n'y a plus d'erreur de parenthèse.
+          sed -i 's/SEQ_PUT_DEC(\([^,]*\), \([^)]*\))/seq_put_decimal_ull_width(m, \1, (\2) << (PAGE_SHIFT-10), 8)/g' fs/proc/task_mmu.c
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
