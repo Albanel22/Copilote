@@ -42,39 +42,48 @@ jobs:
           path: ~/.cache/ccache
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
-    
+
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Setup KernelSU
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          set -euo pipefail
           
-          # 2. FIX: Copie forcée des headers KernelSU dans le path système
-          # On cherche où est le header et on le copie là où le compilateur le cherche
-          find drivers/kernelsu -name "kernelsu.h" -exec cp {} include/linux/ \;
+          # 1. CLONAGE MANUEL DE KERNELSU (Évite le setup.sh instable)
+          echo "📥 Clonage propre de KernelSU v0.9.5..."
+          git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
           
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+          # 2. INTÉGRATION SYSTÈME DE KERNELSU
+          echo "🔧 Configuration du système de fichiers pour KernelSU..."
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+          fi
+          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           fi
           
-          # 3. Setup SUSFS
+          # COPIE PHYSIQUE DU HEADER (Règle définitivement le "file not found")
+          cp drivers/kernelsu/kernel/kernelsu.h include/linux/kernelsu.h
+          
+          # 3. CONFIGURATION DE SUSFS
+          echo "📥 Clonage de SusFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 4. FIX: Injection des dépendances pour susfs.h
+          # Injection des dépendances pour susfs.h
           sed -i '1i #include <linux/mm_types.h>\n#include <linux/fs.h>\n#include <linux/stat.h>' include/linux/susfs.h
           
-          # 5. Sauvegarder task_mmu.c original
+          # 4. SAUVEGARDE ET APPLICATION DU PATCH SUSFS
           cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
           
-          # 6. Application du patch
+          echo "🩹 Application du patch SusFS..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 7. Restauration task_mmu.c
+          # Restauration de task_mmu.c pour annuler le carnage du patch
           mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
           
-          # 8. INJECTION DES HEADERS (fs/open.c et task_mmu.c)
+          # 5. INJECTIONS CHIRURGICALES DES HEADERS
+          echo "🔧 Injection des headers requis..."
           if ! grep -q "#include <linux/kernelsu.h>" fs/open.c; then
             sed -i '1i #include <linux/kernelsu.h>' fs/open.c
           fi
@@ -82,6 +91,11 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
           
+          # 6. RE-DÉCLARATION SÉCURISÉE DES VARIABLES DANS fs/open.c
+          # On force la déclaration de override_cred et old_cred juste avant leur utilisation
+          echo "🔧 Injection chirurgicale des variables creds..."
+          sed -i '/override_cred = prepare_creds();/i \  struct cred *override_cred = NULL;\n  const struct cred *old_cred = NULL;' fs/open.c
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
