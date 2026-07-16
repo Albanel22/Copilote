@@ -56,21 +56,20 @@ jobs:
           # Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          echo "🔧 Nettoyage chirurgical de fs/proc/task_mmu.c..."
+          echo "🔧 Nettoyage et injection de la macro manquante dans fs/proc/task_mmu.c..."
           
-          # 1. Suppression des lignes corrompues qui causent l'erreur "expected identifier"
-          # On cible spécifiquement la séquence d'appel qui plante la compilation
-          sed -i '/seq_put_decimal_ull_width(m, str/d' fs/proc/task_mmu.c
-          
-          # 2. On s'assure que le header est présent
+          # 1. On s'assure que le header est présent
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '/#include "internal.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
           fi
           
-          # 3. Suppression de la macro SEQ_PUT_DEC si elle existe encore
-          sed -i '/#define SEQ_PUT_DEC/d' fs/proc/task_mmu.c
+          # 2. On injecte la macro SEQ_PUT_DEC proprement juste après les includes
+          # Cela définit comment SEQ_PUT_DEC doit se comporter pour que le compilateur ne râle plus
+          if ! grep -q "#define SEQ_PUT_DEC" fs/proc/task_mmu.c; then
+            sed -i '/#include <linux\/susfs.h>/a #ifdef CONFIG_KSU_SUSFS\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif' fs/proc/task_mmu.c
+          fi
           
-          echo "✅ Nettoyage terminé."
+          echo "✅ Préparation terminée."
           
       - name: Lire le fichier de rejet
         if: failure()
@@ -80,9 +79,7 @@ jobs:
           ls -l $KERNEL_PATH/fs/open.c.rej
           echo "--- CONTENU DU REJET ---"
           cat $KERNEL_PATH/fs/open.c.rej
-
-    
-          
+       
       - name: Debug and Print Patch Failures
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
