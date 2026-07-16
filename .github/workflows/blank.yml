@@ -57,8 +57,11 @@ jobs:
       - name: Lire le fichier de rejet
         if: failure()
         run: |
-         echo "--- CONTENU DU REJET fs/open.c ---"
-         cat fs/open.c.rej
+         echo "--- RECHERCHE DU FICHIER REJET ---"
+         # On liste les fichiers pour être sûr de l'emplacement
+         ls -l $KERNEL_PATH/fs/open.c.rej
+         echo "--- CONTENU DU REJET ---"
+         cat $KERNEL_PATH/fs/open.c.rej
           
       - name: Debug and Print Patch Failures
         working-directory: ${{ env.KERNEL_PATH }}
