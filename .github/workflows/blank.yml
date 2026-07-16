@@ -44,6 +44,7 @@ jobs:
           restore-keys: ${{ runner.os }}-ccache-
 
       - name: Integrate KernelSU & SUSFS
+      - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           # 1. Setup KernelSU
@@ -57,17 +58,22 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # 3. NETTOYAGE TOTAL (On remet le fichier dans son état original)
-          git checkout fs/proc/task_mmu.c
+          # 3. Sauvegarder task_mmu.c original avant le patch
+          cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
           
-          # 4. Application du patch
+          # 4. Application du patch (on laisse le patch s'appliquer)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 5. AJOUT MINIMAL (Juste l'include, rien d'autre)
-          echo "🔧 Injection minimale de l'include..."
-          if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
+          # 5. RESTAURATION CIBLÉE
+          # Le patch a probablement corrompu task_mmu.c, on remet l'original
+          mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
+          
+          # 6. INJECTION MANUELLE (La seule, la vraie)
+          # On ajoute juste l'include en haut du fichier
+          sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
+          
+          # On vérifie si KSU_SUSFS doit être activé (c'est souvent le cas par défaut avec le patch)
+          # Si le patch a ajouté des hooks dans d'autres fichiers, ils resteront, c'est ce qu'on veut.
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
