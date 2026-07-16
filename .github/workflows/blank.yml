@@ -52,26 +52,26 @@ jobs:
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          # Option 1 : La méthode "sécurité" (permet de continuer même si le patch échoue)
-          patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          # --- VERSION CORRIGÉE ET SÉCURISÉE ---
-          echo "🔧 Nettoyage ciblé de fs/proc/task_mmu.c..."
           
-          # 1. On s'assure que le header est présent (sans le dupliquer)
+          # Application du patch
+          patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          
+          echo "🔧 Nettoyage chirurgical de fs/proc/task_mmu.c..."
+          
+          # 1. Suppression des lignes corrompues qui causent l'erreur "expected identifier"
+          # On cible spécifiquement la séquence d'appel qui plante la compilation
+          sed -i '/seq_put_decimal_ull_width(m, str/d' fs/proc/task_mmu.c
+          
+          # 2. On s'assure que le header est présent
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '/#include "internal.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
           fi
           
-          # 2. On supprime la définition de la macro fantôme (c'est elle qui cause l'erreur)
+          # 3. Suppression de la macro SEQ_PUT_DEC si elle existe encore
           sed -i '/#define SEQ_PUT_DEC/d' fs/proc/task_mmu.c
           
-          # 3. On supprime les lignes qui appellent cette macro (puisqu'elle n'existe plus)
-          sed -i '/SEQ_PUT_DEC(/d' fs/proc/task_mmu.c
+          echo "✅ Nettoyage terminé."
           
-          # 4. On vérifie qu'il ne reste pas de traces (optionnel)
-          echo "Vérification :"
-          grep "SEQ_PUT_DEC" fs/proc/task_mmu.c || echo "Macro nettoyée avec succès."
-
       - name: Lire le fichier de rejet
         if: failure()
         run: |
