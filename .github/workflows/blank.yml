@@ -60,20 +60,21 @@ jobs:
           # 3. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 4. INJECTION PROPRE (Sans risques d'indentation)
-          echo "🔧 Nettoyage et injection sécurisée..."
+          # 4. NETTOYAGE ET RÉPARATION DE task_mmu.c
+          echo "🔧 Réparation de task_mmu.c..."
           
-          # A. On définit la macro dans include/linux/susfs.h (colonne 0 garantie)
-          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif" >> include/linux/susfs.h
+          # Suppression des lignes corrompues que le patch a insérées au mauvais endroit (top-level)
+          # On cible spécifiquement les appels qui échouent à la compilation
+          sed -i '/seq_put_decimal_ull_width/d' fs/proc/task_mmu.c
+          sed -i '/SEQ_PUT_DEC/d' fs/proc/task_mmu.c
           
-          # B. On s'assure que task_mmu.c inclut bien susfs.h
+          # Injection de l'include au début du fichier (propre)
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
-            # Utilise un sed qui insère en haut de fichier (colonne 0)
             sed -i '1s/^/#include <linux\/susfs.h>\n/' fs/proc/task_mmu.c
           fi
           
-          # C. On nettoie tout résidu d'injection précédente dans task_mmu.c pour éviter les conflits
-          sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' fs/proc/task_mmu.c
+          # Injection de la macro de manière globale dans susfs.h (plus sûr)
+          echo -e "\n#ifdef CONFIG_KSU_SUSFS\n#define SEQ_PUT_DEC(str, val) seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)\n#endif" >> include/linux/susfs.h
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
