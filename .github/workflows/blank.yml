@@ -57,20 +57,24 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # FIX : Injection des dépendances manquantes dans susfs.h
-          # On ajoute les headers qui définissent les types manquants (vm_flags_t, struct filename, etc.)
+          # 3. FIX: Injection des dépendances pour susfs.h
           sed -i '1i #include <linux/mm_types.h>\n#include <linux/fs.h>\n#include <linux/stat.h>' include/linux/susfs.h
           
-          # 3. Sauvegarder task_mmu.c original avant le patch
+          # 4. Sauvegarder task_mmu.c original avant le patch
           cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
           
-          # 4. Application du patch
+          # 5. Application du patch
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 5. RESTAURATION CIBLÉE (On répare les dégâts du patch sur task_mmu.c)
+          # 6. RESTAURATION CIBLÉE (On répare les dégâts du patch sur task_mmu.c)
           mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
           
-          # 6. INJECTION MINIMALE (On ajoute juste l'include en haut de task_mmu.c)
+          # 7. INJECTION DES HEADERS (Le correctif pour fs/open.c)
+          # On injecte le header manquant pour que les hooks KernelSU soient reconnus
+          if ! grep -q "#include <linux/kernelsu.h>" fs/open.c; then
+            sed -i '1i #include <linux/kernelsu.h>' fs/open.c
+          fi
+          # On injecte aussi dans task_mmu.c comme avant
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
