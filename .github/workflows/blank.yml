@@ -43,47 +43,46 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS
+      - name: Integrate KernelSU & SUSFS (Golden Hybrid)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
+
+          # 1. Intégration officielle KernelSU
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 1. Nettoyage et Clonage
-          rm -rf drivers/kernelsu
-          git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
+          # Correction vitale pour que l'APK détecte le module
+          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+          fi
+
+          # 2. Application du custom.patch (si présent)
+          if [ -f "$GITHUB_WORKSPACE/custom.patch" ]; then
+            echo "✅ Application du custom.patch détecté à la racine..."
+            cp "$GITHUB_WORKSPACE/custom.patch" drivers/kernelsu/
+            cd drivers/kernelsu
+            patch -p1 < custom.patch
+            cd ../..
+          fi
+
+          # 3. Préparation SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          
-          # 2. Préparation des fichiers
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp drivers/kernelsu/kernel/ksu.h include/linux/kernelsu.h
-          
-          # 3. Injection Kconfig & Makefile
-          printf "menu \"KernelSU - SUSFS\"\nconfig KSU_SUSFS\n\tbool \"KernelSU addon - SUSFS\"\n\tdepends on KSU\n\tdefault y\nconfig KSU_SUSFS_SUS_PATH\n\tbool \"Enable to hide suspicious path\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_SUS_MOUNT\n\tbool \"Enable to hide suspicious mounts\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_SUS_KSTAT\n\tbool \"Enable to spoof suspicious kstat\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_SUS_MAPS\n\tbool \"Enable to spoof suspicious maps\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_TRY_UMOUNT\n\tbool \"Enable to use ksu's try_umount\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_SPOOF_UNAME\n\tbool \"Enable to spoof uname\"\n\tdepends on KSU_SUSFS\n\tdefault y\nconfig KSU_SUSFS_ENABLE_LOG\n\tbool \"Enable logging susfs log to kernel\"\n\tdepends on KSU_SUSFS\n\tdefault y\nendmenu\n" >> Kconfig
 
-          printf "ifeq (\$(shell test -e \$(srctree)/fs/susfs.c; echo \$\$?),0)\nifdef KSU_SUSFS\nccflags-y += -DKSU_SUSFS\nendif\nifdef KSU_SUSFS_SUS_PATH\nccflags-y += -DKSU_SUSFS_SUS_PATH\nendif\nifdef KSU_SUSFS_SUS_MOUNT\nccflags-y += -DKSU_SUSFS_SUS_MOUNT\nendif\nifdef KSU_SUSFS_SUS_KSTAT\nccflags-y += -DKSU_SUSFS_SUS_KSTAT\nendif\nifdef KSU_SUSFS_SUS_MAPS\nccflags-y += -DKSU_SUSFS_SUS_MAPS\nendif\nifdef KSU_SUSFS_TRY_UMOUNT\nccflags-y += -DKSU_SUSFS_TRY_UMOUNT\nendif\nifdef KSU_SUSFS_SPOOF_UNAME\nccflags-y += -DKSU_SUSFS_SPOOF_UNAME\nendif\nifdef KSU_SUSFS_ENABLE_LOG\nccflags-y += -DKSU_SUSFS_ENABLE_LOG\nendif\nendif\n" >> kernel/Makefile
-
-          # 4. Patch KernelSU (Uniquement pour les fichiers dans drivers/kernelsu)
-          cp $GITHUB_WORKSPACE/custom.patch drivers/kernelsu/
-          cd drivers/kernelsu && patch -p1 < custom.patch && cd ../..
-          
-          # 5. Patch spécifique task_mmu.c (méthode robuste sans patch)
-          echo "🔧 Injection propre de l'include dans task_mmu.c..."
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
-          else
-              echo "✅ Déjà présent, on continue."
-          fi
-          
-          # 6. Patch SusFS final (à la racine)
+          # 4. Patch principal SUSFS
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      
-      # 1. On déclare les variables nécessaires au patch KernelSU
-      - name: Fix fs/open.c declaration
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🔧 Correction des déclarations dans fs/open.c..."
+          # 5. Correctifs "Chirurgicaux" (fixes fs/open.c & task_mmu.c)
+          
+          # Fix task_mmu.c
+          echo "🔧 Correction task_mmu.c..."
+          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
+              sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
+          fi
+          
+          # Fix fs/open.c (Déclarations de variables)
+          echo "🔧 Correction déclarations fs/open.c..."
           if ! grep -q "struct cred \*override_cred" fs/open.c; then
             sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
             struct cred *override_cred = NULL;\
@@ -91,16 +90,9 @@ jobs:
             struct path path;\
             struct inode *inode;' fs/open.c
           fi
-          if ! grep -q "struct vfsmount \*mnt;" fs/open.c; then
-             sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
-             struct vfsmount *mnt;' fs/open.c
-          fi
-
-      # 2. On injecte le bloc SUSFS manuellement (le remplaçant du Hunk 3 rejeté)
-      - name: Manual Injection SUSFS in open.c
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🔧 Injection manuelle de SUSFS dans fs/open.c..."
+          
+          # Fix fs/open.c (Injection SUSFS)
+          echo "🔧 Injection manuelle SUSFS dans fs/open.c..."
           sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
           \
           #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
