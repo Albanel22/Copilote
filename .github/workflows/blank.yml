@@ -527,11 +527,6 @@ jobs:
           
           echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-          # 5. Réparation minimale pour task_mmu.c (indispensable)
-          if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
 
       - name: Debug patch failure
         run: |
