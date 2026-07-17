@@ -63,12 +63,16 @@ jobs:
 
           printf "ifeq (\$(shell test -e \$(srctree)/fs/susfs.c; echo \$\$?),0)\nifdef KSU_SUSFS\nccflags-y += -DKSU_SUSFS\nendif\nifdef KSU_SUSFS_SUS_PATH\nccflags-y += -DKSU_SUSFS_SUS_PATH\nendif\nifdef KSU_SUSFS_SUS_MOUNT\nccflags-y += -DKSU_SUSFS_SUS_MOUNT\nendif\nifdef KSU_SUSFS_SUS_KSTAT\nccflags-y += -DKSU_SUSFS_SUS_KSTAT\nendif\nifdef KSU_SUSFS_SUS_MAPS\nccflags-y += -DKSU_SUSFS_SUS_MAPS\nendif\nifdef KSU_SUSFS_TRY_UMOUNT\nccflags-y += -DKSU_SUSFS_TRY_UMOUNT\nendif\nifdef KSU_SUSFS_SPOOF_UNAME\nccflags-y += -DKSU_SUSFS_SPOOF_UNAME\nendif\nifdef KSU_SUSFS_ENABLE_LOG\nccflags-y += -DKSU_SUSFS_ENABLE_LOG\nendif\nendif\n" >> kernel/Makefile
 
-          # 4. Application du patch (C'est ici qu'on utilise ton fichier custom.patch)
-          # Assure-toi que custom.patch est bien à la racine de ton dépôt
-          cp $GITHUB_WORKSPACE/custom.patch .
+          # 4. Application du patch (CRUCIAL : On se déplace dans drivers/kernelsu pour patcher)
+          cp $GITHUB_WORKSPACE/custom.patch drivers/kernelsu/
+          cd drivers/kernelsu
           patch -p1 --ignore-whitespace < custom.patch
+          cd ../..
+          
+          # 5. Application du patch SusFS (On reste à la racine car il modifie fs/ et include/)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
+          # 6. Fix final
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
               sed -i '/#include <linux\//a #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
