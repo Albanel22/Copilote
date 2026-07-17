@@ -59,148 +59,82 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp drivers/kernelsu/kernel/ksu.h include/linux/kernelsu.h
           
-          # 3. Création du patch de pont (Chemise corrigés pour pointer vers drivers/kernelsu/...)
-          cat <<'EOF_PATCH' > 10_enable_susfs_for_ksu.patch
-          diff --git a/kernel/Kconfig b/kernel/Kconfig
-          index 67f177f4..27cc7b1e 100644
-          --- a/kernel/Kconfig
-          +++ b/kernel/Kconfig
-          @@ -16,4 +16,87 @@ config KSU_DEBUG
-           	help
-           	  Enable KernelSU debug mode.
-           
-          +menu "KernelSU - SUSFS"
-          +config KSU_SUSFS
-          +    bool "KernelSU addon - SUSFS"
-          +    depends on KSU
-          +    default y
-          +    help
-          +      Patch and Enable SUSFS to kernel with KernelSU
-          +
-          +config KSU_SUSFS_SUS_PATH
-          +    bool "Enable to hide suspicious path"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow hiding the existence of user-defined file/directory from various system calls
-          +
-          +config KSU_SUSFS_SUS_MOUNT
-          +    bool "Enable to hide suspicious mounts"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow hiding the user-defined mount paths from /proc/self/[mounts|mountinfo|mountstat]
-          +
-          +config KSU_SUSFS_SUS_MOUNT_MNT_ID_REORDER
-          +    bool "Enable to re-order mount id and parent mount id in mountinfo (experimental)"
-          +    depends on KSU_SUSFS_SUS_MOUNT
-          +    default n
-          +    help
-          +      - Enable this option will automatically and completely re-order the mount id and parent mount id in /proc/self/mountinfo
-          +      - The actual mnt_id/parent_mnt_id is not changed in kernel, only reflects on /proc/self/mountinfo
-          +      - You should not enable this if the mnt_id on your device is already not in order by default
-          +      - Moreover, be careful this feature may cause unknown system crashes / random reboot / bootloop on different kernels or devices, further testing is needed.
-          +      - Requires KSU_SUSFS_SUS_MOUNT to be ON
-          +
-          +config KSU_SUSFS_SUS_KSTAT
-          +    bool "Enable to spoof suspicious kstat"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow spoofing the kstat of user-defined file/directory
-          +
-          +config KSU_SUSFS_SUS_MAPS
-          +    bool "Enable to spoof suspicious maps"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow spoofing the user-defined mappings in /proc/self/[maps|smaps|map_files]
-          +
-          +config KSU_SUSFS_SUS_PROC_FD_LINK
-          +    bool "Enable to spoof suspicous symbolic links (experimental)"
-          +    depends on KSU_SUSFS
-          +    default n
-          +    help
-          +      Allow spoofing the user-defined symbolic link in /proc/self/fd/
-          +
-          +config KSU_SUSFS_SUS_MEMFD
-          +    bool "Enable to hide or spoof suspicous memfd (experimental)"
-          +    depends on KSU_SUSFS
-          +    default n
-          +    help
-          +      Allow preventing the user-defined memfd name from being created
-          +
-          +config KSU_SUSFS_TRY_UMOUNT
-          +    bool "Enable to use ksu's try_umount"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow using ksu's umount to umount other user-defined mount paths prior to ksu's default umount paths
-          +
-          +config KSU_SUSFS_SPOOF_UNAME
-          +    bool "Enable to spoof uname"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow spoofing the string returned by uname syscall to user-defined string
-          +
-          +config KSU_SUSFS_ENABLE_LOG
-          +    bool "Enable logging susfs log to kernel"
-          +    depends on KSU_SUSFS
-          +    default y
-          +    help
-          +      Allow logging susfs log to kernel, uncheck it to completely disable all susfs log
-          +endmenu
-          +
-           endmenu
-          diff --git a/kernel/Makefile b/kernel/Makefile
-          index 66929756..d25f36c7 100644
-          --- a/kernel/Makefile
-          +++ b/kernel/Makefile
-          @@ -66,4 +66,43 @@ endif
-           ccflags-y += -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat
-           ccflags-y += -Wno-declaration-after-statement -Wno-unused-function
-           
-          +ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
-          +ifdef KSU_SUSFS
-          +ccflags-y += -DKSU_SUSFS
-          +endif
-          +ifdef KSU_SUSFS_SUS_PATH
-          +ccflags-y += -DKSU_SUSFS_SUS_PATH
-          +endif
-          +ifdef KSU_SUSFS_SUS_MOUNT
-          +ccflags-y += -DKSU_SUSFS_SUS_MOUNT
-          +endif
-          +ifdef KSU_SUSFS_SUS_MOUNT_MNT_ID_REORDER
-          +ccflags-y += -DKSU_SUSFS_SUS_MOUNT_MNT_ID_REORDER
-          +endif
-          +ifdef KSU_SUSFS_SUS_KSTAT
-          +ccflags-y += -DKSU_SUSFS_SUS_KSTAT
-          +endif
-          +ifdef KSU_SUSFS_SUS_MAPS
-          +ccflags-y += -DKSU_SUSFS_SUS_MAPS
-          +endif
-          +ifdef KSU_SUSFS_SUS_PROC_FD_LINK
-          +ccflags-y += -DKSU_SUSFS_SUS_PROC_FD_LINK
-          +endif
-          +ifdef KSU_SUSFS_SUS_MEMFD
-          +ccflags-y += -DKSU_SUSFS_SUS_MEMFD
-          +endif
-          +ifdef KSU_SUSFS_TRY_UMOUNT
-          +ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
-          +endif
-          +ifdef KSU_SUSFS_SPOOF_UNAME
-          +ccflags-y += -DKSU_SUSFS_SPOOF_UNAME
-          +endif
-          +ifdef KSU_SUSFS_ENABLE_LOG
-          +ccflags-y += -DKSU_SUSFS_ENABLE_LOG
-          +endif
-          +else
-          +$(info -- You have not integrate susfs in your kernel.)
-          +$(info -- Read: https://gitlab.com/simonpunk/susfs4ksu)
-          +endif
-          +
-           # Keep a new line here!! Because someone may append config
+          # 3. Injection des configurations (Directement dans le Kconfig racine)
+          echo "⚙️ Injection des configurations dans Kconfig..."
+          cat >> Kconfig <<'EOF'
+
+          menu "KernelSU - SUSFS"
+          config KSU_SUSFS
+          bool "KernelSU addon - SUSFS"
+          depends on KSU
+          default y
+          config KSU_SUSFS_SUS_PATH
+          bool "Enable to hide suspicious path"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_SUS_MOUNT
+          bool "Enable to hide suspicious mounts"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_SUS_KSTAT
+          bool "Enable to spoof suspicious kstat"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_SUS_MAPS
+          bool "Enable to spoof suspicious maps"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_TRY_UMOUNT
+          bool "Enable to use ksu's try_umount"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_SPOOF_UNAME
+          bool "Enable to spoof uname"
+          depends on KSU_SUSFS
+          default y
+          config KSU_SUSFS_ENABLE_LOG
+          bool "Enable logging susfs log to kernel"
+          depends on KSU_SUSFS
+          default y
+          endmenu
+          EOF
+
+          # Append au Makefile (Kernel)
+          echo "⚙️ Injection dans kernel/Makefile..."
+          cat >> kernel/Makefile <<'EOF'
+          ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
+          ifdef KSU_SUSFS
+          ccflags-y += -DKSU_SUSFS
+          endif
+          ifdef KSU_SUSFS_SUS_PATH
+          ccflags-y += -DKSU_SUSFS_SUS_PATH
+          endif
+          ifdef KSU_SUSFS_SUS_MOUNT
+          ccflags-y += -DKSU_SUSFS_SUS_MOUNT
+          endif
+          ifdef KSU_SUSFS_SUS_KSTAT
+          ccflags-y += -DKSU_SUSFS_SUS_KSTAT
+          endif
+          ifdef KSU_SUSFS_SUS_MAPS
+          ccflags-y += -DKSU_SUSFS_SUS_MAPS
+          endif
+          ifdef KSU_SUSFS_TRY_UMOUNT
+          ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
+          endif
+          ifdef KSU_SUSFS_SPOOF_UNAME
+          ccflags-y += -DKSU_SUSFS_SPOOF_UNAME
+          endif
+          ifdef KSU_SUSFS_ENABLE_LOG
+          ccflags-y += -DKSU_SUSFS_ENABLE_LOG
+          endif
+          endif
+          EOF
+          
+          # 4. Patch des sources C (Uniquement celles qui ont été clonées dans drivers/kernelsu)
+          echo "🩹 Application des patchs sources..."
+          # Note: Nous utilisons le fichier source_patches.patch créé dans l'étape précédente
+          # Si le fichier source_patches.patch n'existe pas encore, on le recrée ici
+          cat <<'EOF_PATCH' > source_patches.patch
           diff --git a/drivers/kernelsu/kernel/core_hook.c b/drivers/kernelsu/kernel/core_hook.c
           index 429ba330..f016db75 100644
           --- a/drivers/kernelsu/kernel/core_hook.c
@@ -238,7 +172,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
           +		if (arg2 == CMD_SUSFS_ADD_SUS_MOUNT) {
           +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_mount))) {
@@ -254,7 +188,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
           +		if (arg2 == CMD_SUSFS_ADD_SUS_KSTAT) {
           +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_kstat))) {
@@ -270,35 +204,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +		if (arg2 == CMD_SUSFS_UPDATE_SUS_KSTAT) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_kstat))) {
-          +				pr_err("susfs: CMD_SUSFS_UPDATE_SUS_KSTAT -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_UPDATE_SUS_KSTAT -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_update_sus_kstat((struct st_susfs_sus_kstat __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_UPDATE_SUS_KSTAT -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +		}
-          +		if (arg2 == CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_kstat))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_add_sus_kstat((struct st_susfs_sus_kstat __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +        }
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_SUS_MAPS
           +		if (arg2 == CMD_SUSFS_ADD_SUS_MAPS) {
           +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_maps))) {
@@ -314,67 +220,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +		if (arg2 == CMD_SUSFS_UPDATE_SUS_MAPS) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_maps))) {
-          +				pr_err("susfs: CMD_SUSFS_UPDATE_SUS_MAPS -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_UPDATE_SUS_MAPS -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_update_sus_maps((struct st_susfs_sus_maps __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_UPDATE_SUS_MAPS -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +		}
-          +		if (arg2 == CMD_SUSFS_ADD_SUS_MAPS_STATICALLY) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_maps))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS_STATICALLY -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS_STATICALLY -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_add_sus_maps((struct st_susfs_sus_maps __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_ADD_SUS_MAPS_STATICALLY -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_MAPS
-          +#ifdef CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK
-          +		if (arg2 == CMD_SUSFS_ADD_SUS_PROC_FD_LINK) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_proc_fd_link))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_PROC_FD_LINK -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_PROC_FD_LINK -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_add_sus_proc_fd_link((struct st_susfs_sus_proc_fd_link __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_ADD_SUS_PROC_FD_LINK -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK
-          +#ifdef CONFIG_KSU_SUSFS_SUS_MEMFD
-          +		if (arg2 == CMD_SUSFS_ADD_SUS_MEMFD) {
-          +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_memfd))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MEMFD -> arg3 is not accessible\n");
-          +				return 0;
-          +			}
-          +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-          +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MEMFD -> arg5 is not accessible\n");
-          +				return 0;
-          +			}
-          +			error = susfs_add_sus_memfd((struct st_susfs_sus_memfd __user*)arg3);
-          +			pr_info("susfs: CMD_SUSFS_ADD_SUS_MEMFD -> ret: %d\n", error);
-          +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-          +			return 0;
-          +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SUS_MEMFD
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
           +		if (arg2 == CMD_SUSFS_ADD_TRY_UMOUNT) {
           +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_try_umount))) {
@@ -390,7 +236,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
           +		if (arg2 == CMD_SUSFS_SET_UNAME) {
           +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_uname))) {
@@ -406,7 +252,7 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+          +#endif
           +#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
           +		if (arg2 == CMD_SUSFS_ENABLE_LOG) {
           +			if (arg3 != 0 && arg3 != 1) {
@@ -417,9 +263,9 @@ jobs:
           +			copy_to_user((void __user*)arg5, &error, sizeof(error));
           +			return 0;
           +		}
-          +#endif //#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          +#endif
           +	}
-          +#endif //#ifdef CONFIG_KSU_SUSFS
+          +#endif
           +
            	// all other cmds are for 'root manager'
            	if (!from_manager) {
@@ -512,9 +358,7 @@ jobs:
            }
           EOF_PATCH
           
-          # 4. Application des patchs
-          echo "🩹 Application du patch de pont officiel..."
-          patch -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
+          patch -p1 --ignore-whitespace < source_patches.patch
           
           echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
