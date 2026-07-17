@@ -522,9 +522,18 @@ jobs:
           
           # 4. Application des patchs
           echo "🩹 Application du patch de pont officiel..."
-          patch -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
+          
+          # On se déplace dans le dossier où se trouve le code KernelSU
+          cd drivers/kernelsu
+          
+          # On applique le patch depuis la racine (d'où le ../)
+          patch -p1 --ignore-whitespace -F3 < ../10_enable_susfs_for_ksu.patch
+          
+          # On revient à la racine du kernel
+          cd ../..
           
           echo "🩹 Application du patch SusFS original..."
+          # Celui-ci doit être appliqué depuis la racine (car il patch des fichiers comme fs/susfs.c ou autre à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
           # 5. Réparation minimale pour task_mmu.c (indispensable)
