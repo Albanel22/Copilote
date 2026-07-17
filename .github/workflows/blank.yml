@@ -77,17 +77,17 @@ jobs:
           
           # 6. Patch SusFS final (à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-          
-      - name: Localiser les fichiers
+
+      - name: Fix fs/open.c declaration
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "--- Vérification des fichiers après patch ---"
-          ls -l fs/susfs.c
-          ls -l include/linux/susfs.h
-          ls -l fs/open.c
-          echo "--- Vérification du patch de pont ---"
-          ls -l drivers/kernelsu/kernel/ksu.h
+          echo "🔧 Correction des variables manquantes dans fs/open.c..."
+          # On cherche la ligne où la variable est utilisée pour la première fois
+          # et on insère les déclarations de variables juste au-dessus.
+          sed -i '/override_cred = prepare_creds();/i \
+          struct cred *override_cred = NULL;\
+          struct cred *old_cred = NULL;' fs/open.c
+          
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
