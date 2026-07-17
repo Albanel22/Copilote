@@ -72,10 +72,6 @@ jobs:
           # 5. Application du patch SusFS (On reste à la racine car il modifie fs/ et include/)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 6. Fix final
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\//a #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
           
       - name: Localiser les fichiers
         working-directory: ${{ env.KERNEL_PATH }}
