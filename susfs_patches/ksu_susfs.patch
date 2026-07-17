@@ -1,4 +1,3 @@
-diff --git a/KernelSU-Next/kernel/ksu.c b/KernelSU-Next/kernel/ksu.c
 --- a/KernelSU-Next/kernel/ksu.c
 +++ b/KernelSU-Next/kernel/ksu.c
 @@ -10,3 +10,6 @@
@@ -8,8 +7,8 @@ diff --git a/KernelSU-Next/kernel/ksu.c b/KernelSU-Next/kernel/ksu.c
  
  int __init ksu_init(void)
  {
-+	#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS
 +	susfs_init();
-+	#endif
++#endif
  	return 0;
  }
