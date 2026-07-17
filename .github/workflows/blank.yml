@@ -50,13 +50,22 @@ jobs:
           
           # 1. Cloner KernelSU et SUSFS
           echo "📥 Clonage des sources..."
+          # Suppression du dossier s'il existe déjà pour éviter les conflits
+          rm -rf drivers/kernelsu
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           
           # 2. Préparation des fichiers
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp drivers/kernelsu/kernel/kernelsu.h include/linux/kernelsu.h
+          
+          # FIX: Recherche automatique du header au lieu de deviner le chemin
+          KSU_HEADER=$(find drivers/kernelsu -name "kernelsu.h" | head -n 1)
+          if [ -z "$KSU_HEADER" ]; then
+            echo "❌ Erreur: impossible de trouver kernelsu.h"
+            exit 1
+          fi
+          cp "$KSU_HEADER" include/linux/kernelsu.h
           
           # 3. Création du patch de pont "10_enable_susfs_for_ksu.patch"
           cat <<'EOF_PATCH' > 10_enable_susfs_for_ksu.patch
