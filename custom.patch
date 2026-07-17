@@ -447,4 +447,15 @@ index 1ba6d853..7b24203c 100644
 +
  	rcu_read_unlock();
  }
+ --- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -28,6 +28,9 @@
+ #include <linux/mmu_notifier.h>
+ #include <linux/page_idle.h>
+ #include <linux/shmem_fs.h>
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs.h>
++#endif
  
+ #include <asm/elf.h>
+ #include <asm/tlb.h>
