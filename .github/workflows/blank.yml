@@ -43,41 +43,28 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS (Golden Hybrid)
+      - name: Integrate KernelSU & SUSFS (Build 329)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-
+          
           # 1. Intégration officielle KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          
-          # Correction vitale pour que l'APK détecte le module
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
-          # 2. Application du custom.patch (Désactivé car non compatible)
-          # On saute cette étape car setup.sh fait déjà le travail
-          echo "⏩ Étape custom.patch ignorée (incompatible avec la structure du noyau)."
-
-
-          # 3. Préparation SUSFS
+          # 2. Préparation SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
-          # 4. Patch principal SUSFS
+          # 3. Patch principal SUSFS
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 5. Correctifs "Chirurgicaux" (fixes fs/open.c & task_mmu.c)
+          # 4. Correctifs Chirurgicaux (UNIQUEMENT pour fs/open.c)
+          # On ne touche PLUS à task_mmu.c car le patch l'a déjà géré.
           
-          # Fix task_mmu.c
-          echo "🔧 Correction task_mmu.c..."
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-              sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
-          fi
-          
-          # Fix fs/open.c (Déclarations de variables)
           echo "🔧 Correction déclarations fs/open.c..."
           if ! grep -q "struct cred \*override_cred" fs/open.c; then
             sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
@@ -87,21 +74,23 @@ jobs:
             struct inode *inode;' fs/open.c
           fi
           
-          # Fix fs/open.c (Injection SUSFS)
           echo "🔧 Injection manuelle SUSFS dans fs/open.c..."
-          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
-          \
-          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
-          	struct filename* fname;\
-          	int status;\
-          	int error;\
-          	fname = getname_safe(filename);\
-          	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
-          	putname_safe(fname);\
-          	if (status) {\
-          		return error;\
-          	}\
-          #endif' fs/open.c
+          # On s'assure de ne pas injecter en double
+          if ! grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
+            sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
+            \
+            #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
+            	struct filename* fname;\
+            	int status;\
+            	int error;\
+            	fname = getname_safe(filename);\
+            	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
+            	putname_safe(fname);\
+            	if (status) {\
+            		return error;\
+            	}\
+            #endif' fs/open.c
+          fi
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
