@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           
-          # 1. Clonage
+          # 1. Nettoyage et Clonage
           echo "📥 Clonage des sources..."
           rm -rf drivers/kernelsu
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
@@ -57,13 +57,7 @@ jobs:
           # 2. Préparation des fichiers
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          
-          if [ -f "drivers/kernelsu/kernel/ksu.h" ]; then
-            cp "drivers/kernelsu/kernel/ksu.h" include/linux/kernelsu.h
-          else
-            echo "❌ ERREUR : ksu.h introuvable"
-            exit 1
-          fi
+          cp drivers/kernelsu/kernel/ksu.h include/linux/kernelsu.h
           
           # 3. Création du patch de pont
           cat <<'EOF_PATCH' > 10_enable_susfs_for_ksu.patch
@@ -519,16 +513,19 @@ jobs:
           EOF_PATCH
           
           # 4. Application des patchs
-          echo "🩹 Application des patchs..."
+          echo "🩹 Application du patch de pont officiel..."
+          patch -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
           
-          # Patch 1 : Pont (dans le dossier drivers/kernelsu)
-          patch -d drivers/kernelsu -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
-          
-          # Patch 2 : SusFS original (à la racine)
+          echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-
-          echo "✅ Intégration terminée."
-
+          
+          # 5. FIX PROPRE POUR task_mmu.c
+          # On vérifie si l'include existe déjà, sinon on l'ajoute proprement après les headers existants
+          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
+              # On ajoute après le premier #include <linux/...>
+              sed -i '/#include <linux\//a #include <linux/susfs.h>' fs/proc/task_mmu.c
+          fi
+          
       - name: Localiser les fichiers
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
