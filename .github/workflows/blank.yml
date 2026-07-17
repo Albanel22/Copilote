@@ -56,15 +56,9 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
-          # 2. Application du custom.patch (si présent)
-          if [ -f "$GITHUB_WORKSPACE/custom.patch" ]; then
-            echo "✅ Application du custom.patch détecté..."
-            cp "$GITHUB_WORKSPACE/custom.patch" drivers/kernelsu/
-            cd drivers/kernelsu
-            # Essaye d'abord -p0. Si cela échoue, c'est que le patch est mal formaté.
-            patch -p0 < custom.patch
-            cd ../..
-          fi
+          # 2. Application du custom.patch (Désactivé car non compatible)
+          # On saute cette étape car setup.sh fait déjà le travail
+          echo "⏩ Étape custom.patch ignorée (incompatible avec la structure du noyau)."
 
 
           # 3. Préparation SUSFS
