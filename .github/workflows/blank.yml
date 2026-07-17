@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS (Build 329)
+      - name: Integrate KernelSU & SUSFS (Build 330 - Correction task_mmu.c)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
@@ -62,10 +62,18 @@ jobs:
           # 3. Patch principal SUSFS
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 4. Correctifs Chirurgicaux (UNIQUEMENT pour fs/open.c)
-          # On ne touche PLUS à task_mmu.c car le patch l'a déjà géré.
-          
-          echo "🔧 Correction déclarations fs/open.c..."
+          # 4. NETTOYAGE CRITIQUE : Suppression du code corrompu dans task_mmu.c
+          # On cherche le bloc suspect ajouté par le patch et on l'efface
+          echo "🧹 Nettoyage de task_mmu.c..."
+          sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' fs/proc/task_mmu.c
+
+          # 5. Injection manuelle PROPRE dans task_mmu.c
+          echo "🔧 Ré-injection propre dans task_mmu.c..."
+          # On cherche une ligne d'include existante pour se placer juste après
+          sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
+
+          # 6. Correctifs fs/open.c (toujours nécessaires)
+          echo "🔧 Correction fs/open.c..."
           if ! grep -q "struct cred \*override_cred" fs/open.c; then
             sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
             struct cred *override_cred = NULL;\
@@ -74,8 +82,7 @@ jobs:
             struct inode *inode;' fs/open.c
           fi
           
-          echo "🔧 Injection manuelle SUSFS dans fs/open.c..."
-          # On s'assure de ne pas injecter en double
+          # Injection SUSFS dans open.c
           if ! grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
             sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
             \
