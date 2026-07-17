@@ -528,12 +528,13 @@ jobs:
           echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Debug patch failure
+      - name: Localiser les fichiers
         run: |
-          echo "--- Contenu de fs/open.c.rej ---"
-          cat fs/open.c.rej || echo "Fichier .rej introuvable"
-          echo "--- Contexte autour de faccessat ---"
-          grep -C 10 "faccessat" fs/open.c || echo "faccessat non trouvé"
+          echo "--- Je suis dans ce dossier (pwd) ---"
+          pwd
+          echo "--- Liste des fichiers importants ---"
+          find . -name "open.c"
+          find . -name "task_mmu.c"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
