@@ -58,49 +58,48 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp drivers/kernelsu/kernel/ksu.h include/linux/kernelsu.h
           
-          # 3. Injection Kconfig
-          cat <<-'EOF' >> Kconfig
-
+          # 3. Création des fichiers Kconfig et Makefile
+          cat <<-'EOF' > susfs_config.txt
           menu "KernelSU - SUSFS"
           config KSU_SUSFS
-          	bool "KernelSU addon - SUSFS"
-          	depends on KSU
-          	default y
+              bool "KernelSU addon - SUSFS"
+              depends on KSU
+              default y
           config KSU_SUSFS_SUS_PATH
-          	bool "Enable to hide suspicious path"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to hide suspicious path"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_SUS_MOUNT
-          	bool "Enable to hide suspicious mounts"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to hide suspicious mounts"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_SUS_KSTAT
-          	bool "Enable to spoof suspicious kstat"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to spoof suspicious kstat"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_SUS_MAPS
-          	bool "Enable to spoof suspicious maps"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to spoof suspicious maps"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_TRY_UMOUNT
-          	bool "Enable to use ksu's try_umount"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to use ksu's try_umount"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_SPOOF_UNAME
-          	bool "Enable to spoof uname"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable to spoof uname"
+              depends on KSU_SUSFS
+              default y
           config KSU_SUSFS_ENABLE_LOG
-          	bool "Enable logging susfs log to kernel"
-          	depends on KSU_SUSFS
-          	default y
+              bool "Enable logging susfs log to kernel"
+              depends on KSU_SUSFS
+              default y
           endmenu
           EOF
+          sed -i 's/^[ \t]*//' susfs_config.txt
+          cat susfs_config.txt >> Kconfig
           
-          # 4. Injection Makefile
-          cat <<-'EOF' >> kernel/Makefile
-
-          ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
+          cat <<-'EOF' > susfs_makefile.txt
+          ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $?),0)
           ifdef KSU_SUSFS
           ccflags-y += -DKSU_SUSFS
           endif
@@ -127,239 +126,127 @@ jobs:
           endif
           endif
           EOF
-          
-          # 5. Création du patch avec nettoyage
-          cat > source_patches.patch <<'EOF'
-              diff --git a/drivers/kernelsu/kernel/core_hook.c b/drivers/kernelsu/kernel/core_hook.c
-              index 429ba330..f016db75 100644
-              --- a/drivers/kernelsu/kernel/core_hook.c
-              +++ b/drivers/kernelsu/kernel/core_hook.c
-              @@ -44,6 +44,10 @@
-               #include "throne_tracker.h"
-               #include "kernel_compat.h"
-               
-              +#ifdef CONFIG_KSU_SUSFS
-              +#include <linux/susfs.h>
-              +#endif
-              +
-               static bool ksu_module_mounted = false;
-               
-               extern int handle_sepolicy(unsigned long arg3, void __user *arg4);
-              @@ -375,6 +379,207 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
-               		return 0;
-               	}
-               
-              +#ifdef CONFIG_KSU_SUSFS
-              +	if (current_uid().val == 0) {
-              +		int error = 0;
-              +#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-              +		if (arg2 == CMD_SUSFS_ADD_SUS_PATH) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_path))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_PATH -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_PATH -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_add_sus_path((struct st_susfs_sus_path __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_ADD_SUS_PATH -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-              +		if (arg2 == CMD_SUSFS_ADD_SUS_MOUNT) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_mount))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_add_sus_mount((struct st_susfs_sus_mount __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-              +		if (arg2 == CMD_SUSFS_ADD_SUS_KSTAT) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_kstat))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_add_sus_kstat((struct st_susfs_sus_kstat __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_SUS_MAPS
-              +		if (arg2 == CMD_SUSFS_ADD_SUS_MAPS) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_maps))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_add_sus_maps((struct st_susfs_sus_maps __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_ADD_SUS_MAPS -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-              +		if (arg2 == CMD_SUSFS_ADD_TRY_UMOUNT) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_try_umount))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_TRY_UMOUNT -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_ADD_TRY_UMOUNT -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_add_try_umount((struct st_susfs_try_umount __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_ADD_TRY_UMOUNT -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-              +		if (arg2 == CMD_SUSFS_SET_UNAME) {
-              +			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_uname))) {
-              +				pr_err("susfs: CMD_SUSFS_SET_UNAME -> arg3 is not accessible\n");
-              +				return 0;
-              +			}
-              +			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-              +				pr_err("susfs: CMD_SUSFS_SET_UNAME -> arg5 is not accessible\n");
-              +				return 0;
-              +			}
-              +			error = susfs_set_uname((struct st_susfs_uname __user*)arg3);
-              +			pr_info("susfs: CMD_SUSFS_SET_UNAME -> ret: %d\n", error);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-              +		if (arg2 == CMD_SUSFS_ENABLE_LOG) {
-              +			if (arg3 != 0 && arg3 != 1) {
-              +				pr_err("susfs: CMD_SUSFS_ENABLE_LOG -> arg3 can only be 0 or 1\n");
-              +				return 0;
-              +			}
-              +			susfs_set_log(arg3);
-              +			copy_to_user((void __user*)arg5, &error, sizeof(error));
-              +			return 0;
-              +		}
-              +#endif
-              +	}
-              +#endif
-              +
-               	// all other cmds are for 'root manager'
-               	if (!from_manager) {
-               		return 0;
-              @@ -535,6 +740,11 @@ int ksu_handle_setuid(struct cred *new, const struct cred *old)
-               		current->pid);
-               #endif
-               
-              +#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-              +	// susfs come first, and lastly umount by ksu, make sure umount in reversed order
-              +	susfs_try_umount(new_uid.val);
-              +#endif
-              +
-               	// fixme: use `collect_mounts` and `iterate_mount` to iterate all mountpoint and
-               	// filter the mountpoint whose target is `/data/adb`
-               	try_umount("/system", true, 0);
-              diff --git a/drivers/kernelsu/kernel/kernel_compat.c b/drivers/kernelsu/kernel/kernel_compat.c
-              index b242bc63..0ec3df62 100644
-              --- a/drivers/kernelsu/kernel/kernel_compat.c
-              +++ b/drivers/kernelsu/kernel/kernel_compat.c
-              @@ -77,6 +77,16 @@ void ksu_android_ns_fs_check()
-               	task_unlock(current);
-               }
-               
-              +int ksu_access_ok(const void *addr, unsigned long size) {
-              +#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
-              +    /* For kernels before 5.0.0, pass the type argument to access_ok. */
-              +    return access_ok(VERIFY_READ, addr, size);
-              +#else
-              +    /* For kernels 5.0.0 and later, ignore the type argument. */
-              +    return access_ok(addr, size);
-              +#endif
-              +}
-              +
-               struct file *ksu_filp_open_compat(const char *filename, int flags, umode_t mode)
-               {
-               #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_IS_HW_HISI)
-              diff --git a/drivers/kernelsu/kernel/kernel_compat.h b/drivers/kernelsu/kernel/kernel_compat.h
-              index ba998185..34050e73 100644
-              --- a/drivers/kernelsu/kernel/kernel_compat.h
-              +++ b/drivers/kernelsu/kernel/kernel_compat.h
-              @@ -29,6 +29,7 @@ extern struct key *init_session_keyring;
-               #endif
-               
-               extern void ksu_android_ns_fs_check();
-              +extern int ksu_access_ok(const void *addr, unsigned long size);
-               extern struct file *ksu_filp_open_compat(const char *filename, int flags,
-               					 umode_t mode);
-               extern ssize_t ksu_kernel_read_compat(struct file *p, void *buf, size_t count,
-              diff --git a/drivers/kernelsu/kernel/ksu.c b/drivers/kernelsu/kernel/ksu.c
-              index 3639edc2..4a9cfaba 100644
-              --- a/drivers/kernelsu/kernel/ksu.c
-              +++ b/drivers/kernelsu/kernel/ksu.c
-              @@ -11,6 +11,10 @@
-               #include "ksu.h"
-               #include "throne_tracker.h"
-               
-              +#ifdef CONFIG_KSU_SUSFS
-              +#include <linux/susfs.h>
-              +#endif
-              +
-               static struct workqueue_struct *ksu_workqueue;
-               
-               bool ksu_queue_work(struct work_struct *work)
-              @@ -49,6 +53,10 @@ int __init kernelsu_init(void)
-               	pr_alert("*************************************************************");
-               #endif
-               
-              +#ifdef CONFIG_KSU_SUSFS
-              +	susfs_init();
-              +#endif
-              +
-               	ksu_core_init();
-               
-               	ksu_workqueue = alloc_ordered_workqueue("kernelsu_work_queue", 0);
-              diff --git a/drivers/kernelsu/kernel/selinux/rules.c b/drivers/kernelsu/kernel/selinux/rules.c
-              index 1ba6d853..7b24203c 100644
-              --- a/drivers/kernelsu/kernel/selinux/rules.c
-              +++ b/drivers/kernelsu/kernel/selinux/rules.c
-              @@ -134,6 +134,11 @@ void apply_kernelsu_rules()
-                    ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
-                    ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
-               
-              +#ifdef CONFIG_KSU_SUSFS
-              +	// Allow umount in zygote process without installing zygisk
-              +	ksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");
-              +#endif
-              +
-               	rcu_read_unlock();
-               }
+          sed -i 's/^[ \t]*//' susfs_makefile.txt
+          cat susfs_makefile.txt >> kernel/Makefile
+
+          # 4. Patch (On crée le fichier et on nettoie l'indentation avec sed)
+          # Utilisation de base64 pour éviter tout problème d'encodage
+          cat <<-'EOF' | base64 -d > source_patches.patch
+          ZGlmZiAtdCAtcCAiZHJpdmVycwprZXJuZWxzdS9rZXJuZWwvY29yZV9ob29rLmMiICJkcml2ZXJz
+          L2tlcm5lbHN1L2tlcm5lbC9jb3JlX2hvb2suYyIKaW5kZXggNDI5YmEzMzAuLmYwMTZkYjc1IDEw
+          MDY0NAotLS0gYS9kcml2ZXJzL2tlcm5lbHN1L2tlcm5lbC9jb3JlX2hvb2suYworKysgYi9kcml2
+          ZXJzL2tlcm5lbHN1L2tlcm5lbC9jb3JlX2hvb2suYwpAQCAtNDQsNiArNDQsMTAgQEAKICNpbmNs
+          dWRlICJ0aHJvbmVfdHJhY2tlci5oIgogI2luY2x1ZGUgImtlcm5lbF9jb21wYXQuaCIKIAorI2lm
+          ZGVmIENPTkZJR19LU1VfU1VTRlMKKyNpbmNsdWRlIDxsaW51eC9zdXNmcy5oPgorI2VuZGlmCisK
+          IHN0YXRpYyBib29sIGtzdV9tb2R1bGVfbW91bnRlZCA9IGZhbHNlOwogCiBleHRlcm4gaW50IGhh
+          bmRsZV9zZXBvbGljeSh1bnNpZ25lZCBsb25nIGFyZzMsIHZvaWQgX191c2VyICphcmc0KTsKQEAg
+          LTM3NSw2ICszNzksMjA3IEBAIGludCBrc3VfaGFuZGxlX3ByY3RsKGludCBvcHRpb24sIHVuc2ln
+          bmVkIGxvbmcgYXJnMiwgdW5zaWduZWQgbG9uZyBhcmczLAogCQlyZXR1cm4gMDsKIAl9CiAKKyNp
+          ZmRlZiBDT05GSUdfS1NVX1NVU0ZTCisJaWYgKGN1cnJlbnRfdWlkKCkudmFsID09IDApIHsKKwkJ
+          aW50IGVycm9yID0gMDsKKyNpZmRlZiBDT05GSUdfS1NVX1NVU0ZTX1NVU19QQVRICisJCWlmIChh
+          cmcyID09IENNRF9TVVNGU19BRERfU1VTX1BBVEgpIHsKKwkJCWlmICgha3N1X2FjY2Vzc19vaygo
+          dm9pZCBfX3VzZXIgKilhcmczLCBzaXplb2Yoc3RydWN0IHN0X3N1c2ZzX3N1c19wYXRoKSkpIHsK
+          KwkJCQlwcl9lcnIoInN1c2ZzOiBDTURfU1VTRlNfQUREX1NVU19QQVRIIC0+IGFyZzMgaXMgbm90
+          IGFjY2Vzc2libGVcbiIpOworCQkJCXJldHVybiAwOworCQkJfQorCQkJaWYgKCFrc3VfYWNjZXNz
+          X29rKCh2b2lkIF9fdXNlciAqKWFyZzUsIHNpemVvZihlcnJvcikpKSB7CisJCQkJcHJfZXJyKCJz
+          dXNmczogQ01EX1NVU0ZTX0FERF9TVVNfUEFUSCAtPiBhcmc1IGlzIG5vdCBhY2Nlc3NpYmxlXG4i
+          KTsKKwkJCQlyZXR1cm4gMDsKKwkJCX0KKwkJCWVycm9yID0gc3VzZnNfYWRkX3N1c19wYXRoKChz
+          dHJ1Y3Qgc3Rfc3VzZnNfc3VzX3BhdGggX191c2VyKilhcmczKTsKKwkJCXByX2luZm8oInN1c2Zz
+          OiBDTURfU1VTRlNfQUREX1NVU19QQVRIIC0+IHJldDogJWRcbiIsIGVycm9yKTsKKwkJCWNvcHlf
+          dG9fdXNlcigodm9pZCBfX3VzZXIgKilhcmdzLCAmZXJyb3IsIHNpemVvZihlcnJvcikpOworCQkJ
+          cmV0dXJuIDA7CisJCX0KKyNlbmRpZgorI2lmZGVmIENPTkZJR19LU1VfU1VTRlNfU1VTX01PVU5U
+          CisJCWlmIChhcmcyID09IENNRF9TVVNGU19BRERfU1VTX01PVU5UKSB7CisJCQlpZiAoIWtzdV9h
+          Y2Nlc3Nfb2soKHZvaWQgX191c2VyICopYXJnMywgc2l6ZW9mKHN0cnVjdCBzdF9zdXNmc19zdXNf
+          bW91bnQpKSkgeworCQkJCXByX2Vycigic3VzZnM6IENNRF9TVVNGU19BRERfU1VTX01PVU5UIC0+
+          IGFyZzMgaXMgbm90IGFjY2Vzc2libGVcbiIpOworCQkJCXJldHVybiAwOworCQkJfQorCQkJaWYg
+          KCFrc3VfYWNjZXNzX29rKCh2b2lkIF9fdXNlciAqKWFyZzUsIHNpemVvZihlcnJvcikpKSB7Cisj
+          CQkJCXByX2Vycigic3VzZnM6IENNRF9TVVNGU19BRERfU1VTX01PVU5UIC0+IGFyZzUgaXMgbm90
+          IGFjY2Vzc2libGVcbiIpOworCQkJCXJldHVybiAwOworCQkJfQorCQkJZXJyb3IgPSBzdXNmc19h
+          ZGRfc3VzX21vdW50KChzdHJ1Y3Qgc3Rfc3VzZnNfc3VzX21vdW50IF9fdXNlcgopYXJnMyk7Cisj
+          CQkJcHJfaW5mbygic3VzZnM6IENNRF9TVVNGU19BRERfU1VTX01PVU5UIC0+IHJldDogJWRcbiIs
+          IGVycm9yKTsKKwkJCWNvcHlfdG9fdXNlcigodm9pZCBfX3VzZXIgKilhcmdzLCAmZXJyb3IsIHNp
+          emVvZihlcnJvcikpOworCQkJcmV0dXJuIDA7CisJCX0KKyNlbmRpZgorI2lmZGVmIENPTkZJR19L
+          U1VfU1VTRlNfU1VTX0tTVEFUCisJCWlmIChhcmcyID09IENNRF9TVVNGU19BRERfU1VTX0tTVEFU
+          KSB7CisJCQlpZiAoIWtzdV9hY2Nlc3Nfb2soKHZvaWQgX191c2VyICopYXJnMywgc2l6ZW9mKHN0
+          cnVjdCBzdF9zdXNmc19zdXNfa3N0YXQpKSkgeworCQkJCXByX2Vycigic3VzZnM6IENNRF9TVVNG
+          U19BRERfU1VTX0tTVEFUIC0+IGFyZzMgaXMgbm90IGFjY2Vzc2libGVcbiIpOworCQkJCXJldHVy
+          biAwOworCQkJfQorCQkJaWYgKCFrc3VfYWNjZXNzX29rKCh2b2lkIF9fdXNlciAqKWFyZzUsIHNp
+          emVvZihlcnJvcikpKSB7CisJCQkJcHJfZXJyKCJzdXNmczogQ01EX1NVU0ZTX0FERF9TVVNfS1NU
+          QVQgLT4gYXJnNSBpcyBub3QgYWNjZXNzaWJsZVxuIik7CisJCQkJcmV0dXJuIDA7CisJCX0KKwkJ
+          CWVycm9yID0gc3VzZnNfYWRkX3N1c19rc3RhdCgoc3RydWN0IHN0X3N1c2ZzX3N1c19rc3RhdCBf
+          X3VzZXIgKWFyZzMpOworCQkJcHJfaW5mbygic3VzZnM6IENNRF9TVVNGU19BRERfU1VTX0tTVEFU
+          IC0+IHJldDogJWRcbiIsIGVycm9yKTsKKwkJCWNvcHlfdG9fdXNlcigodm9pZCBfX3VzZXIgKilh
+          cmdzLCAmZXJyb3IsIHNpemVvZihlcnJvcikpOworCQkJcmV0dXJuIDA7CisJCX0KKyNlbmRpZgor
+          I2lmZGVmIENPTkZJR19LU1VfU1VTRlNfU1VTX01BUFMKKwkJaWYgKGFyZzIgPT0gQ01EX1NVU0ZT
+          X0FERF9TVVNfTUFQUykgeworCQkJaWYgKCFrc3VfYWNjZXNzX29rKCh2b2lkIF9fdXNlciAqKWFy
+          ZzMsIHNpemVvZihzdHJ1Y3Qgc3Rfc3VzZnNfc3VzX21hcHMpKSkgeworCQkJCXByX2Vycigic3Vz
+          ZnM6IENNRF9TVVNGU19BRERfU1VTX01BUFMgLT4gYXJnMyBpcyBub3QgYWNjZXNzaWJsZVxuIik7
+          CisJCQkJcmV0dXJuIDA7CisJCX0KKwkJCWlmICgha3N1X2FjY2Vzc19vaygodm9pZCBfX3VzZXIg
+          KilhcmdzLCBzaXplb2YoZXJyb3IpKSkgeworCQkJCXByX2Vycigic3VzZnM6IENNRF9TVVNGU19B
+          RERfU1VTX01BUFMgLT4gYXJnNSBpcyBub3QgYWNjZXNzaWJsZVxuIik7CisJCQkJcmV0dXJuIDA7
+          CisJCX0KKwkJCWVycm9yID0gc3VzZnNfYWRkX3N1c19tYXBzKChzdHJ1Y3Qgc3Rfc3VzZnNfc3Vz
+          X21hcHMgX191c2VyICopYXJnMyk7CisJCQlwcl9pbmZvKCJzdXNmczogQ01EX1NVU0ZTX0FERF9T
+          VVNfTUFQUyAtPiByZXQ6ICVkXG4iLCBlcnJvcik7CisJCQljb3B5X3RvX3VzZXIoKHZvaWQgX191
+          c2VyICopYXJnNSwgJmVycm9yLCBzaXplb2YoZXJyb3IpKTsKKwkJCXJldHVybiAwOworCQl9Cisj
+          ZW5kaWYKKyNpZmRlZiBDT05GSUdfS1NVX1NVU0ZTX1RSWV9VTU9VTlQKKwkJaWYgKGFyZzIgPT0g
+          Q01EX1NVU0ZTX0FERF9UUllfVU1PVU5UKSB7CisJCQlpZiAoIWtzdV9hY2Nlc3Nfb2soKHZvaWQg
+          X191c2VyICopYXJnMywgc2l6ZW9mKHN0cnVjdCBzdF9zdXNmc190cnlfdW1vdW50KSkpIHsKKwkJ
+          CQlwcl9lcnIoInN1c2ZzOiBDTURfU1VTRlNfQUREX1RSWV9VTU9VTlQgLT4gYXJnMyBpcyBub3Qg
+          YWNjZXNzaWJsZVxuIik7CisJCQkJcmV0dXJuIDA7CisJCX0KKwkJCWlmICgha3N1X2FjY2Vzc19v
+          aygodm9pZCBfX3VzZXIgKilhcmdzLCBzaXplb2YoZXJyb3IpKSkgeworCQkJCXByX2Vycigic3Vz
+          ZnM6IENNRF9TVVNGU19BRERfVFJZX1VNT1VOVCAtPiBhcmc1IGlzIG5vdCBhY2Nlc3NpYmxlXG4i
+          KTsKKwkJCQlyZXR1cm4gMD;
           EOF
-          sed -i 's/^              //' source_patches.patch
+          base64 -d -i <<< "cQkJfQoJCQllcnJvciA9IHN1c2ZzX2FkZF90cnlfdW1vdW50KChzdHJ1Y3Qgc3Rfc3VzZnNfdHJ5X3Vtb3VudCBfX3VzZXIgKilhcmdzKTsKCQkJcHJfaW5mbygic3VzZnM6IENNRF9TVVNGU19BRERfVFJZX1VNT1VOVCAtPiByZXQ6ICVkXG4iLCBlcnJvcik7CgkJCWNvcHlfdG9fdXNlcigodm9pZCBfX3VzZXIgKilhcmdzLCAmZXJyb3IsIHNpemVvZihlcnJvcikpOwoJCQlyZXR1cm4gMDsKCQl9CiNlbmRpZgojaWZkZWYgQ09ORklHX0tTVV9TVVNGU19TUE9PRl9VTkFNRQoJCWlmIChhcmcyID09IENNRF9TVVNGU19TRVRfVU5BTUUpIHsKCQkJaWYgKCFrc3VfYWNjZXNzX29rKCh2b2lkIF9fdXNlciAqKWFyZzMsIHNpemVvZihzdHJ1Y3Qgc3Rfc3VzZnNfdW5hbWUpKSkgewoJCQkJcHJfZXJyKCJzdXNmczogQ01EX1NVU0ZTX1NFVF9VTkFNRSAtPiBhcmczIGlzIG5vdCBhY2Nlc3NpYmxlXG4iKTsKwkJCQlyZXR1cm4gMDsKCQl9CgkJCWlmICgha3N1X2FjY2Vzc19vaygodm9pZCBfX3VzZXIgKilhcmdzLCBzaXplb2YoZXJyb3IpKSkgewoJCQkJcHJfZXJyKCJzdXNmczogQ01EX1NVU0ZTX1NFVF9VTkFNRSAtPiBhcmc1IGlzIG5vdCBhY2Nlc3NpYmxlXG4iKTsKwkJCQlyZXR1cm4gMDsKCQl9CgkJCWVycm9yID0gc3VzZnNfc2V0X3VuYW1lKChzdHJ1Y3Qgc3Rfc3VzZnNfdW5hbWUgX191c2VyICopYXJnMyk7CgkJcHJfaW5mbygic3VzZnM6IENNRF9TVVNGU19TRVRfVU5BTUUgLT4gcmV0OiAlZFxuIiwgZXJyb3IpOwoJCQljb3B5X3RvX3VzZXIoKHZvaWQgX191c2VyICopYXJnNSwgJmVycm9yLCBzaXplb2YoZXJyb3IpKTsKCQkJcmV0dXJuIDA7CgkJfQojZW5kaWYKI2lmZGVmIENPTkZJR19LU1VfU1VTRlNfRU5BQkxFX0xPRwoJCWlmIChhcmcyID09IENNRF9TVVNGU19FTkFCTEVfTE9HKSB7CgkJCWlmIChhcmczICE9IDAgJiYgYXJnMyAhPSAxKSB7CgkJCQlwcl9lcnIoInN1c2ZzOiBDTURfU1VTRlNfRU5BQkxFX0xPRyAtPiBhcmczIGNhbiBvbmx5IGJlIDAgb3IgMVxuIik7CgkJCQlyZXR1cm4gMDsKCQkJfQoJCQlzdXNmc19zZXRfbG9nKGFyZzMpOwoJCQljb3B5X3RvX3VzZXIoKHZvaWQgX191c2VyICopYXJnNSwgJmVycm9yLCBzaXplb2YoZXJyb3IpKTsKCQkJcmV0dXJuIDA7CgkJfQojZW5kaWYKCX0KI2VuZGlmCgoJLy8gYWxsIG90aGVyIGNtZHMgYXJlIGZvciAncm9vdCBtYW5hZ2VyJwoJaWYgKCFmcm9tX21hbmFnZXIpIHsKCQlyZXR1cm4gMDsKCX0KQEAgLTUzNSw2ICs3NDAsMTEgQEAgaW50IGtzdV9oYW5kbGVfc2V0dWlkKHN0cnVjdCBjcmVkICpuZXcsIGNvbnN0IHN0cnVjdCBjcmVkICpvbGQpCgkJY3VycmVudC0+cGlkKTsKI2VuZGlmCgoKI2lmZGVmIENPTkZJR19LU1VfU1VTRlNfVFJZX1VNT1VOVAoJLy8gc3VzZnMgY29tZSBmaXJzdCwgYW5kIGxhc3RseSB1bW91bnQgYnkga3N1LCBtYWtlIHN1cmUgdW1vdW50IGluIHJldmVyc2VkIG9yZGVyCglzdXNmc190cnlfdW1vdW50KG5ld191aWQudmFsKTsKI2VuZGlmCgoJLy8gZml4bWU6IHVzZSBgY29sbGVjdF9tb3VudHNgIGFuZCBgLWl0ZXJhdGVfbW91bnRgIHRvIGl0ZXJhdGUgYWxsIG1vdW50cG9pbnQgYW5kCgkvLyBmaWx0ZXIgdGhlIG1vdW50cG9pbnQgd2hvc2UgdGFyZ2V0IGlzIGAvZGF0YS9hZGJgCgl0cnlfdW1vdW50KCIvc3lzdGVtIiwgdHJ1ZSwgMCk7CmRpZmYgLXQgLXAgImRyaXZlcnMva2VybmVsc3Uva2VybmVsL2tlcm5lbF9jb21wYXQuYyIgImRyaXZlcnMva2VybmVsc3Uva2VybmVsL2tlcm5lbF9jb21wYXQuYyIKaW5kZXggYjI0MmJjNjMuLjBlYzNkZjYyIDEwMDY0NAotLS0gYS9kcml2ZXJzL2tlcm5lbHN1L2tlcm5lbC9rZXJuZWxfY29tcGF0LmMKKysrIGIvZHJpdmVycy9rZXJuZWxzdS9rZXJuZWwva2VybmVsX2NvbXBhdC5jCkBAIC03Nyw2ICs3NywxNiBAQCB2b2lkIGtzdV9hbmRyb2lkX25zX2ZzX2NoZWNrKCkKIHRhc2tfdW5sb2NrKGN1cnJlbnQpOwp9CgoraW50IGtzdV9hY2Nlc3Nfb2soY29uc3Qgdm9pZCAqYWRkciwgdW5zaWduZWQgbG9uZyBzaXplKSB7CiNpZiBMSU5VWF9WRVJTSU9OX0NPREUgPCBLRVJOR 
+          BASE64_END" >> source_patches.patch
           
+          # Ajout du reste du patch (la fin du fichier est plus courte et simple)
+          cat <<-'EOF' >> source_patches.patch
+          TF9WRVJTSU9OKDUsMCwwKQpUICAgIC8qIEZvciBrZXJuZWxzIGJlZm9yZSA1LjAuMCwgcGFzcyB0aGUg
+          dHlwZSBhcmd1bWVudCB0byBhY2Nlc3Nfb2suICovCiAgICByZXR1cm4gYWNjZXNzX29rKFZFUklG
+          WV9SRUFELCBhZGRyLCBzaXplKTsKI2Vsc2UKICAgIC8qIEZvciBrZXJuZWxzIDUuMC4wIGFuZCBs
+          YXRlciwgaWdub3JlIHRoZSB0eXBlIGFyZ3VtZW50LiAqLwogICAgcmV0dXJuIGFjY2Vzc19vayhh
+          ZGRyLCBzaXplKTsKI2VuZGlmCn0KCnN0cnVjdCBmaWxlICprc3VfZmlscF9vcGVuX2NvbXBhdChj
+          b25zdCBjaGFyICpmaWxlbmFtZSwgaW50IGZsYWdzLCB1bW9kZV90IG1vZGUpCnsKI2lmIExJTlVY
+          X1ZFUlNJT05fQ09ERSA8IEtFUk5FTF9WRVJTSU9OKDQsIDEwLCAwKSB8fCBkZWZpbmVkKENPTkZJ
+          R19JU19IV19ISVNJKQpkaWZmIC10IC1wICJkcml2ZXJzL2tlcm5lbHN1L2tlcm5lbC9rZXJuZWxf
+          Y29tcGF0LmgiICJkcml2ZXJzL2tlcm5lbHN1L2tlcm5lbC9rZXJuZWxfY29tcGF0LmgiCmluZGV4
+          IGJhOTk4MTg1Li4zNDA1MGU3MyAxMDA2NDQKLS0tIGEvZHJpdmVycy9rZXJuZWxzdS9rZXJuZWwv
+          a2VybmVsX2NvbXBhdC5oCisrKyBiL2RyaXZlcnMva2VybmVsc3Uva2VybmVsL2tlcm5lbF9jb21w
+          YXQuaApAQCAtMjksNiArMjksNyBAQCBleHRlcm4gc3RydWN0IGtleSAqaW5pdF9zZXNzaW9uX2tl
+          eXJpbmc7CiAjZW5kaWYKIAogZXh0ZXJuIHZvaWQga3N1X2FuZHJvaWRfbnNfZnNfY2hlY2soKTsK
+          K2V4dGVybiBpbnQga3N1X2FjY2Vzc19vayhjb25zdCB2b2lkICphZGRyLCB1bnNpZ25lZCBsb25n
+          IHNpemUpOwogZXh0ZXJuIHN0cnVjdCBmaWxlICprc3VfZmlscF9vcGVuX2NvbXBhdChjb25zdCBj
+          aGFyICpmaWxlbmFtZSwgaW50IGZsYWdzLAogIAkJIHVtb2RlX3QgbW9kZSk7CiBleHRlcm4gc3Nz
+          aXplX3Qga3N1X2tlcm5lbF9yZWFkX2NvbXBhdChzdHJ1Y3QgZmlsZSAqcCwKQEAgLTExLDYgKzEx
+          LDEwIEBACiAjaW5jbHVkZSAia3N1LmgiCiAjaW5jbHVkZSAidGhyb25lX3RyYWNrZXIuaCIKIAor
+          I2lmZGVmIENPTkZJR19LU1VfU1VTRlMKKyNpbmNsdWRlIDxsaW51eC9zdXNmcy5oPgorI2VuZGlm
+          CisKIHN0YXRpYyBzdHJ1Y3Qgd29ya3F1ZXVlX3N0cnVjdCAqa3N1X3dvcmtxdWV1ZTsKIAogYm9v
+          bCBrc3VfcXVldWVfd29yayhzdHJ1Y3Qgd29ya19zdHJ1Y3QgKndvcmspCkBAIC00OSw2ICs1Mywx
+          MCBAQCBpbnQgX19pbml0IGtlcm5lbHN1X2luaXQodm9pZCkKIHByX2FsZXJ0KCIqKioqKioqKioq
+          KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqIik7CiAjZW5kaWYKIAor
+          I2lmZGVmIENPTkZJR19LU1VfU1VTRlMKKwlzdXNmc19pbml0KCk7CisjZW5kaWYKKwogCWtzdV9j
+          b3JlX2luaXQoKTsKIAogCWtzdV93b3JrcXVldWUgPSBhbGxvY19vcmRlcmVkX3dvcmtxdWV1ZSgi
+          a2VybmVsc3Vfd29ya19xdWV1ZSIsIDApOwpkaWZmIC10IC1wICJkcml2ZXJzL2tlcm5lbHN1L2tl
+          cm5lbC9zZWxpbnV4L3J1bGVzLmMiICJkcml2ZXJzL2tlcm5lbHN1L2tlcm5lbC9zZWxpbnV4L3J1
+          bGVzLmMiCmluZGV4IDFiYTZkODUzLi43YjI0MjAzYyAxMDA2NDQKLS0tIGEvZHJpdmVycy9rZXJu
+          ZWxzdS9rZXJuZWwvc2VsaW51eC9ydWxlcy5jCisrKyBiL2RyaXZlcnMva2VybmVsc3Uva2VybmVs
+          L3NlbGludXgvcnVsZXMuYwpAQCAtMTM0LDYgKzEzNCwxMSBAQCB2b2lkIGFwcGx5X2tlcm5lbHN1
+          X3J1bGVzKCkKICAgICBrc3VfYWxsb3coZGIsICJzeXN0ZW1fc2VydmVyIiwgS0VSTkVMX1NVX0RP
+          TUFJTiwgInByb2Nlc3MiLCAiZ2V0cGdpZCIpOwogICAgIGtzdV9hbGxvdChkYiwgInN5c3RlbV9z
+          ZXJ2ZXIiLCBLRVJORUxfU1VfRE9NQUlOLCAicHJvY2VzcyIsICJzaWdraWxsIik7CiAKKyNpZmRl
+          ZiBDT05GSUdfS1NVX1NVU0ZTCisJLy8gQWxsb3cgdW1vdW50IGluIHp5Z290ZSBwcm9jZXNzIHdp
+          dGhvdXQgaW5zdGFsbGluZyB6eWdpc2sKKwlrc3VfYWxsb3coZGIsICJ6eWdvdGUiLCAibGFiZWxl
+          ZGZzIiwgImZpbGVzeXN0ZW0iLCAidW5tb3VudCIpOworI2VuZGlmCisKIHJjdV9yZWFkX3VubG9j
+          aygpOwogfQo=
+          EOF
+          base64 -d -i <<< "TF9WRVJTSU9OKDUsMCwwKQpUICAgIC8qIEZvciBrZXJuZWxzIGJlZm9yZSA1LjAuMCwgcGFzcyB0aGUg" >> source_patches.patch
+          
+          # Application des patchs
           patch -p1 --ignore-whitespace < source_patches.patch
-          
-          echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 6. FIX PROPRE POUR task_mmu.c
+          # Fix task_mmu.c
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
               sed -i '/#include <linux\//a #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
