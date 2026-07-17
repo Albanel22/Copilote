@@ -81,13 +81,20 @@ jobs:
       - name: Fix fs/open.c declaration
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🔧 Correction des variables manquantes dans fs/open.c..."
-          # On cherche la ligne où la variable est utilisée pour la première fois
-          # et on insère les déclarations de variables juste au-dessus.
-          sed -i '/override_cred = prepare_creds();/i \
-          struct cred *override_cred = NULL;\
-          struct cred *old_cred = NULL;' fs/open.c
+          echo "🔧 Correction complète de fs/open.c..."
           
+          # 1. On nettoie les tentatives précédentes pour éviter les doublons
+          sed -i '/struct cred \*override_cred/d' fs/open.c
+          sed -i '/const struct cred \*old_cred/d' fs/open.c
+          
+          # 2. On injecte proprement toutes les déclarations nécessaires
+          # On cherche la ligne de définition de la fonction et on ajoute après
+          sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
+          struct cred *override_cred = NULL;\
+          const struct cred *old_cred = NULL;\
+          struct path path;\
+          struct inode *inode;\
+          struct vfsmount *mnt;' fs/open.c
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
