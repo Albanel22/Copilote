@@ -67,22 +67,13 @@ jobs:
           cp $GITHUB_WORKSPACE/custom.patch drivers/kernelsu/
           cd drivers/kernelsu && patch -p1 < custom.patch && cd ../..
           
-          # 5. Patch spécifique task_mmu.c (créé dynamiquement et appliqué à la racine)
-          cat <<-'EOF' > mmu.patch
-          --- a/fs/proc/task_mmu.c
-          +++ b/fs/proc/task_mmu.c
-          @@ -28,6 +28,9 @@
-           #include <linux/mmu_notifier.h>
-           #include <linux/page_idle.h>
-           #include <linux/shmem_fs.h>
-          +#ifdef CONFIG_KSU_SUSFS
-          +#include <linux/susfs.h>
-          +#endif
-          
-           #include <asm/elf.h>
-           #include <asm/tlb.h>
-          EOF
-          patch -p1 < mmu.patch
+          # 5. Patch spécifique task_mmu.c (méthode robuste sans patch)
+          echo "🔧 Injection propre de l'include dans task_mmu.c..."
+          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
+              sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' fs/proc/task_mmu.c
+          else
+              echo "✅ Déjà présent, on continue."
+          fi
           
           # 6. Patch SusFS final (à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
