@@ -58,12 +58,14 @@ jobs:
 
           # 2. Application du custom.patch (si présent)
           if [ -f "$GITHUB_WORKSPACE/custom.patch" ]; then
-            echo "✅ Application du custom.patch détecté à la racine..."
+            echo "✅ Application du custom.patch détecté..."
             cp "$GITHUB_WORKSPACE/custom.patch" drivers/kernelsu/
             cd drivers/kernelsu
-            patch -p1 < custom.patch
+            # Essaye d'abord -p0. Si cela échoue, c'est que le patch est mal formaté.
+            patch -p0 < custom.patch
             cd ../..
           fi
+
 
           # 3. Préparation SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
