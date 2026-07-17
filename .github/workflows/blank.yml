@@ -77,23 +77,13 @@ jobs:
           
           # 6. Patch SusFS final (à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-      - name: Debug rejected patch
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f fs/open.c.rej ]; then
-            echo "--- CONTENU DU HUNK MANQUANT ---"
-            cat fs/open.c.rej
-          else
-            echo "Aucun fichier .rej trouvé."
-          fi    
 
+      
+      # 1. On déclare les variables nécessaires au patch KernelSU
       - name: Fix fs/open.c declaration
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🔧 Correction intelligente de fs/open.c..."
-          
-          # On ajoute les variables uniquement si elles ne sont pas déjà présentes
+          echo "🔧 Correction des déclarations dans fs/open.c..."
           if ! grep -q "struct cred \*override_cred" fs/open.c; then
             sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
             struct cred *override_cred = NULL;\
@@ -101,12 +91,29 @@ jobs:
             struct path path;\
             struct inode *inode;' fs/open.c
           fi
-          
-          # On ajoute 'struct vfsmount *mnt;' seulement si ce n'est pas déjà défini
           if ! grep -q "struct vfsmount \*mnt;" fs/open.c; then
              sed -i '/long do_faccessat(int dfd, const char __user \*filename, int mode)/!b;n;a \
              struct vfsmount *mnt;' fs/open.c
           fi
+
+      # 2. On injecte le bloc SUSFS manuellement (le remplaçant du Hunk 3 rejeté)
+      - name: Manual Injection SUSFS in open.c
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔧 Injection manuelle de SUSFS dans fs/open.c..."
+          sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
+          \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
+          	struct filename* fname;\
+          	int status;\
+          	int error;\
+          	fname = getname_safe(filename);\
+          	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
+          	putname_safe(fname);\
+          	if (status) {\
+          		return error;\
+          	}\
+          #endif' fs/open.c
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
