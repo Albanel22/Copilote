@@ -143,13 +143,18 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           cp boot-stock.img repack/boot.img
+          
+          # Téléchargement et préparation de magiskboot
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
+          
+          # Repackage
           cd repack
           ./magiskboot unpack boot.img
-          cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
+          # Utilisation des variables pour le chemin du kernel
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           cd ..
