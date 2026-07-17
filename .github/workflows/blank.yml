@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           
-          # 1. Cloner KernelSU et SUSFS
+          # 1. Clonage
           echo "📥 Clonage des sources..."
           rm -rf drivers/kernelsu
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
@@ -58,17 +58,14 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # FIX: Copie ksu.h (qui existe) vers kernelsu.h (que le patch attend)
           if [ -f "drivers/kernelsu/kernel/ksu.h" ]; then
-            echo "✅ Fichier ksu.h trouvé, copie vers kernelsu.h pour le patch..."
             cp "drivers/kernelsu/kernel/ksu.h" include/linux/kernelsu.h
           else
-            echo "❌ ERREUR : ksu.h introuvable dans drivers/kernelsu/kernel/"
+            echo "❌ ERREUR : ksu.h introuvable"
             exit 1
           fi
           
-          # 3 & 4. Création et Application du patch de pont
-          echo "📝 Création du patch de pont..."
+          # 3. Création du patch de pont
           cat <<'EOF_PATCH' > 10_enable_susfs_for_ksu.patch
           diff --git a/kernel/Kconfig b/kernel/Kconfig
           index 67f177f4..27cc7b1e 100644
@@ -521,20 +518,26 @@ jobs:
            }
           EOF_PATCH
           
-          echo "🩹 Application du patch de pont officiel (dans drivers/kernelsu)..."
-          # -d indique à patch d'aller dans le dossier, mais de prendre le fichier ici
+          # 4. Application des patchs
+          echo "🩹 Application des patchs..."
+          
+          # Patch 1 : Pont (dans le dossier drivers/kernelsu)
           patch -d drivers/kernelsu -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
           
-          echo "🩹 Application du patch SusFS original..."
+          # Patch 2 : SusFS original (à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
+          echo "✅ Intégration terminée."
+
       - name: Localiser les fichiers
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "--- Je suis dans ce dossier (pwd) ---"
-          pwd
-          echo "--- Liste des fichiers importants ---"
-          find . -name "open.c"
-          find . -name "task_mmu.c"
+          echo "--- Vérification des fichiers après patch ---"
+          ls -l fs/susfs.c
+          ls -l include/linux/susfs.h
+          ls -l fs/open.c
+          echo "--- Vérification du patch de pont ---"
+          ls -l drivers/kernelsu/kernel/ksu.h
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
