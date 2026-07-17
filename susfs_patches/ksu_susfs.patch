@@ -3,7 +3,7 @@
 @@ -28,6 +28,10 @@
  #include <asm/tlbflush.h>
  #include "internal.h"
-
+ 
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs.h>
 +#endif
