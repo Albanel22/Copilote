@@ -63,13 +63,28 @@ jobs:
 
           printf "ifeq (\$(shell test -e \$(srctree)/fs/susfs.c; echo \$\$?),0)\nifdef KSU_SUSFS\nccflags-y += -DKSU_SUSFS\nendif\nifdef KSU_SUSFS_SUS_PATH\nccflags-y += -DKSU_SUSFS_SUS_PATH\nendif\nifdef KSU_SUSFS_SUS_MOUNT\nccflags-y += -DKSU_SUSFS_SUS_MOUNT\nendif\nifdef KSU_SUSFS_SUS_KSTAT\nccflags-y += -DKSU_SUSFS_SUS_KSTAT\nendif\nifdef KSU_SUSFS_SUS_MAPS\nccflags-y += -DKSU_SUSFS_SUS_MAPS\nendif\nifdef KSU_SUSFS_TRY_UMOUNT\nccflags-y += -DKSU_SUSFS_TRY_UMOUNT\nendif\nifdef KSU_SUSFS_SPOOF_UNAME\nccflags-y += -DKSU_SUSFS_SPOOF_UNAME\nendif\nifdef KSU_SUSFS_ENABLE_LOG\nccflags-y += -DKSU_SUSFS_ENABLE_LOG\nendif\nendif\n" >> kernel/Makefile
 
-          # 4. Application du patch (CRUCIAL : On se déplace dans drivers/kernelsu pour patcher)
+          # 4. Patch KernelSU (Uniquement pour les fichiers dans drivers/kernelsu)
           cp $GITHUB_WORKSPACE/custom.patch drivers/kernelsu/
-          cd drivers/kernelsu
-          patch -p1 --ignore-whitespace < custom.patch
-          cd ../..
+          cd drivers/kernelsu && patch -p1 < custom.patch && cd ../..
           
-          # 5. Application du patch SusFS (On reste à la racine car il modifie fs/ et include/)
+          # 5. Patch spécifique task_mmu.c (créé dynamiquement et appliqué à la racine)
+          cat <<-'EOF' > mmu.patch
+          --- a/fs/proc/task_mmu.c
+          +++ b/fs/proc/task_mmu.c
+          @@ -28,6 +28,9 @@
+           #include <linux/mmu_notifier.h>
+           #include <linux/page_idle.h>
+           #include <linux/shmem_fs.h>
+          +#ifdef CONFIG_KSU_SUSFS
+          +#include <linux/susfs.h>
+          +#endif
+          
+           #include <asm/elf.h>
+           #include <asm/tlb.h>
+          EOF
+          patch -p1 < mmu.patch
+          
+          # 6. Patch SusFS final (à la racine)
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
           
