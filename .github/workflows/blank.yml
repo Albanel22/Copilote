@@ -54,30 +54,20 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           
-          # 2. DIAGNOSTIC : Afficher l'arborescence pour trouver kernelsu.h
-          echo "🔍 Recherche de kernelsu.h..."
-          find drivers/kernelsu -name "kernelsu.h"
-          
-          # 3. Préparation des fichiers
+          # 2. Préparation des fichiers
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           
-          # FIX: Copie conditionnelle basée sur la découverte
-          # On cherche le fichier, s'il est trouvé on le copie, sinon on affiche une erreur explicite
-          KSU_HEADER=$(find drivers/kernelsu -name "kernelsu.h" | head -n 1)
-          
-          if [ -f "$KSU_HEADER" ]; then
-            echo "✅ Fichier trouvé : $KSU_HEADER"
-            cp "$KSU_HEADER" include/linux/kernelsu.h
+          # FIX: Copie ksu.h (qui existe) vers kernelsu.h (que le patch attend)
+          if [ -f "drivers/kernelsu/kernel/ksu.h" ]; then
+            echo "✅ Fichier ksu.h trouvé, copie vers kernelsu.h pour le patch..."
+            cp "drivers/kernelsu/kernel/ksu.h" include/linux/kernelsu.h
           else
-            echo "❌ ERREUR : kernelsu.h introuvable !"
-            echo "--- Structure du dossier drivers/kernelsu ---"
-            ls -R drivers/kernelsu
+            echo "❌ ERREUR : ksu.h introuvable dans drivers/kernelsu/kernel/"
             exit 1
           fi
           
-          # 4. Création du patch de pont "10_enable_susfs_for_ksu.patch"
-          # (On garde le même contenu que précédemment)
+          # 3. Création du patch de pont "10_enable_susfs_for_ksu.patch"
           cat <<'EOF_PATCH' > 10_enable_susfs_for_ksu.patch
           diff --git a/kernel/Kconfig b/kernel/Kconfig
           index 67f177f4..27cc7b1e 100644
@@ -530,14 +520,14 @@ jobs:
            }
           EOF_PATCH
           
-          # 5. Application des patchs
+          # 4. Application des patchs
           echo "🩹 Application du patch de pont officiel..."
           patch -p1 --ignore-whitespace -F3 < 10_enable_susfs_for_ksu.patch
           
           echo "🩹 Application du patch SusFS original..."
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           
-          # 6. Réparation minimale pour task_mmu.c (indispensable)
+          # 5. Réparation minimale pour task_mmu.c (indispensable)
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
