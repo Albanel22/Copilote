@@ -532,6 +532,13 @@ jobs:
           if ! grep -q "#include <linux/susfs.h>" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
+
+      - name: Debug patch failure
+        run: |
+          echo "--- Contenu de fs/open.c.rej ---"
+          cat fs/open.c.rej || echo "Fichier .rej introuvable"
+          echo "--- Contexte autour de faccessat ---"
+          grep -C 10 "faccessat" fs/open.c || echo "faccessat non trouvé"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
