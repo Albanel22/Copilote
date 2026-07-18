@@ -101,7 +101,7 @@ jobs:
           [ -f include/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/linux/susfs.h
           [ -f include/uapi/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/uapi/linux/susfs.h
 
-          # 🛠️ INJECTION DES FALLBACKS ADAPTATIFS DANS LES HEADERS (Évite l'erreur open.c)
+          # 🛠️ INJECTION DES FALLBACKS ADAPTATIFS DANS LES HEADERS (Évite les erreurs open.c et susfs.c)
           if [ -f include/linux/susfs.h ]; then
             cat << 'EOF' >> include/linux/susfs.h
 
@@ -118,17 +118,20 @@ jobs:
           #define SYSCALL_FAMILY_ALL_EACCES 1
           #endif
 
+          #include <linux/types.h>
           #ifdef CONFIG_KSU_SUSFS
           extern int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family);
+          void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid);
           #else
           static inline int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) { return 0; }
+          static inline void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {}
           #endif
           /* --- Fin Fallbacks --- */
           EOF
-            echo "✅ Fallbacks de sécurité injectés dans include/linux/susfs.h"
+            echo "✅ Fallbacks de sécurité et prototype ksu_try_umount injectés dans include/linux/susfs.h"
           fi
 
-          # 🛠️ SÉCURISATION DU LINKER (Évite une erreur 'undefined reference' ultérieure)
+          # 🛠️ SÉCURISATION DU LINKER (Évite une erreur 'undefined reference' de susfs_sus_path_by_filename)
           if [ -f fs/susfs.c ]; then
             if ! grep -q "susfs_sus_path_by_filename" fs/susfs.c; then
               cat << 'EOF' >> fs/susfs.c
@@ -211,6 +214,10 @@ jobs:
           sed -i '/try_umount("\/system"/i #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT\n\tsusfs_try_umount(new_uid.val);\n#endif' "$CORE_HOOK"
           sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' "$KSU_C"
           sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' "$RULES_C"
+
+          # 7. 🛠️ CRÉATION DU PONT DE LIAISON (Évite l'erreur d'unmount dans susfs.c)
+          echo -e "\n/* --- Pont de liaison SusFS <-> KernelSU --- */\nvoid ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {\n\ttry_umount(mnt, check_mnt, flags);\n}" >> "$CORE_HOOK"
+          echo "🎉 Pont d'API pour ksu_try_umount greffé à la fin de $CORE_HOOK"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
