@@ -11,84 +11,7 @@
  static bool ksu_module_mounted = false;
  
  extern int handle_sepolicy(unsigned long arg3, void __user *arg4);
-@@ -375,6 +379,207 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
- 		return 0;
- 	}
- 
-+#ifdef CONFIG_KSU_SUSFS
-+	if (current_uid().val == 0) {
-+		int error = 0;
-+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+		if (arg2 == CMD_SUSFS_ADD_SUS_PATH) {
-+			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_path))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_PATH -> arg3 is not accessible\n");
-+				return 0;
-+			}
-+			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_PATH -> arg5 is not accessible\n");
-+				return 0;
-+			}
-+			error = susfs_add_sus_path((struct st_susfs_sus_path __user*)arg3);
-+			pr_info("susfs: CMD_SUSFS_ADD_SUS_PATH -> ret: %d\n", error);
-+			copy_to_user((void __user*)arg5, &error, sizeof(error));
-+			return 0;
-+		}
-+#endif
-+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-+		if (arg2 == CMD_SUSFS_ADD_SUS_MOUNT) {
-+			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_mount))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> arg3 is not accessible\n");
-+				return 0;
-+			}
-+			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> arg5 is not accessible\n");
-+				return 0;
-+			}
-+			error = susfs_add_sus_mount((struct st_susfs_sus_mount __user*)arg3);
-+			pr_info("susfs: CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", error);
-+			copy_to_user((void __user*)arg5, &error, sizeof(error));
-+			return 0;
-+		}
-+#endif
-+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-+		if (arg2 == CMD_SUSFS_ADD_SUS_KSTAT) {
-+			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_kstat))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> arg3 is not accessible\n");
-+				return 0;
-+			}
-+			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> arg5 is not accessible\n");
-+				return 0;
-+			}
-+			error = susfs_add_sus_kstat((struct st_susfs_sus_kstat __user*)arg3);
-+			pr_info("susfs: CMD_SUSFS_ADD_SUS_KSTAT -> ret: %d\n", error);
-+			copy_to_user((void __user*)arg5, &error, sizeof(error));
-+			return 0;
-+		}
-+#endif
-+#ifdef CONFIG_KSU_SUSFS_SUS_MAPS
-+		if (arg2 == CMD_SUSFS_ADD_SUS_MAPS) {
-+			if (!ksu_access_ok((void __user*)arg3, sizeof(struct st_susfs_sus_maps))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS -> arg3 is not accessible\n");
-+				return 0;
-+			}
-+			if (!ksu_access_ok((void __user*)arg5, sizeof(error))) {
-+				pr_err("susfs: CMD_SUSFS_ADD_SUS_MAPS -> arg5 is not accessible\n");
-+				return 0;
-+			}
-+			error = susfs_add_sus_maps((struct st_susfs_sus_maps __user*)arg3);
-+			pr_info("susfs: CMD_SUSFS_ADD_SUS_MAPS -> ret: %d\n", error);
-+			copy_to_user((void __user*)arg5, &error, sizeof(error));
-+			return 0;
-+		}
-+#endif
-+	}
-+#endif
-+
- 	// all other cmds are for 'root manager'
- 	if (!from_manager) {
- 		return 0;
-@@ -535,6 +740,11 @@ int ksu_handle_setuid(struct cred *new, const struct cred *old)
+@@ -535,6 +539,11 @@
  		current->pid);
  #endif
  
@@ -102,7 +25,7 @@
  	try_umount("/system", true, 0);
 --- a/drivers/kernelsu/kernel_compat.c
 +++ b/drivers/kernelsu/kernel_compat.c
-@@ -77,6 +77,16 @@ void ksu_android_ns_fs_check()
+@@ -77,6 +77,16 @@
  	task_unlock(current);
  }
  
@@ -119,7 +42,7 @@
  #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_IS_HW_HISI)
 --- a/drivers/kernelsu/kernel_compat.h
 +++ b/drivers/kernelsu/kernel_compat.h
-@@ -29,6 +29,7 @@ extern struct key *init_session_keyring;
+@@ -29,6 +29,7 @@
  #endif
  
  extern void ksu_android_ns_fs_check();
@@ -140,7 +63,7 @@
  static struct workqueue_struct *ksu_workqueue;
  
  bool ksu_queue_work(struct work_struct *work)
-@@ -49,6 +53,10 @@ int __init kernelsu_init(void)
+@@ -49,6 +53,10 @@
  	pr_alert("*************************************************************");
  #endif
  
@@ -153,7 +76,7 @@
  	ksu_workqueue = alloc_ordered_workqueue("kernelsu_work_queue", 0);
 --- a/drivers/kernelsu/selinux/rules.c
 +++ b/drivers/kernelsu/selinux/rules.c
-@@ -134,6 +134,11 @@ void apply_kernelsu_rules()
+@@ -134,6 +134,11 @@
       ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
       ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
  
@@ -164,48 +87,3 @@
 +
  	rcu_read_unlock();
  }
---- a/fs/open.c
-+++ b/fs/open.c
-@@ -385,6 +385,9 @@
- 	if (error)
- 		return error;
- 
-+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-+#endif
-+
- 	fd = get_unused_fd_flags(mode);
- 	if (fd >= 0) {
- 		struct file *f = do_filp_open(dfd, filename, &open_mode);
---- a/fs/namespace.c
-+++ b/fs/namespace.c
-@@ -1739,6 +1739,26 @@
- }
- #endif
- 
-+int path_umount(struct path *path, int flags)
-+{
-+	struct mount *mnt = real_mount(path->mnt);
-+	int ret;
-+
-+	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
-+		return -EINVAL;
-+	if (!may_mount())
-+		return -EPERM;
-+	if (path->dentry != path->mnt->mnt_root)
-+		return -EINVAL;
-+	if (!check_mnt(mnt))
-+		return -EINVAL;
-+	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
-+		return -EINVAL;
-+	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
-+		return -EPERM;
-+	ret = do_umount(mnt, flags);
-+	dput(path->dentry);
-+	mntput_no_expire(mnt);
-+	return ret;
-+}
-+
- /*
-  * Now umount can handle mount points as well as block devices.
-  * This is important for filesystems which use unnamed block devices.
