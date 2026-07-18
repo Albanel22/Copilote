@@ -46,10 +46,17 @@ jobs:
       - name: Injecter KernelSU & SUSFS Dynamiquement
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Nettoyage et installation KernelSU
+          # 1. Nettoyage complet des sources
           git reset --hard
           git clean -fd
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
+          # 🛠️ INSTALLATION MANUELLE DE KERNELSU (Bypasse le setup.sh instable en CI)
+          echo "📥 Clonage direct et propre de KernelSU v0.9.5..."
+          git clone https://github.com/tiann/KernelSU.git -b v0.9.5 KernelSU
+
+          echo "🔧 Liaison de KernelSU au système de build (Kconfig / Makefile)..."
+          echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
+          echo "obj-y += ../KernelSU/" >> drivers/Makefile
 
           # 2. Détection dynamique de la version du Kernel (Ex: 4.19)
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
@@ -101,7 +108,7 @@ jobs:
           [ -f include/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/linux/susfs.h
           [ -f include/uapi/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/uapi/linux/susfs.h
 
-          # 🛠️ INJECTION DES FALLBACKS ADAPTATIFS DANS LES HEADERS (Évite les erreurs open.c et susfs.c)
+          # 🛠️ INJECTION DES FALLBACKS ADAPTATIFS DANS LES HEADERS
           if [ -f include/linux/susfs.h ]; then
             cat << 'EOF' >> include/linux/susfs.h
 
@@ -131,7 +138,7 @@ jobs:
             echo "✅ Fallbacks de sécurité et prototype ksu_try_umount injectés dans include/linux/susfs.h"
           fi
 
-          # 🛠️ SÉCURISATION DU LINKER (Évite une erreur 'undefined reference' de susfs_sus_path_by_filename)
+          # 🛠️ SÉCURISATION DU LINKER
           if [ -f fs/susfs.c ]; then
             if ! grep -q "susfs_sus_path_by_filename" fs/susfs.c; then
               cat << 'EOF' >> fs/susfs.c
@@ -215,7 +222,7 @@ jobs:
           sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' "$KSU_C"
           sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' "$RULES_C"
 
-          # 7. 🛠️ CRÉATION DU PONT DE LIAISON (Évite l'erreur d'unmount dans susfs.c)
+          # 7. 🛠️ CRÉATION DU PONT DE LIAISON API
           echo -e "\n/* --- Pont de liaison SusFS <-> KernelSU --- */\nvoid ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {\n\ttry_umount(mnt, check_mnt, flags);\n}" >> "$CORE_HOOK"
           echo "🎉 Pont d'API pour ksu_try_umount greffé à la fin de $CORE_HOOK"
 
