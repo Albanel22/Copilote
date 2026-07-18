@@ -116,29 +116,29 @@ jobs:
           if [ -f include/linux/susfs.h ]; then
             cat << 'EOF' >> include/linux/susfs.h
 
-/* --- Début Fallbacks de Compatibilité Moteur SUSFS Modernes --- */
-#ifndef SYSCALL_FAMILY_ALL_ENOENT
-#define SYSCALL_FAMILY_ALL_ENOENT 0
-#endif
+          /* --- Début Fallbacks de Compatibilité Moteur SUSFS Modernes --- */
+          #ifndef SYSCALL_FAMILY_ALL_ENOENT
+          #define SYSCALL_FAMILY_ALL_ENOENT 0
+          #endif
 
-#ifndef SUSFS_DONT_LOG
-#define SUSFS_DONT_LOG 0
-#endif
+          #ifndef SUSFS_DONT_LOG
+          #define SUSFS_DONT_LOG 0
+          #endif
 
-#ifndef SYSCALL_FAMILY_ALL_EACCES
-#define SYSCALL_FAMILY_ALL_EACCES 1
-#endif
+          #ifndef SYSCALL_FAMILY_ALL_EACCES
+          #define SYSCALL_FAMILY_ALL_EACCES 1
+          #endif
 
-#include <linux/types.h>
-#ifdef CONFIG_KSU_SUSFS
-extern int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family);
-void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid);
-#else
-static inline int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) { return 0; }
-static inline void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {}
-#endif
-/* --- Fin Fallbacks --- */
-EOF
+          #include <linux/types.h>
+          #ifdef CONFIG_KSU_SUSFS
+          extern int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family);
+          void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid);
+          #else
+          static inline int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) { return 0; }
+          static inline void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {}
+          #endif
+          /* --- Fin Fallbacks --- */
+          EOF
             echo "✅ Fallbacks de sécurité et prototype ksu_try_umount injectés dans include/linux/susfs.h"
           fi
 
@@ -147,11 +147,11 @@ EOF
             if ! grep -q "susfs_sus_path_by_filename" fs/susfs.c; then
               cat << 'EOF' >> fs/susfs.c
 
-/* Stub adaptatif généré automatiquement pour satisfaire les hooks du dépôt */
-int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) {
-    return 0;
-}
-EOF
+          /* Stub adaptatif généré automatiquement pour satisfaire les hooks du dépôt */
+          int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) {
+              return 0;
+          }
+          EOF
               echo "✅ Stub de liaison injecté dans fs/susfs.c"
             fi
           fi
@@ -192,33 +192,33 @@ EOF
 
           # 5. Injection dans Kconfig et Makefile de KernelSU
           cat << 'EOF' >> "$KSU_ROOT/Kconfig"
-menu "KernelSU - SUSFS"
-config KSU_SUSFS
-    bool "KernelSU addon - SUSFS"
-    depends on KSU
-    default y
-config KSU_SUSFS_SUS_PATH
-    bool "Enable to hide suspicious path"
-    depends on KSU_SUSFS
-    default y
-config KSU_SUSFS_TRY_UMOUNT
-    bool "Enable to use ksu's try_umount"
-    depends on KSU_SUSFS
-    default y
-endmenu
-EOF
+          menu "KernelSU - SUSFS"
+          config KSU_SUSFS
+              bool "KernelSU addon - SUSFS"
+              depends on KSU
+              default y
+          config KSU_SUSFS_SUS_PATH
+              bool "Enable to hide suspicious path"
+              depends on KSU_SUSFS
+              default y
+          config KSU_SUSFS_TRY_UMOUNT
+              bool "Enable to use ksu's try_umount"
+              depends on KSU_SUSFS
+              default y
+          endmenu
+          EOF
 
           cat << 'EOF' >> "$KSU_ROOT/Makefile"
-ifdef KSU_SUSFS
-ccflags-y += -DKSU_SUSFS
-endif
-ifdef KSU_SUSFS_SUS_PATH
-ccflags-y += -DKSU_SUSFS_SUS_PATH
-endif
-ifdef KSU_SUSFS_TRY_UMOUNT
-ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
-endif
-EOF
+          ifdef KSU_SUSFS
+          ccflags-y += -DKSU_SUSFS
+          endif
+          ifdef KSU_SUSFS_SUS_PATH
+          ccflags-y += -DKSU_SUSFS_SUS_PATH
+          endif
+          ifdef KSU_SUSFS_TRY_UMOUNT
+          ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
+          endif
+          EOF
 
           # 6. Injections des hooks KernelSU essentiels
           sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' "$CORE_HOOK"
