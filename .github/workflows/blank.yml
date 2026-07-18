@@ -300,50 +300,23 @@ jobs:
           mkdir -p repack
           cp boot-stock.img repack/boot.img
           
-          echo "📥 Téléchargement de magiskboot natif Linux x86_64..."
-          
-          # Liste de miroirs et méthodes alternatives (Releases fixes + RAW Github)
-          URLS=(
-            "https://github.com/bmaxsh/magiskboot-linux/releases/download/v27.0/magiskboot"
-            "https://github.com/HuskyDG/magiskboot-bin/raw/main/linux/x86_64/magiskboot"
-            "https://github.com/xiaoxindada/magiskboot_linux/releases/download/27000/magiskboot"
-            "https://github.com/affggh/magiskboot_linux/releases/download/v27.0/magiskboot"
-          )
-          
-          SUCCESS=0
-          for url in "${URLS[@]}"; do
-            echo "🔹 Tentative de téléchargement depuis : $url"
-            if curl -fLo repack/magiskboot "$url"; then
-              echo "✅ Téléchargement réussi !"
-              SUCCESS=1
-              break
-            fi
-          done
-          
-          if [ $SUCCESS -ne 1 ]; then
-            echo "❌ Erreur critique : Tous les miroirs pour magiskboot ont renvoyé un échec."
-            exit 1
-          fi
-          
+          # Téléchargement et préparation de magiskboot
+          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
+          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
+          mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
           
+          # Repackage
           cd repack
-          echo "📦 Unpack du boot.img stock..."
           ./magiskboot unpack boot.img
-          
-          IMAGE_PATH="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          if [ ! -f "$IMAGE_PATH" ]; then
-            echo "❌ Erreur : Image de noyau introuvable à l'emplacement $IMAGE_PATH"
-            exit 1
-          fi
-          
-          cp "$IMAGE_PATH" kernel
-          echo "🔄 Repack du nouveau boot.img avec ton Kernel..."
+          # Utilisation des variables pour le chemin du kernel
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
-          
+          mv new-boot.img ../final_boot.img
           cd ..
           mkdir -p final_output
-          mv repack/new-boot.img final_output/boot.img
+          mv final_boot.img final_output/boot.img
+      
           
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
