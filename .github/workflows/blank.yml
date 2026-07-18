@@ -50,6 +50,24 @@ jobs:
           git reset --hard
           git clean -fd
 
+          # 🧹 NEUTRALISATION DES ANCIENS HOOKS CONFLICTUELS DU DÉPÔT
+          echo "🧹 Désactivation des anciennes traces KernelSU corrompues..."
+          python3 -c '
+          import os
+          targets = ["Makefile", "drivers/Makefile", "drivers/Kconfig", "arch/arm64/Makefile"]
+          for path in targets:
+              if os.path.exists(path):
+                  with open(path, "r") as f:
+                      lines = f.readlines()
+                  with open(path, "w") as f:
+                      for line in lines:
+                          if "KernelSU" in line or "kernelsu" in line:
+                              f.write("# " + line if not line.strip().startswith("#") else line)
+                          else:
+                              f.write(line)
+          print("✅ Anciens hooks nettoyés et mis en commentaire.")
+          '
+
           # 🛠️ INSTALLATION MANUELLE DE KERNELSU DANS DRIVERS
           echo "📥 Clonage propre de KernelSU v0.9.5..."
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 KernelSU_tmp
