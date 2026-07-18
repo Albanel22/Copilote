@@ -79,8 +79,23 @@ jobs:
           # Correctif visibilité types mémoire SUSFS
           sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' "$LINUX_INCLUDE/susfs.h"
 
-          # 🛠️ SYNTAXE CORRIGÉE : Déclaration sécurisée des variables dans do_faccessat
-          sed -i '/long do_faccessat/,/^{/ { /^{/a \ \ \ \ struct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;\n}' fs/open.c
+          # 🛠️ PATCH ROBUSTE VIA PYTHON : Injection propre des variables manquantes dans do_faccessat
+          python3 -c '
+          import os
+          file_path = "fs/open.c"
+          if os.path.exists(file_path):
+              with open(file_path, "r") as f:
+                  code = f.read()
+              if "long do_faccessat" in code and "struct path path;" not in code:
+                  idx = code.find("long do_faccessat")
+                  brace_idx = code.find("{", idx)
+                  if brace_idx != -1:
+                      patch = "\n\tstruct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;"
+                      code = code[:brace_idx+1] + patch + code[brace_idx+1:]
+                      with open(file_path, "w") as f:
+                          f.write(code)
+                      print("🎉 Variables injectées avec succès dans fs/open.c")
+          '
 
           # 5. Injection dans Kconfig et Makefile (Indispensable)
           cat <<EOF >> "$KSU_ROOT/Kconfig"
