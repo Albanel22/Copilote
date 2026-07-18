@@ -81,10 +81,10 @@ jobs:
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
 
-          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU (Correctif pour l'erreur 16)
+          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU (Correctif ultime pour l'erreur 16)
           echo "🚀 Forçage manuel de la version KernelSU à 12100..."
-          sed -i 's/-DKSUD_VERSION=[^ ]*//g' drivers/kernelsu/Makefile
-          echo "ccflags-y += -DKSUD_VERSION=12100" >> drivers/kernelsu/Makefile
+          # On injecte la variable tout en haut du Makefile pour écraser l'ancien système de détection
+          echo "KSUD_VERSION := 12100" | cat - drivers/kernelsu/Makefile > temp && mv temp drivers/kernelsu/Makefile
 
           # 2. Détection dynamique de la version du Kernel
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
@@ -300,14 +300,16 @@ jobs:
           mkdir -p repack
           cp boot-stock.img repack/boot.img
           
-          # Récupération d'un build natif Linux x86_64 de magiskboot au lieu de la version APK Android
-          curl -Lo repack/magiskboot https://github.com/miz999/magiskboot-linux/releases/latest/download/magiskboot
+          echo "📥 Téléchargement de magiskboot natif Linux x86_64..."
+          curl -fLo repack/magiskboot https://github.com/xiaoxindada/magiskboot_linux/releases/latest/download/magiskboot || \
+          curl -fLo repack/magiskboot https://github.com/affggh/magiskboot_linux/releases/latest/download/magiskboot
+          
           chmod +x repack/magiskboot
           
           cd repack
+          echo "📦 Unpack du boot.img stock..."
           ./magiskboot unpack boot.img
           
-          # Vérification que l'image du noyau compilé existe bien avant la copie
           IMAGE_PATH="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
           if [ ! -f "$IMAGE_PATH" ]; then
             echo "❌ Erreur : Image de noyau introuvable à l'emplacement $IMAGE_PATH"
@@ -315,6 +317,7 @@ jobs:
           fi
           
           cp "$IMAGE_PATH" kernel
+          echo "🔄 Repack du nouveau boot.img avec ton Kernel..."
           ./magiskboot repack boot.img new-boot.img
           
           cd ..
