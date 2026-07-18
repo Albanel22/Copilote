@@ -311,4 +311,49 @@ index 1ba6d853..7b24203c 100644
 +
  	rcu_read_unlock();
  }
+
+ --- a/fs/open.c
++++ b/fs/open.c
+@@ -385,6 +385,15 @@
+ 	if (error)
+ 		return error;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
++#endif
++
+ 	fd = get_unused_fd_flags(mode);
+ 	if (fd >= 0) {
+ 		struct file *f = do_filp_open(dfd, filename, &open_mode);
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -1739,6 +1739,26 @@
+ }
+ #endif
+ 
++int path_umount(struct path *path, int flags)
++{
++	struct mount *mnt = real_mount(path->mnt);
++	int ret;
++
++	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
++		return -EINVAL;
++	if (!may_mount())
++		return -EPERM;
++	if (path->dentry != path->mnt->mnt_root)
++		return -EINVAL;
++	if (!check_mnt(mnt))
++		return -EINVAL;
++	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
++		return -EINVAL;
++	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	ret = do_umount(mnt, flags);
++	dput(path->dentry);
++	mntput_no_expire(mnt);
++	return ret;
++}
++
+ /*
+  * Now umount can handle mount points as well as block devices.
  
