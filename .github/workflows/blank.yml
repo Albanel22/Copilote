@@ -51,13 +51,13 @@ jobs:
           git clean -fd
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-          # 2. 🛠️ DÉTECTION DYNAMIQUE DE LA VERSION DU KERNEL (Ex: 4.19)
+          # 2. Détection dynamique de la version du Kernel (Ex: 4.19)
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
           PATCHLEVEL=$(grep -E "^PATCHLEVEL =" Makefile | head -n 1 | awk '{print $3}')
           KERNEL_VER="${VERSION}.${PATCHLEVEL}"
           echo "📊 Version du Kernel détectée : ${KERNEL_VER}"
 
-          # 3. 🛠️ SÉLECTION DE LA BRANCHE SUSFS CORRESPONDANTE
+          # 3. Sélection et clonage de la branche SUSFS correspondante
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "kernel-${KERNEL_VER}" --depth=1 susfs4ksu || {
             echo "⚠️ Branche kernel-${KERNEL_VER} introuvable, repli sur la branche principale..."
             git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
@@ -69,29 +69,37 @@ jobs:
           KSU_H=$(find . -type f -name "ksu.h" | grep -E "kernel/|drivers/" | head -n 1)
           RULES_C=$(find . -name "rules.c" | grep "selinux" | head -n 1)
           KSU_ROOT=$(dirname "$CORE_HOOK")
-          LINUX_INCLUDE=$(find . -name "linux" -type d | grep "include" | head -n 1)
 
           echo "✅ Fichiers KernelSU trouvés : $CORE_HOOK, $KSU_C, $KSU_H, $RULES_C"
 
-          # Alignement structurel requis
+          # Alignement structurel requis pour KernelSU
           mkdir -p kernelSU
           cp "$KSU_H" kernelSU/ksu.h
 
-          # 🛠️ LOCALISATION SÉCURISÉE DES SOURCES SUSFS SELON LA BRANCHE
-          SUSFS_C_SRC=$(find susfs4ksu/ -name "susfs.c" | head -n 1)
-          SUSFS_H_SRC=$(find susfs4ksu/ -name "susfs.h" | head -n 1)
+          # 🛠️ STRATÉGIE DE COPIE SÉCURISÉE ET GLOBALE DES HEADERS SUSFS
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ 2>/dev/null || cp $(find susfs4ksu/ -name "susfs.c") fs/
           
-          if [ -z "$SUSFS_C_SRC" ] || [ -z "$SUSFS_H_SRC" ]; then
-            echo "❌ Erreur : Impossible de trouver les fichiers sources de SusFS !"
-            exit 1
+          if [ -d "susfs4ksu/kernel_patches/include" ]; then
+            cp -r susfs4ksu/kernel_patches/include/* include/
+            echo "✅ Arborescence complète des fichiers d'en-tête SUSFS intégrée avec succès."
+          else
+            echo "⚠️ Structure alternative détectée dans l'arborescence SUSFS, répartition manuelle..."
+            mkdir -p include/linux include/uapi/linux
+            find susfs4ksu/ -name "susfs.h" | while read -r f; do
+              if [[ "$f" == *"uapi"* ]]; then
+                cp "$f" include/uapi/linux/
+              else
+                cp "$f" include/linux/
+              fi
+            done
+            find susfs4ksu/ -name "susfs_def.h" -exec cp {} include/linux/ \; 2>/dev/null || true
           fi
 
-          cp "$SUSFS_C_SRC" fs/
-          cp "$SUSFS_H_SRC" "$LINUX_INCLUDE/"
           echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
 
-          # Correctif visibilité types mémoire SUSFS
-          sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' "$LINUX_INCLUDE/susfs.h"
+          # Correctif visibilité types mémoire SUSFS sur l'ensemble des headers copiés
+          [ -f include/linux/susfs.h ] && sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/linux/susfs.h
+          [ -f include/uapi/linux/susfs.h ] && sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/uapi/linux/susfs.h
 
           # Patch robuste ciblé (Regex) pour fs/open.c via Python
           python3 -c '
