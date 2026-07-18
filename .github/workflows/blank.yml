@@ -43,39 +43,37 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS
+      - name: Injecter KernelSU & SUSFS manuellement
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -euo pipefail
-          
-          # 1. Intégration KernelSU officielle
+          # 1. KernelSU officiel (setup.sh est fiable, on le garde)
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-          fi
 
-          # 2. Préparation SUSFS
+          # 2. Copie des fichiers SUSFS nécessaires
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
-          # 3. Neutralisation de task_mmu.c (on garde le fichier constructeur original)
-          echo "💾 Sauvegarde de fs/proc/task_mmu.c..."
-          cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
+          # 3. Injection des hooks SUSFS (remplace les patches qui échouent)
+          
+          # Hook dans fs/open.c
+          sed -i '/if (error) return error;/a \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif' fs/open.c
 
-          # 4. Patch automatique
-          patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué..."
+          # Hook dans fs/namespace.c (Injection de path_umount)
+          echo -e '\nint path_umount(struct path *path, int flags) {\n\tstruct mount *mnt = real_mount(path->mnt);\n\tint ret;\n\tif (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW)) return -EINVAL;\n\tif (!may_mount()) return -EPERM;\n\tif (path->dentry != path->mnt->mnt_root) return -EINVAL;\n\tif (!check_mnt(mnt)) return -EINVAL;\n\tif (mnt->mnt.mnt_flags & MNT_LOCKED) return -EINVAL;\n\tif (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN)) return -EPERM;\n\tret = do_umount(mnt, flags);\n\tdput(path->dentry);\n\tmntput_no_expire(mnt);\n\treturn ret;\n}' >> fs/namespace.c
 
-          # 5. Restauration de task_mmu.c et ajout propre de l'include
-          echo "🔄 Restauration de fs/proc/task_mmu.c..."
-          mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
-          sed -i '/#include <linux\/mm.h>/a #include <linux/susfs.h>' fs/proc/task_mmu.c
+          # Hooks dans drivers/kernelsu/core_hook.c
+          sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' drivers/kernelsu/core_hook.c
+          sed -i '/try_umount("\/system"/i #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT\n\tsusfs_try_umount(new_uid.val);\n#endif' drivers/kernelsu/core_hook.c
 
-          # 6. Application de TON custom.patch (on va y mettre toutes les injections)
-          if [ -f "$GITHUB_WORKSPACE/patches/custom.patch" ]; then
-            echo "✅ Application du custom.patch..."
-            patch -p1 < "$GITHUB_WORKSPACE/patches/custom.patch"
-          fi
+          # Hooks dans drivers/kernelsu/ksu.c
+          sed -i '/#include "throne_tracker.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' drivers/kernelsu/ksu.c
+          sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' drivers/kernelsu/ksu.c
+
+          # Hooks dans drivers/kernelsu/selinux/rules.c
+          sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a \
+          #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' drivers/kernelsu/selinux/rules.c
           
       - name: Multi-stage Kernel Compilation
         run: |
