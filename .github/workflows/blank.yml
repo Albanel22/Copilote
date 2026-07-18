@@ -299,18 +299,27 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           cp boot-stock.img repack/boot.img
-          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
-          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
-          mv lib/x86_64/libmagiskboot.so repack/magiskboot
+          
+          # Récupération d'un build natif Linux x86_64 de magiskboot au lieu de la version APK Android
+          curl -Lo repack/magiskboot https://github.com/miz999/magiskboot-linux/releases/latest/download/magiskboot
           chmod +x repack/magiskboot
+          
           cd repack
           ./magiskboot unpack boot.img
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
+          # Vérification que l'image du noyau compilé existe bien avant la copie
+          IMAGE_PATH="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          if [ ! -f "$IMAGE_PATH" ]; then
+            echo "❌ Erreur : Image de noyau introuvable à l'emplacement $IMAGE_PATH"
+            exit 1
+          fi
+          
+          cp "$IMAGE_PATH" kernel
           ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../final_boot.img
+          
           cd ..
           mkdir -p final_output
-          mv final_boot.img final_output/boot.img
+          mv repack/new-boot.img final_output/boot.img
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
