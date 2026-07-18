@@ -76,9 +76,15 @@ jobs:
           mv KernelSU_tmp/kernel drivers/kernelsu
           rm -rf KernelSU_tmp
 
+          # 🔧 Liaison de KernelSU au système de build officiel
           echo "🔧 Liaison de KernelSU au système de build officiel..."
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
+
+          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU (Correctif pour l'erreur 16)
+          echo "🚀 Forçage manuel de la version KernelSU à 12100..."
+          sed -i 's/-DKSUD_VERSION=[^ ]*//g' drivers/kernelsu/Makefile
+          echo "ccflags-y += -DKSUD_VERSION=12100" >> drivers/kernelsu/Makefile
 
           # 2. Détection dynamique de la version du Kernel
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
@@ -307,7 +313,7 @@ jobs:
           mv final_boot.img final_output/boot.img
 
       - name: Upload Finished Packaged Assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact=v4
         with:
           name: kernel-motorola_final
           path: final_output/boot.img
