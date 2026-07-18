@@ -301,8 +301,29 @@ jobs:
           cp boot-stock.img repack/boot.img
           
           echo "📥 Téléchargement de magiskboot natif Linux x86_64..."
-          curl -fLo repack/magiskboot https://github.com/xiaoxindada/magiskboot_linux/releases/latest/download/magiskboot || \
-          curl -fLo repack/magiskboot https://github.com/affggh/magiskboot_linux/releases/latest/download/magiskboot
+          
+          # Liste de miroirs et méthodes alternatives (Releases fixes + RAW Github)
+          URLS=(
+            "https://github.com/bmaxsh/magiskboot-linux/releases/download/v27.0/magiskboot"
+            "https://github.com/HuskyDG/magiskboot-bin/raw/main/linux/x86_64/magiskboot"
+            "https://github.com/xiaoxindada/magiskboot_linux/releases/download/27000/magiskboot"
+            "https://github.com/affggh/magiskboot_linux/releases/download/v27.0/magiskboot"
+          )
+          
+          SUCCESS=0
+          for url in "${URLS[@]}"; do
+            echo "🔹 Tentative de téléchargement depuis : $url"
+            if curl -fLo repack/magiskboot "$url"; then
+              echo "✅ Téléchargement réussi !"
+              SUCCESS=1
+              break
+            fi
+          done
+          
+          if [ $SUCCESS -ne 1 ]; then
+            echo "❌ Erreur critique : Tous les miroirs pour magiskboot ont renvoyé un échec."
+            exit 1
+          fi
           
           chmod +x repack/magiskboot
           
@@ -323,7 +344,7 @@ jobs:
           cd ..
           mkdir -p final_output
           mv repack/new-boot.img final_output/boot.img
-
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
