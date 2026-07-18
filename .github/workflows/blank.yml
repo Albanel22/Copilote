@@ -46,7 +46,7 @@ jobs:
       - name: Injecter KernelSU & SUSFS Dynamiquement
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Nettoyage et installation KernelSU (v0.9.5 figé pour tes hooks actuels)
+          # 1. Nettoyage et installation KernelSU
           git reset --hard
           git clean -fd
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
@@ -57,14 +57,17 @@ jobs:
           # 3. Détection dynamique des chemins
           CORE_HOOK=$(find . -name "core_hook.c" | head -n 1)
           KSU_C=$(find . -name "ksu.c" | head -n 1)
-          KSU_H=$(find . -name "ksu.h" | head -n 1)
+          
+          # 🛠️ ENHANCEMENT : On filtre pour exclure les headers C++ du manager/userspace
+          KSU_H=$(find . -type f -name "ksu.h" | grep -E "kernel/|drivers/" | head -n 1)
+          
           RULES_C=$(find . -name "rules.c" | grep "selinux" | head -n 1)
           KSU_ROOT=$(dirname "$CORE_HOOK")
           LINUX_INCLUDE=$(find . -name "linux" -type d | grep "include" | head -n 1)
 
           echo "✅ Fichiers trouvés : $CORE_HOOK, $KSU_C, $KSU_H, $RULES_C"
 
-          # 🛠️ CORRECTIF CASSE/CHEMIN : Crée le lien exact attendu par ton fs/open.c
+          # 🛠️ CORRECTIF CASSE/CHEMIN : Crée le dossier et y place le vrai ksu.h de niveau Kernel
           mkdir -p kernelSU
           cp "$KSU_H" kernelSU/ksu.h
 
@@ -72,6 +75,12 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h "$LINUX_INCLUDE/"
           echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
+
+          # 🛠️ CORRECTIF VISIBILITÉ SUSFS : Force l'inclusion des dépendances de types (vm_flags_t, etc.)
+          sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' "$LINUX_INCLUDE/susfs.h"
+
+          # 🛠️ CORRECTIF AUTOMATIQUE FS/OPEN.C : Déclare les variables manquantes nécessaires à ton patch faccessat
+          sed -i '/long do_faccessat(/,/{/ { /{/a \ \ \ \ struct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;' fs/open.c
 
           # 5. Injection dans Kconfig et Makefile (Indispensable)
           cat <<EOF >> "$KSU_ROOT/Kconfig"
