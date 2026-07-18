@@ -59,45 +59,25 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
-          # 3. STRATÉGIE DE NEUTRALISATION : Sauvegarde du fichier critique avant le patch
-          echo "💾 Sauvegarde de fs/proc/task_mmu.c pour éviter la corruption..."
+          # 3. Neutralisation de task_mmu.c (on garde le fichier constructeur original)
+          echo "💾 Sauvegarde de fs/proc/task_mmu.c..."
           cp fs/proc/task_mmu.c fs/proc/task_mmu.c.bak
 
           # 4. Patch automatique
           patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué..."
 
-          # 5. RESTAURATION : On remet le fichier original pour éviter les erreurs de syntaxe
-          echo "🔄 Restauration de fs/proc/task_mmu.c original..."
+          # 5. Restauration de task_mmu.c et ajout propre de l'include
+          echo "🔄 Restauration de fs/proc/task_mmu.c..."
           mv fs/proc/task_mmu.c.bak fs/proc/task_mmu.c
-          # On ré-insère l'include nécessaire proprement
           sed -i '/#include <linux\/mm.h>/a #include <linux/susfs.h>' fs/proc/task_mmu.c
 
-          # 6. Application de TON custom.patch (depuis le dossier patches)
+          # 6. Application de TON custom.patch (on va y mettre toutes les injections)
           if [ -f "$GITHUB_WORKSPACE/patches/custom.patch" ]; then
             echo "✅ Application du custom.patch..."
             patch -p1 < "$GITHUB_WORKSPACE/patches/custom.patch"
           fi
-
-          # 7. Injection manuelle fs/open.c
-          echo "🔧 Injection fs/open.c..."
-          if ! grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
-            sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
-            \
-            #ifdef CONFIG_KSU_SUSFS_SUS_PATH\
-            	struct filename* fname;\
-            	int status;\
-            	int error;\
-            	fname = getname_safe(filename);\
-            	status = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\
-            	putname_safe(fname);\
-            	if (status) {\
-            		return error;\
-            	}\
-            #endif' fs/open.c
-          fi
           
       - name: Multi-stage Kernel Compilation
-        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
           ccache -C
