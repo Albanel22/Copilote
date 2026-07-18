@@ -79,22 +79,42 @@ jobs:
           # Correctif visibilité types mémoire SUSFS
           sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' "$LINUX_INCLUDE/susfs.h"
 
-          # 🛠️ PATCH ROBUSTE VIA PYTHON : Injection propre des variables manquantes dans do_faccessat
+          # 🛠️ PATCH ROBUSTE CIBLÉ (REGEX) POUR FS/OPEN.C
           python3 -c '
-          import os
+          import re
           file_path = "fs/open.c"
-          if os.path.exists(file_path):
-              with open(file_path, "r") as f:
-                  code = f.read()
-              if "long do_faccessat" in code and "struct path path;" not in code:
-                  idx = code.find("long do_faccessat")
-                  brace_idx = code.find("{", idx)
-                  if brace_idx != -1:
-                      patch = "\n\tstruct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;"
-                      code = code[:brace_idx+1] + patch + code[brace_idx+1:]
-                      with open(file_path, "w") as f:
-                          f.write(code)
-                      print("🎉 Variables injectées avec succès dans fs/open.c")
+          with open(file_path, "r") as f:
+              code = f.read()
+          
+          # A. Injection du prototype externe pour ksu_handle_faccessat s`il n`existe pas
+          extern_decl = "\n#ifdef CONFIG_KSU\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n"
+          if "ksu_handle_faccessat" in code and "extern int ksu_handle_faccessat" not in code:
+              code = code.replace("long do_faccessat", extern_decl + "long do_faccessat")
+              print("🎉 Prototype de ksu_handle_faccessat injecté.")
+          
+          # B. Injection locale des variables structurelles manquantes au début de do_faccessat
+          pattern = r"(long\s+do_faccessat\s*\([^)]+\)\s*\{)"
+          match = re.search(pattern, code)
+          if match:
+              func_start_idx = match.end()
+              local_window = code[func_start_idx:func_start_idx+400]
+              
+              variables_to_inject = ""
+              if "struct path path;" not in local_window:
+                  variables_to_inject += "\n\tstruct path path;"
+              if "struct inode *inode;" not in local_window:
+                  variables_to_inject += "\n\tstruct inode *inode;"
+              if "struct vfsmount *mnt;" not in local_window:
+                  variables_to_inject += "\n\tstruct vfsmount *mnt;"
+                  
+              if variables_to_inject:
+                  code = code[:func_start_idx] + variables_to_inject + code[func_start_idx:]
+                  print("🎉 Variables locales injectées avec succès dans do_faccessat !")
+          else:
+              print("⚠️ Impossible de localiser la fonction do_faccessat via Regex")
+          
+          with open(file_path, "w") as f:
+              f.write(code)
           '
 
           # 5. Injection dans Kconfig et Makefile (Indispensable)
