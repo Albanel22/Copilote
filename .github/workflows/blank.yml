@@ -23,7 +23,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
+          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git
 
       - name: Download Stock Boot Image
         shell: bash
@@ -42,12 +42,11 @@ jobs:
           path: ~/.cache/ccache
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
-          
 
       - name: Injecter KernelSU & SUSFS Dynamiquement
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Nettoyage et installation KernelSU
+          # 1. Nettoyage et installation KernelSU (v0.9.5 figé pour tes hooks actuels)
           git reset --hard
           git clean -fd
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
@@ -64,9 +63,10 @@ jobs:
 
           echo "✅ Fichiers trouvés : $CORE_HOOK, $KSU_C, $RULES_C"
 
-          # 4. Copie des fichiers SUSFS
+          # 4. Copie des fichiers SUSFS et liaison indispensable au système de build
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h "$LINUX_INCLUDE/"
+          echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
 
           # 5. Injection dans Kconfig et Makefile (Indispensable)
           cat <<EOF >> "$KSU_ROOT/Kconfig"
@@ -104,16 +104,15 @@ jobs:
           sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' "$KSU_C"
           sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' "$RULES_C"
 
-          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
-          ccache -C
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
+          ccache -M ${{ env.CCACHE_SIZE }}
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
