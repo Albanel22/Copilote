@@ -58,7 +58,7 @@ jobs:
           CORE_HOOK=$(find . -name "core_hook.c" | head -n 1)
           KSU_C=$(find . -name "ksu.c" | head -n 1)
           
-          # 🛠️ ENHANCEMENT : On filtre pour exclure les headers C++ du manager/userspace
+          # Filtration stricte pour obtenir le header C du niveau Kernel
           KSU_H=$(find . -type f -name "ksu.h" | grep -E "kernel/|drivers/" | head -n 1)
           
           RULES_C=$(find . -name "rules.c" | grep "selinux" | head -n 1)
@@ -67,7 +67,7 @@ jobs:
 
           echo "✅ Fichiers trouvés : $CORE_HOOK, $KSU_C, $KSU_H, $RULES_C"
 
-          # 🛠️ CORRECTIF CASSE/CHEMIN : Crée le dossier et y place le vrai ksu.h de niveau Kernel
+          # Correctif chemin / casse pour fs/open.c
           mkdir -p kernelSU
           cp "$KSU_H" kernelSU/ksu.h
 
@@ -76,11 +76,11 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h "$LINUX_INCLUDE/"
           echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
 
-          # 🛠️ CORRECTIF VISIBILITÉ SUSFS : Force l'inclusion des dépendances de types (vm_flags_t, etc.)
+          # Correctif visibilité types mémoire SUSFS
           sed -i '1i #include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' "$LINUX_INCLUDE/susfs.h"
 
-          # 🛠️ CORRECTIF AUTOMATIQUE FS/OPEN.C : Déclare les variables manquantes nécessaires à ton patch faccessat
-          sed -i '/long do_faccessat(/,/{/ { /{/a \ \ \ \ struct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;' fs/open.c
+          # 🛠️ SYNTAXE CORRIGÉE : Déclaration sécurisée des variables dans do_faccessat
+          sed -i '/long do_faccessat/,/^{/ { /^{/a \ \ \ \ struct path path;\n\tstruct inode *inode;\n\tstruct vfsmount *mnt;\n}' fs/open.c
 
           # 5. Injection dans Kconfig et Makefile (Indispensable)
           cat <<EOF >> "$KSU_ROOT/Kconfig"
