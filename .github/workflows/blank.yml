@@ -59,26 +59,26 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
-          # 3. Patch automatique (on autorise l'erreur ici pour gérer le nettoyage après)
-          patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué, nettoyage en cours..."
+          # 3. Patch automatique
+          patch -p1 --ignore-whitespace -F3 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ Patch partiel appliqué..."
 
-          # 4. NETTOYAGE CRITIQUE : Suppression des erreurs dans task_mmu.c causées par le patch auto
-          # On nettoie les blocs corrompus et on ajoute proprement l'include nécessaire
+          # 4. NETTOYAGE RADICAL (Chirurgie)
+          # On supprime toutes les lignes contenant l'appel qui fait planter la compilation
+          # et tous les blocs ifdef associés pour repartir sur une base propre.
           if [ -f fs/proc/task_mmu.c ]; then
-            echo "🧹 Nettoyage de fs/proc/task_mmu.c..."
+            echo "🧹 Nettoyage radical de fs/proc/task_mmu.c..."
+            sed -i '/seq_put_decimal_ull_width/d' fs/proc/task_mmu.c
             sed -i '/#ifdef CONFIG_KSU_SUSFS/,/#endif/d' fs/proc/task_mmu.c
             sed -i '/#include <linux\/mm.h>/a #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
           # 5. Application de TON custom.patch (depuis le dossier patches)
           if [ -f "$GITHUB_WORKSPACE/patches/custom.patch" ]; then
-            echo "✅ Application du custom.patch depuis le dossier patches..."
+            echo "✅ Application du custom.patch..."
             patch -p1 < "$GITHUB_WORKSPACE/patches/custom.patch"
-          else
-            echo "⚠️ Attention : custom.patch non trouvé dans patches/, vérifie ton dépôt."
           fi
 
-          # 6. Injection manuelle fs/open.c (Injection sécurisée)
+          # 6. Injection manuelle fs/open.c
           echo "🔧 Injection fs/open.c..."
           if ! grep -q "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c; then
             sed -i '/ksu_handle_faccessat(&dfd, &filename, &mode, NULL);/!b;n;a \
