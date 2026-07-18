@@ -42,25 +42,33 @@ jobs:
           path: ~/.cache/ccache
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
-          
 
-      - name: Injecter KernelSU & SUSFS manuellement
+      - name: Injecter KernelSU & SUSFS Dynamiquement
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Nettoyage complet avant l'injection
+          # 1. Nettoyage et installation KernelSU
           git reset --hard
           git clean -fd
-
-          # 2. KernelSU officiel
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-          # 3. Récupération et placement SUSFS
+          # 2. Récupération SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          
+          # 3. Détection dynamique des chemins
+          CORE_HOOK=$(find . -name "core_hook.c" | head -n 1)
+          KSU_C=$(find . -name "ksu.c" | head -n 1)
+          RULES_C=$(find . -name "rules.c" | grep "selinux" | head -n 1)
+          KSU_ROOT=$(dirname "$CORE_HOOK")
+          LINUX_INCLUDE=$(find . -name "linux" -type d | grep "include" | head -n 1)
 
-          # 4. Modification de Kconfig (ajout du menu SUSFS)
-          cat <<EOF >> kernel/Kconfig
+          echo "✅ Fichiers trouvés : $CORE_HOOK, $KSU_C, $RULES_C"
+
+          # 4. Copie des fichiers SUSFS
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h "$LINUX_INCLUDE/"
+
+          # 5. Injection dans Kconfig
+          cat <<EOF >> "$KSU_ROOT/Kconfig"
 
           menu "KernelSU - SUSFS"
           config KSU_SUSFS
@@ -78,8 +86,8 @@ jobs:
           endmenu
           EOF
 
-          # 5. Modification du Makefile (ajout des flags)
-          cat <<EOF >> kernel/Makefile
+          # 6. Injection dans Makefile
+          cat <<EOF >> "$KSU_ROOT/Makefile"
           ifdef KSU_SUSFS
           ccflags-y += -DKSU_SUSFS
           endif
@@ -91,23 +99,16 @@ jobs:
           endif
           EOF
 
-          # 6. Injections (Hooks)
-          # fs/open.c
+          # 7. Injections (Hooks)
           sed -i '/if (error) return error;/a #ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif' fs/open.c
-
-          # fs/namespace.c (Injection de path_umount)
+          
           echo -e '\nint path_umount(struct path *path, int flags) {\n\tstruct mount *mnt = real_mount(path->mnt);\n\tint ret;\n\tif (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW)) return -EINVAL;\n\tif (!may_mount()) return -EPERM;\n\tif (path->dentry != path->mnt->mnt_root) return -EINVAL;\n\tif (!check_mnt(mnt)) return -EINVAL;\n\tif (mnt->mnt.mnt_flags & MNT_LOCKED) return -EINVAL;\n\tif (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN)) return -EPERM;\n\tret = do_umount(mnt, flags);\n\tdput(path->dentry);\n\tmntput_no_expire(mnt);\n\treturn ret;\n}' >> fs/namespace.c
 
-          # kernel/core_hook.c
-          sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' kernel/core_hook.c
-          sed -i '/try_umount("\/system"/i #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT\n\tsusfs_try_umount(new_uid.val);\n#endif' kernel/core_hook.c
+          sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' "$CORE_HOOK"
+          sed -i '/try_umount("\/system"/i #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT\n\tsusfs_try_umount(new_uid.val);\n#endif' "$CORE_HOOK"
+          sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' "$KSU_C"
+          sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' "$RULES_C"
 
-          # kernel/ksu.c
-          sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' kernel/ksu.c
-
-          # kernel/selinux/rules.c
-          sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' kernel/selinux/rules.c
-          
       - name: Multi-stage Kernel Compilation
         run: |
           set -uo pipefail
@@ -152,17 +153,12 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           cp boot-stock.img repack/boot.img
-          
-          # Téléchargement et préparation de magiskboot
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
-          
-          # Repackage
           cd repack
           ./magiskboot unpack boot.img
-          # Utilisation des variables pour le chemin du kernel
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
