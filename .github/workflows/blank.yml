@@ -50,7 +50,7 @@ jobs:
           git reset --hard
           git clean -fd
 
-          # 🛠️ INSTALLATION MANUELLE DE KERNELSU DANS DRIVERS (Standard & 100% compatible O=out)
+          # 🛠️ INSTALLATION MANUELLE DE KERNELSU DANS DRIVERS
           echo "📥 Clonage propre de KernelSU v0.9.5..."
           git clone https://github.com/tiann/KernelSU.git -b v0.9.5 KernelSU_tmp
           
@@ -62,7 +62,7 @@ jobs:
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
 
-          # 2. Détection dynamique de la version du Kernel (Ex: 4.19)
+          # 2. Détection dynamique de la version du Kernel
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
           PATCHLEVEL=$(grep -E "^PATCHLEVEL =" Makefile | head -n 1 | awk '{print $3}')
           KERNEL_VER="${VERSION}.${PATCHLEVEL}"
@@ -156,7 +156,7 @@ EOF
             fi
           fi
 
-          # Patch ciblé pour fs/open.c (Variables et prototypes requis par KernelSU)
+          # Patch ciblé pour fs/open.c
           python3 -c '
           import re
           file_path = "fs/open.c"
@@ -191,34 +191,34 @@ EOF
           '
 
           # 5. Injection dans Kconfig et Makefile de KernelSU
-          cat <<EOF >> "$KSU_ROOT/Kconfig"
-          menu "KernelSU - SUSFS"
-          config KSU_SUSFS
-              bool "KernelSU addon - SUSFS"
-              depends on KSU
-              default y
-          config KSU_SUSFS_SUS_PATH
-              bool "Enable to hide suspicious path"
-              depends on KSU_SUSFS
-              default y
-          config KSU_SUSFS_TRY_UMOUNT
-              bool "Enable to use ksu's try_umount"
-              depends on KSU_SUSFS
-              default y
-          endmenu
-          EOF
+          cat << 'EOF' >> "$KSU_ROOT/Kconfig"
+menu "KernelSU - SUSFS"
+config KSU_SUSFS
+    bool "KernelSU addon - SUSFS"
+    depends on KSU
+    default y
+config KSU_SUSFS_SUS_PATH
+    bool "Enable to hide suspicious path"
+    depends on KSU_SUSFS
+    default y
+config KSU_SUSFS_TRY_UMOUNT
+    bool "Enable to use ksu's try_umount"
+    depends on KSU_SUSFS
+    default y
+endmenu
+EOF
 
-          cat <<EOF >> "$KSU_ROOT/Makefile"
-          ifdef KSU_SUSFS
-          ccflags-y += -DKSU_SUSFS
-          endif
-          ifdef KSU_SUSFS_SUS_PATH
-          ccflags-y += -DKSU_SUSFS_SUS_PATH
-          endif
-          ifdef KSU_SUSFS_TRY_UMOUNT
-          ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
-          endif
-          EOF
+          cat << 'EOF' >> "$KSU_ROOT/Makefile"
+ifdef KSU_SUSFS
+ccflags-y += -DKSU_SUSFS
+endif
+ifdef KSU_SUSFS_SUS_PATH
+ccflags-y += -DKSU_SUSFS_SUS_PATH
+endif
+ifdef KSU_SUSFS_TRY_UMOUNT
+ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
+endif
+EOF
 
           # 6. Injections des hooks KernelSU essentiels
           sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' "$CORE_HOOK"
