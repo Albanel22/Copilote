@@ -48,6 +48,9 @@ jobs:
         run: |
           set -e
 
+          echo "🧹 Purge des anciens résidus de KernelSU du Makefile principal..."
+          sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' Makefile || true
+
           echo "🚀 [CONTOURNEMENT] Injection immédiate de KernelSU et SusFS pré-build..."
           
           # Nettoyage de sécurité avant injection
@@ -122,6 +125,10 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           rm -rf susfs4ksu
+
+          # Correction de la variable obsolète mmap_sem vers mmap_lock (spécifique aux branches Lineage récentes)
+          echo "🔧 Correction adaptative de mmap_sem vers mmap_lock dans fs/proc/base.c..."
+          sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
 
           # Pré-injection des flags directement dans le fichier cible de Motorola
           echo "📝 Pré-injection des flags d'activation dans le defconfig de base..."
