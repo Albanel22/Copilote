@@ -48,7 +48,7 @@ jobs:
         run: |
           set -e
 
-          echo "🧹 Purge complète de fs/open.c pour repartir sur du propre..."
+          echo "🧹 Purge complète de fs/open.c..."
           git checkout fs/open.c || true
 
           echo "🧹 Purge des anciens résidus de KernelSU..."
@@ -66,12 +66,16 @@ jobs:
           echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
 
-          # Clonage de SusFS et application du patch Noyau natif
+          # Clonage de SusFS et nettoyage du fichier de patch avant application
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
-          # On applique le patch global mais on refuse qu'il touche à fs/open.c pour éviter les conflits fuzz
-          patch -p1 --exclude="fs/open.c" < "$PATCH_FILE" || echo "⚠️ Patch partiel (excluant fs/open.c)"
+          echo "🧼 Neutralisation des mauvaises inclusions directement dans le fichier .patch..."
+          sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' "$PATCH_FILE" || true
+          sed -i 's/kernelSU/kernelsu/g' "$PATCH_FILE" || true
+
+          # Application du patch global expurgé (en excluant toujours fs/open.c au cas où)
+          patch -p1 --exclude="fs/open.c" < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec exclusions"
 
           # Application du patch SusFS sur KernelSU
           if [ -d susfs4ksu/kernel_patches/KernelSU ]; then
@@ -86,7 +90,7 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
 
-          echo "🚀 Purge globale des mauvaises inclusions de chemins alternatifs..."
+          echo "🚀 Purge globale préventive sur l'ensemble du code source..."
           find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' {} + || true
           find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/kernelSU/kernelsu/g' {} + || true
 
@@ -103,10 +107,9 @@ jobs:
                   with open(susfs_h, "w") as f: f.write(content)
               print("✅ include/linux/susfs.h sécurisé.")
 
-          # 2. Reconstruction totale, propre et isolée de fs/open.c
+          # 2. Reconstruction totale et propre de fs/open.c depuis l-état d-origine
           open_c = "fs/open.c"
           if os.path.exists(open_c):
-              # On recharge la version d-origine pour détruire les injections corrompues du patch original
               os.system("git checkout fs/open.c")
               with open(open_c, "r") as f: content = f.read()
               
@@ -114,24 +117,24 @@ jobs:
               headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
               content = headers + content
 
-              # Reconstruction propre de do_faccessat avec le hook SusFS officiel
+              # Injection chirurgicale dans do_faccessat
               target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
               idx = content.find(target_func)
               if idx != -1:
                   brace_idx = content.find("{", idx)
                   if brace_idx != -1:
-                      # Injection des variables locales requises au début de la fonction
+                      # Variables de pile au début de la fonction
                       vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
                       content = content[:brace_idx+1] + vars_inj + content[brace_idx+1:]
                       
-                      # Injection du hook juste avant la validation des flags d-accès originaux
+                      # Hook juste avant le check des flags d-accès originaux
                       idx_hook = content.find("if (mode & ~S_IRWXO)", brace_idx)
                       if idx_hook != -1:
                           hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
                           content = content[:idx_hook] + hook_inj + content[idx_hook:]
 
               with open(open_c, "w") as f: f.write(content)
-              print("✅ fs/open.c reconstruit et nettoyé de toute variable fantôme.")
+              print("✅ fs/open.c reconstruit proprement à l-abri du patch.")
 
           # 3. Réparation totale de fs/proc/task_mmu.c
           task_mmu_c = "fs/proc/task_mmu.c"
