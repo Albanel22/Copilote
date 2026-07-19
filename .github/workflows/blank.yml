@@ -197,7 +197,8 @@ jobs:
           mv final_boot.img final_output/boot.img
 
       - name: Upload Finished Packaged Assets
-        uses: uses/upload-artifact@v4
+        uses: actions/upload-artifact@v4
+
         with:
           name: kernel-motorola_final
           path: final_output/boot.img
