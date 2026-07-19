@@ -46,13 +46,13 @@ jobs:
       - name: Injecter KernelSU & SUSFS Proprement (Build 416)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -e # Coupe le build immédiatement si une étape échoue (évite les monstres bancals)
+          set -e
 
           # 1. Nettoyage complet des sources
           git reset --hard
           git clean -fd
 
-          # 🧹 Désactivation des anciennes traces si présentes
+          # 🧹 Nettoyage des hooks existants
           echo "🧹 Nettoyage des hooks existants..."
           sed -i '/kernelsu/d' drivers/Makefile || true
           sed -i '/KernelSU/d' drivers/Kconfig || true
@@ -77,14 +77,27 @@ jobs:
           # 3. Clonage de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
 
-          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU (Le cœur du correctif)
+          # 4. APPLICATION DU PATCH OFFICIEL ET CAPTURE DES ERREURS
           echo "🛠️ Application du patch SusFS sur l'arborescence du noyau..."
-          # On cherche le patch 4.19 dans le dépôt susfs
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          
+
           if [ -f "$PATCH_FILE" ]; then
             echo "✅ Patch trouvé : $PATCH_FILE"
-            patch -p1 < "$PATCH_FILE"
+            
+            patch -p1 < "$PATCH_FILE" || {
+              echo "❌ Le patch a échoué. Extraction immédiate des conflits (.rej) :"
+              echo "========================================="
+              echo "📂 CONTENU DE fs/open.c.rej :"
+              echo "========================================="
+              [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Aucun rejet pour open.c"
+              
+              echo "========================================="
+              echo "📂 CONTENU DE fs/proc/task_mmu.c.rej :"
+              echo "========================================="
+              [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Aucun rejet pour task_mmu.c"
+              echo "========================================="
+              exit 1
+            }
           else
             echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
             exit 1
@@ -95,14 +108,13 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           
-          # Si le patch n'a pas mis à jour le Makefile de fs/, on l'ajoute
           if ! grep -q "susfs.o" fs/Makefile; then
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
           # 6. Application des patchs spécifiques à KernelSU pour SusFS
           echo "🔗 Liaison SusFS <-> KernelSU..."
-          cp susfs4ksu/kernel_patches/KernelSU/ext/* drivers/kernelsu/
+          cp -r susfs4ksu/kernel_patches/KernelSU/ext/* drivers/kernelsu/
 
           echo "✅ Injection terminée avec succès pour le Build 416 !"
           
