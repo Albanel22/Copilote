@@ -139,41 +139,54 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 2. ⚡ CHIRURGIE NUCLÉAIRE POST-CONFIG ⚡
-          echo "🚀 Réécriture chirurgicale des fichiers sensibles..."
+          # 2. ⚡ CHIRURGIE NUCLÉAIRE SÉCURISÉE POST-CONFIG ⚡
+          echo "🚀 Réécriture anti-doublon et assainissement de fs/open.c..."
           python3 -c '
           import os
 
-          # Restauration propre du fichier fs/open.c racine
-          os.system("git checkout fs/open.c")
-          
           def fix_open_file(filepath):
-              if os.path.exists(filepath):
-                  with open(filepath, "r") as f: content = f.read()
-                  if "kernelSU/ksu.h" in content or "kernelsu/kernel/ksu.h" in content:
-                      lines = content.splitlines()
-                      lines = [l for l in lines if "ksu.h" not in l and "susfs.h" not in l]
-                      content = "\n".join(lines) + "\n"
+              if not os.path.exists(filepath):
+                  return
+              
+              # Étape A : On repart systématiquement d-une base 100% saine (le fichier d-origine git)
+              # pour éliminer les injections brisées du patch original.
+              tmp_content = ""
+              with open("fs/open.c", "r") as f_orig:
+                  tmp_content = f_orig.read()
+              
+              # Nettoyage de sécurité si le fichier temporaire contient déjà des résidus
+              if "kernelSU" in tmp_content or "CONFIG_KSU_SUSFS_SUS_PATH" in tmp_content:
+                  os.system("git checkout fs/open.c")
+                  with open("fs/open.c", "r") as f_orig:
+                      tmp_content = f_orig.read()
 
-                  headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
-                  content = headers + content
+              # Étape B : Injection propre et contrôlée des en-têtes universels
+              headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
+              new_content = headers + tmp_content
 
-                  target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-                  idx = content.find(target_func)
-                  if idx != -1:
-                      brace_idx = content.find("{", idx)
-                      if brace_idx != -1:
-                          vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
-                          content = content[:brace_idx+1] + vars_inj + content[brace_idx+1:]
-                          
-                          idx_hook = content.find("if (mode & ~S_IRWXO)", brace_idx)
-                          if idx_hook != -1:
-                              hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
-                              content = content[:idx_hook] + hook_inj + content[idx_hook:]
+              # Étape C : Reconstruction chirurgicale de do_faccessat sans duplication
+              target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
+              idx = new_content.find(target_func)
+              if idx != -1:
+                  brace_idx = new_content.find("{", idx)
+                  if brace_idx != -1:
+                      # Injection des variables locales au tout début de la fonction
+                      vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
+                      new_content = new_content[:brace_idx+1] + vars_inj + new_content[brace_idx+1:]
+                      
+                      # Hook juste avant la validation des flags d-accès d-origine
+                      idx_hook = new_content.find("if (mode & ~S_IRWXO)", brace_idx)
+                      if idx_hook != -1:
+                          hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
+                          new_content = new_content[:idx_hook] + hook_inj + new_content[idx_hook:]
 
-                  with open(filepath, "w") as f: f.write(content)
-                  print(f"✅ {filepath} réécrit avec succès.")
+              # Étape D : Écriture finale dans la cible (écrase les doublons éventuels)
+              with open(filepath, "w") as f:
+                  f.write(new_content)
+              print(f"✅ {filepath} réécrit et stabilisé (zéro doublon).")
 
+          # Nettoyage et reconstruction synchrone
+          os.system("git checkout fs/open.c")
           fix_open_file("fs/open.c")
           fix_open_file(os.path.join("${{ env.BUILD_DIR }}", "fs/open.c"))
 
@@ -181,8 +194,6 @@ jobs:
           def fix_task_mmu(filepath):
               if os.path.exists(filepath):
                   with open(filepath, "r") as f: content = f.read()
-                  
-                  # Si l-en-tête de sécurité n-est pas présent, on l-injecte avec un garde-fou macro
                   if "SUSFS_MAX_LEN_PATHNAME" not in content or "#include <linux/susfs.h>" not in content:
                       safety_headers = (
                           "#define CONFIG_KSU_SUSFS 1\n"
@@ -198,16 +209,13 @@ jobs:
           fix_task_mmu("fs/proc/task_mmu.c")
           fix_task_mmu(os.path.join("${{ env.BUILD_DIR }}", "fs/proc/task_mmu.c"))
 
-          # Réparation structurelle de include/linux/susfs.h si nécessaire
+          # Réparation structurelle de include/linux/susfs.h
           susfs_h = "include/linux/susfs.h"
           if os.path.exists(susfs_h):
               with open(susfs_h, "r") as f: content = f.read()
-              # On s-assure que les types mm et fs fondamentaux sont déclarés avant le corps
               if "linux/mm_types.h" not in content:
                   content = "#include <linux/mm_types.h>\n#include <linux/fs.h>\n" + content
-              # Sécurité d-exposition de susfs_sus_maps
               if "susfs_sus_maps" not in content:
-                  print("⚠️ susfs_sus_maps introuvable dans susfs.h, injection du prototype externe...")
                   content += "\nextern int susfs_sus_maps(unsigned long ino, unsigned long size, unsigned long *p_ino, unsigned int *p_dev, unsigned long *p_flags, unsigned long *p_pgoff, struct vm_area_struct *vma, char *out_name);\n"
               with open(susfs_h, "w") as f: f.write(content)
               print("✅ include/linux/susfs.h vérifié et validé.")
