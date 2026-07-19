@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Injecter KernelSU & SUSFS Proprement (Build 420)
+      - name: Injecter KernelSU & SUSFS Proprement (Build 421)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
@@ -145,21 +145,29 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          # 7. APPLICATION DU PATCH SUR KERNELSU (Ce que pointait ton lien Github)
+          # 7. APPLICATION DU PATCH SUR KERNELSU (Correction de la portée du patch)
           echo "🔗 Application du patch d'activation SusFS dans KernelSU..."
           KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
 
           if [ -f "$KSU_PATCH" ]; then
             echo "✅ Patch KSU trouvé : $KSU_PATCH"
-            patch -p1 < "$KSU_PATCH"
+            
+            # Sauvegarde du chemin absolu avant le changement de dossier
+            KSU_PATCH_ABS=$(pwd)/$KSU_PATCH
+            
+            # Déplacement et application locale du patch
+            cd drivers/kernelsu
+            patch -p1 < "$KSU_PATCH_ABS"
+            cd ../..
+            
             echo "✅ KernelSU est maintenant lié à SusFS !"
           else
             echo "❌ Erreur critique : Impossible de trouver 10_enable_susfs_for_ksu.patch"
             exit 1
           fi
 
-          echo "🎉 Tout est parfaitement aligné pour le Build 420 !"
-                
+          echo "🎉 Tout est parfaitement aligné pour le Build 421 !"
+            
               
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
