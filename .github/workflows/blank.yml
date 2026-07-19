@@ -48,14 +48,16 @@ jobs:
         run: |
           set -e
 
-          # 1. Nettoyage complet des sources
+          # 1. Nettoyage complet des sources et des dossiers fantômes
           git reset --hard
           git clean -fd
+          rm -rf drivers/kernelsu || true
+          git rm -rf --cached drivers/kernelsu 2>/dev/null || true
 
-          # 🧹 Nettoyage des anciens hooks
+          # 🧹 Nettoyage des anciens hooks (insensible à la casse)
           echo "🧹 Nettoyage des hooks existants..."
-          sed -i '/kernelsu/d' drivers/Makefile || true
-          sed -i '/KernelSU/d' drivers/Kconfig || true
+          sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Makefile || true
+          sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Kconfig || true
 
           # 🛠️ CLONAGE ET FIXATION DE LA VERSION DE KERNELSU
           echo "📥 Clonage propre de KernelSU..."
@@ -77,22 +79,23 @@ jobs:
           # 3. Clonage de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
 
-          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU (Avec notre fix Python juste après)
+          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU
           echo "🛠️ Application du patch SusFS global sur le noyau..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
           if [ -f "$PATCH_FILE" ]; then
             echo "✅ Patch Kernel trouvé : $PATCH_FILE"
-            patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu, application des correctifs chirurgicaux..."
+            patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu..."
           else
             echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
             exit 1
           fi
 
-          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE POUR LES REJETS DE OPEN.C
+          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE
           echo "🐍 Lancement du script de correction des conflits..."
           cat << 'EOF' > fix_susfs.py
           import os
+          import re
 
           # --- Correction de fs/open.c ---
           open_path = 'fs/open.c'
@@ -131,7 +134,93 @@ jobs:
               with open(mmu_path, 'w') as f:
                   f.write(code)
               print("✅ fs/proc/task_mmu.c patché manuellement avec succès !")
+
+          # --- Complétion/Vérification sécurisée de core_hook.c ---
+          hook_path = 'drivers/kernelsu/kernel/core_hook.c'
+          if os.path.exists(hook_path):
+              with open(hook_path, 'r') as f:
+                  code = f.read()
+              
+              if "susfs_try_umount_all" not in code:
+                  print("🔧 Détection d'un patch core_hook.c tronqué. Injection...")
+                  code = re.sub(r'int ksu_handle_setuid\(struct cred \*new,\s*const struct cred \*old\).*$', '', code, flags=re.DOTALL)
+                  
+                  fixed_block = """
+          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+          void susfs_try_umount_all(uid_t uid) {
+          	susfs_try_umount(uid);
+          	ksu_try_umount("/system", true, 0, uid);
+          	ksu_try_umount("/system_ext", true, 0, uid);
+          	ksu_try_umount("/vendor", true, 0, uid);
+          	ksu_try_umount("/product", true, 0, uid);
+          	ksu_try_umount("/odm", true, 0, uid);
+          	ksu_try_umount("/data/adb/modules", false, MNT_DETACH, uid);
+          	ksu_try_umount("/debug_ramdisk", true, MNT_DETACH, uid);
+          }
+          #endif
+
+          int ksu_handle_setuid(struct cred *new, const struct cred *old)
+          {
+          	if (!ksu_module_mounted) {
+          		return 0;
+          	}
+          	if (!new || !old) {
+          		return 0;
+          	}
+          	kuid_t new_uid = new->uid;
+          	kuid_t old_uid = old->uid;
+          	if (0 != old_uid.val) {
+          		return 0;
+          	}
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          	bool is_zygote_child = susfs_is_sid_equal(old->security, susfs_zygote_sid);
+          	if (likely(is_zygote_child)) {
+          		if (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {
+          			if (susfs_is_umount_for_zygote_system_process_enabled) {
+          				goto out_ksu_try_umount;
+          			}
+          		}
+          	}
+          #endif
+          	if (is_non_appuid(new_uid)) {
+          #ifdef CONFIG_KSU_DEBUG
+          		pr_info("handle setuid ignore non application uid: %d\n", new_uid.val);
+          #endif
+          		return 0;
+          	}
+          #ifdef CONFIG_KSU_SUSFS
+          	else {
+          		task_lock(current);
+          		current->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC;
+          		task_unlock(current);
+          	}
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          out_ksu_try_umount:
+          #endif
+          	if (!ksu_uid_should_umount(new_uid.val)) {
+          		return 0;
+          	} else {
+          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+          		susfs_try_umount_all(new_uid.val);
+          #else
+          		try_umount("/system", true, 0);
+          		try_umount("/vendor", true, 0);
+          		try_umount("/product", true, 0);
+          		try_umount("/data/adb/modules", false, MNT_DETACH);
+          #endif
+          	}
+          	return 0;
+          }
+          """
+                  code += fixed_block
+                  with open(hook_path, 'w') as f:
+                      f.write(code)
+                  print("✅ drivers/kernelsu/kernel/core_hook.c opérationnel et sécurisé !")
           EOF
+
+          # Nettoyage chirurgical des 10 espaces de décalage YAML pour Python
+          sed -i 's/^          //' fix_susfs.py
           
           python3 fix_susfs.py
           rm fix_susfs.py
@@ -145,21 +234,16 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          # 7. APPLICATION DU PATCH SUR KERNELSU (Correction de la portée du patch)
+          # 7. APPLICATION DU PATCH SUR KERNELSU
           echo "🔗 Application du patch d'activation SusFS dans KernelSU..."
           KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
 
           if [ -f "$KSU_PATCH" ]; then
             echo "✅ Patch KSU trouvé : $KSU_PATCH"
-            
-            # Sauvegarde du chemin absolu avant le changement de dossier
             KSU_PATCH_ABS=$(pwd)/$KSU_PATCH
-            
-            # Déplacement et application locale du patch
             cd drivers/kernelsu
             patch -p1 < "$KSU_PATCH_ABS"
             cd ../..
-            
             echo "✅ KernelSU est maintenant lié à SusFS !"
           else
             echo "❌ Erreur critique : Impossible de trouver 10_enable_susfs_for_ksu.patch"
@@ -167,8 +251,7 @@ jobs:
           fi
 
           echo "🎉 Tout est parfaitement aligné pour le Build 421 !"
-            
-              
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -184,6 +267,11 @@ jobs:
           
           echo "📂 Préparation du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          
+          # Fix préventif de l'arborescence out/ pour le compilateur Kconfig (Évite l'erreur can't open file)
+          mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu
+          cp drivers/kernelsu/Kconfig ${{ env.BUILD_DIR }}/drivers/kernelsu/Kconfig 2>/dev/null || true
+
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
           echo "🔧 Injection forcée des flags requis..."
