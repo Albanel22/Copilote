@@ -48,6 +48,9 @@ jobs:
         run: |
           set -e
 
+          echo "🧹 Purge complète de fs/open.c pour éviter les résidus..."
+          git checkout fs/open.c || true
+
           echo "🧹 Purge des anciens résidus de KernelSU..."
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' Makefile || true
 
@@ -68,7 +71,6 @@ jobs:
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
           # On applique le patch global mais on refuse qu'il touche à fs/open.c pour éviter les conflits fuzz
-          git checkout fs/open.c || true
           patch -p1 --exclude="fs/open.c" < "$PATCH_FILE" || echo "⚠️ Patch partiel (excluant fs/open.c)"
 
           # Application du patch SusFS sur KernelSU
@@ -97,15 +99,14 @@ jobs:
                   with open(susfs_h, "w") as f: f.write(content)
               print("✅ include/linux/susfs.h sécurisé.")
 
-          # 2. Patch propre et sécurisé de fs/open.c à partir de l-état stock
+          # 2. Reconstruction totale et propre de fs/open.c
           open_c = "fs/open.c"
           if os.path.exists(open_c):
               with open(open_c, "r") as f: content = f.read()
               
-              # Correction stricte ici : correction des minuscules pour "kernelsu"
-              headers = "#include " + chr(34) + "../drivers/kernelsu/kernel/ksu.h" + chr(34) + "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
-              if "drivers/kernelsu/kernel/ksu.h" not in content and "kernelsu" not in content:
-                  content = headers + content
+              # Utilisation d-un chemin universel propre basé sur la racine
+              headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
+              content = headers + content
 
               # Injection chirurgicale dans do_faccessat sans casser les variables locales existantes
               if "susfs_sus_path_by_filename" not in content:
@@ -125,7 +126,7 @@ jobs:
                               content = content[:idx_hook] + hook_inj + content[idx_hook:]
 
               with open(open_c, "w") as f: f.write(content)
-              print("✅ fs/open.c reconstruit proprement avec le bon chemin d-inclusion.")
+              print("✅ fs/open.c reconstruit proprement sans chemin kernelSU corrompu.")
 
           # 3. Réparation totale de fs/proc/task_mmu.c
           task_mmu_c = "fs/proc/task_mmu.c"
