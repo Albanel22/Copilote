@@ -65,7 +65,7 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu
           git checkout v0.9.5
-          rm -rf .git  # 🌟 Élimine le statut de sous-dépôt pour tromper les scripts de nettoyage
+          rm -rf .git  # Retrait du sous-dépôt
           cd ../..
 
           # 🔧 Liaison de KernelSU au système de build
@@ -238,9 +238,20 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          echo "🎉 Tout est parfaitement aligné et corrigé pour le Build 421 !"
+          # 🧹 Nettoyage du dépôt de patchs pour éviter de le commiter inutilement
+          rm -rf susfs4ksu
 
-          
+          # 🛡️ 8. SÉCURISATION DES INJECTIONS DANS GIT (Protection anti-clean)
+          echo "🛡️ Indexation et commit local des fichiers injectés..."
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Inject KernelSU and SusFS source tree code"
+
+          echo "🎉 Tout est verrouillé dans Git et prêt pour le Build 421 !"
+
+                            
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
