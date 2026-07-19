@@ -71,7 +71,7 @@ jobs:
           sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' "$PATCH_FILE" || true
           sed -i 's/kernelSU/kernelsu/g' "$PATCH_FILE" || true
 
-          # Application du patch global (on laisse patch modifier fs/open.c, on écrasera tout proprement après)
+          # Application du patch global
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec conflits mineurs"
 
           # Application du patch SusFS sur KernelSU
@@ -122,7 +122,7 @@ jobs:
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel
           
-          # 1. Génération de la base .config (Initialise le répertoire out/)
+          # 1. Génération de la base .config
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
           # Forçage strict des configurations requises
@@ -139,30 +139,25 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 2. ⚡ CHIRURGIE NUCLÉAIRE POST-CONFIG (Écrase les fichiers de sources ET de build) ⚡
-          echo "🚀 Purge et reconstruction absolue de fs/open.c..."
+          # 2. ⚡ CHIRURGIE NUCLÉAIRE POST-CONFIG ⚡
+          echo "🚀 Réécriture chirurgicale des fichiers sensibles..."
           python3 -c '
           import os
 
-          # Restauration propre du fichier racine
+          # Restauration propre du fichier fs/open.c racine
           os.system("git checkout fs/open.c")
           
-          def fix_file(filepath):
+          def fix_open_file(filepath):
               if os.path.exists(filepath):
                   with open(filepath, "r") as f: content = f.read()
-                  
-                  # Si le fichier contient déjà le mauvais include, on le nettoie complètement
                   if "kernelSU/ksu.h" in content or "kernelsu/kernel/ksu.h" in content:
                       lines = content.splitlines()
-                      # Supprime toutes les lignes contenant ksu.h ou susfs.h injectées par le patch
                       lines = [l for l in lines if "ksu.h" not in l and "susfs.h" not in l]
                       content = "\n".join(lines) + "\n"
 
-                  # Injection des en-têtes universels propres au tout début
                   headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
                   content = headers + content
 
-                  # Injection propre de do_faccessat
                   target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
                   idx = content.find(target_func)
                   if idx != -1:
@@ -179,12 +174,46 @@ jobs:
                   with open(filepath, "w") as f: f.write(content)
                   print(f"✅ {filepath} réécrit avec succès.")
 
-          # On applique la correction sur le fichier source ET dans le dossier de build
-          fix_file("fs/open.c")
-          fix_file(os.path.join("${{ env.BUILD_DIR }}", "fs/open.c"))
+          fix_open_file("fs/open.c")
+          fix_open_file(os.path.join("${{ env.BUILD_DIR }}", "fs/open.c"))
+
+          # Blindage de fs/proc/task_mmu.c pour garantir l-existence des macros SusFS
+          def fix_task_mmu(filepath):
+              if os.path.exists(filepath):
+                  with open(filepath, "r") as f: content = f.read()
+                  
+                  # Si l-en-tête de sécurité n-est pas présent, on l-injecte avec un garde-fou macro
+                  if "SUSFS_MAX_LEN_PATHNAME" not in content or "#include <linux/susfs.h>" not in content:
+                      safety_headers = (
+                          "#define CONFIG_KSU_SUSFS 1\n"
+                          "#include <linux/susfs.h>\n"
+                          "#ifndef SUSFS_MAX_LEN_PATHNAME\n"
+                          "#define SUSFS_MAX_LEN_PATHNAME 512\n"
+                          "#endif\n"
+                      )
+                      content = safety_headers + content
+                      with open(filepath, "w") as f: f.write(content)
+                      print(f"✅ {filepath} blindé contre les macros manquantes.")
+
+          fix_task_mmu("fs/proc/task_mmu.c")
+          fix_task_mmu(os.path.join("${{ env.BUILD_DIR }}", "fs/proc/task_mmu.c"))
+
+          # Réparation structurelle de include/linux/susfs.h si nécessaire
+          susfs_h = "include/linux/susfs.h"
+          if os.path.exists(susfs_h):
+              with open(susfs_h, "r") as f: content = f.read()
+              # On s-assure que les types mm et fs fondamentaux sont déclarés avant le corps
+              if "linux/mm_types.h" not in content:
+                  content = "#include <linux/mm_types.h>\n#include <linux/fs.h>\n" + content
+              # Sécurité d-exposition de susfs_sus_maps
+              if "susfs_sus_maps" not in content:
+                  print("⚠️ susfs_sus_maps introuvable dans susfs.h, injection du prototype externe...")
+                  content += "\nextern int susfs_sus_maps(unsigned long ino, unsigned long size, unsigned long *p_ino, unsigned int *p_dev, unsigned long *p_flags, unsigned long *p_pgoff, struct vm_area_struct *vma, char *out_name);\n"
+              with open(susfs_h, "w") as f: f.write(content)
+              print("✅ include/linux/susfs.h vérifié et validé.")
           '
 
-          # Nettoyage global de sécurité sur tous les fichiers (sources + out/)
+          # Nettoyage global résiduel sur l'ensemble de l'espace de build
           find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' {} + || true
           find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/kernelSU/kernelsu/g' {} + || true
 
@@ -192,7 +221,7 @@ jobs:
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          # 3. Lancement de la compilation de l'Image
+          # 3. Lancement de la compilation
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
