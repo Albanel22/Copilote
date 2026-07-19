@@ -103,34 +103,35 @@ jobs:
                   with open(susfs_h, "w") as f: f.write(content)
               print("✅ include/linux/susfs.h sécurisé.")
 
-          # 2. Reconstruction totale et propre de fs/open.c
+          # 2. Reconstruction totale, propre et isolée de fs/open.c
           open_c = "fs/open.c"
           if os.path.exists(open_c):
+              # On recharge la version d-origine pour détruire les injections corrompues du patch original
+              os.system("git checkout fs/open.c")
               with open(open_c, "r") as f: content = f.read()
               
-              # Utilisation d-un chemin universel propre basé sur la racine
+              # Ajout des en-têtes universels au tout début
               headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
               content = headers + content
 
-              # Injection chirurgicale dans do_faccessat sans casser les variables locales existantes
-              if "susfs_sus_path_by_filename" not in content:
-                  target = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-                  idx = content.find(target)
-                  if idx != -1:
-                      brace_idx = content.find("{", idx)
-                      if brace_idx != -1:
-                          # Déclaration des variables SusFS au tout début de la fonction
-                          vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
-                          content = content[:brace_idx+1] + vars_inj + content[brace_idx+1:]
-                          
-                          # Ré-actualisation de l-index après insertion des variables
-                          idx_hook = content.find("if (mode & ~S_IRWXO)", brace_idx)
-                          if idx_hook != -1:
-                              hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
-                              content = content[:idx_hook] + hook_inj + content[idx_hook:]
+              # Reconstruction propre de do_faccessat avec le hook SusFS officiel
+              target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
+              idx = content.find(target_func)
+              if idx != -1:
+                  brace_idx = content.find("{", idx)
+                  if brace_idx != -1:
+                      # Injection des variables locales requises au début de la fonction
+                      vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
+                      content = content[:brace_idx+1] + vars_inj + content[brace_idx+1:]
+                      
+                      # Injection du hook juste avant la validation des flags d-accès originaux
+                      idx_hook = content.find("if (mode & ~S_IRWXO)", brace_idx)
+                      if idx_hook != -1:
+                          hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
+                          content = content[:idx_hook] + hook_inj + content[idx_hook:]
 
               with open(open_c, "w") as f: f.write(content)
-              print("✅ fs/open.c reconstruit proprement sans chemin kernelSU corrompu.")
+              print("✅ fs/open.c reconstruit et nettoyé de toute variable fantôme.")
 
           # 3. Réparation totale de fs/proc/task_mmu.c
           task_mmu_c = "fs/proc/task_mmu.c"
