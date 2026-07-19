@@ -91,9 +91,9 @@ jobs:
             exit 1
           fi
 
-          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE (Sans chaînes multi-lignes briseuses d'indentation)
+          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE (Nettoyage automatique via textwrap)
           echo "🐍 Lancement du script de correction des conflits..."
-          cat << 'EOF' > fix_susfs.py
+          python3 -c 'import sys, textwrap; print(textwrap.dedent(sys.stdin.read()))' << 'EOF' > fix_susfs.py
           import os
           import re
 
@@ -208,9 +208,6 @@ jobs:
                       f.write(code)
                   print("✅ drivers/kernelsu/kernel/core_hook.c opérationnel et sécurisé !")
           EOF
-
-          # Nettoyage chirurgical des 10 espaces de décalage YAML pour Python
-          sed -i 's/^          //' fix_susfs.py
           
           python3 fix_susfs.py
           rm fix_susfs.py
@@ -240,8 +237,9 @@ jobs:
             exit 1
           fi
 
-          echo "🎉 Tout est parfaitement aligné pour le Build 421 !"
-          
+          echo "🎉 Tout est parfaitement aligné pour le Build 421 !"    
+
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
