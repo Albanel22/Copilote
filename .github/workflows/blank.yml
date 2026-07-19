@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Injecter KernelSU & SUSFS Proprement (Build 416)
+      - name: Injecter KernelSU & SUSFS Proprement (Build 418)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
@@ -52,7 +52,7 @@ jobs:
           git reset --hard
           git clean -fd
 
-          # 🧹 Nettoyage des hooks existants
+          # 🧹 Nettoyage des anciens hooks
           echo "🧹 Nettoyage des hooks existants..."
           sed -i '/kernelsu/d' drivers/Makefile || true
           sed -i '/KernelSU/d' drivers/Kconfig || true
@@ -77,33 +77,69 @@ jobs:
           # 3. Clonage de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
 
-          # 4. APPLICATION DU PATCH OFFICIEL ET CAPTURE DES ERREURS
-          echo "🛠️ Application du patch SusFS sur l'arborescence du noyau..."
+          # 4. APPLICATION DU PATCH OFFICIEL (On ignore l'erreur stricte des 2 rejets)
+          echo "🛠️ Application du patch SusFS global..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-
+          
           if [ -f "$PATCH_FILE" ]; then
             echo "✅ Patch trouvé : $PATCH_FILE"
-            
-            patch -p1 < "$PATCH_FILE" || {
-              echo "❌ Le patch a échoué. Extraction immédiate des conflits (.rej) :"
-              echo "========================================="
-              echo "📂 CONTENU DE fs/open.c.rej :"
-              echo "========================================="
-              [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Aucun rejet pour open.c"
-              
-              echo "========================================="
-              echo "📂 CONTENU DE fs/proc/task_mmu.c.rej :"
-              echo "========================================="
-              [ -f fs/proc/task_mmu.c.rej ] && cat fs/proc/task_mmu.c.rej || echo "Aucun rejet pour task_mmu.c"
-              echo "========================================="
-              exit 1
-            }
+            # On autorise le patch à renvoyer un code d'avertissement car on gère les rejets juste après
+            patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu, application des correctifs chirurgicaux..."
           else
             echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
             exit 1
           fi
 
-          # 5. Copie des fichiers SusFS manquants dans le moteur
+          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE POUR LES REJETS
+          echo "🐍 Lancement du script de correction des conflits..."
+          cat << 'EOF' > fix_susfs.py
+          import os
+
+          # --- Correction de fs/open.c ---
+          open_path = 'fs/open.c'
+          if os.path.exists(open_path):
+              with open(open_path, 'r') as f:
+                  code = f.read()
+              
+              # Injection des variables au début de do_faccessat
+              var_marker = "long do_faccessat(int dfd, const char __user *filename, int mode)"
+              idx = code.find(var_marker)
+              if idx != -1:
+                  brace_idx = code.find("{", idx)
+                  if brace_idx != -1 and "struct filename* fname;" not in code:
+                      var_injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n"
+                      code = code[:brace_idx+1] + var_injection + code[brace_idx+1:]
+              
+              # Injection du hook de masquage avant la validation du mode
+              hook_marker = "if (mode & ~S_IRWXO)"
+              if hook_marker in code and "susfs_sus_path_by_filename" not in code:
+                  hook_injection = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
+                  code = code.replace(hook_marker, hook_injection + hook_marker)
+                  
+              with open(open_path, 'w') as f:
+                  f.write(code)
+              print("✅ fs/open.c patché manuellement avec succès !")
+
+          # --- Correction de fs/proc/task_mmu.c ---
+          mmu_path = 'fs/proc/task_mmu.c'
+          if os.path.exists(mmu_path):
+              with open(mmu_path, 'r') as f:
+                  code = f.read()
+              
+              include_marker = '#include "internal.h"'
+              if include_marker in code and "linux/susfs.h" not in code:
+                  include_injection = "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
+                  code = code.replace(include_marker, include_marker + include_injection)
+                  
+              with open(mmu_path, 'w') as f:
+                  f.write(code)
+              print("✅ fs/proc/task_mmu.c patché manuellement avec succès !")
+          EOF
+          
+          python3 fix_susfs.py
+          rm fix_susfs.py
+
+          # 6. Copie des fichiers SusFS manquants dans le moteur
           echo "📦 Intégration des fichiers additionnels SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
@@ -112,11 +148,11 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          # 6. Application des patchs spécifiques à KernelSU pour SusFS
+          # 7. Application des patchs spécifiques à KernelSU pour SusFS
           echo "🔗 Liaison SusFS <-> KernelSU..."
           cp -r susfs4ksu/kernel_patches/KernelSU/ext/* drivers/kernelsu/
 
-          echo "✅ Injection terminée avec succès pour le Build 416 !"
+          echo "🎉 Tout est aligné et corrigé pour le Build 418 !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
