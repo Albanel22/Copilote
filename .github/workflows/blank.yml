@@ -48,7 +48,7 @@ jobs:
         run: |
           set -e
 
-          echo "🧹 Purge complète de fs/open.c pour éviter les résidus..."
+          echo "🧹 Purge complète de fs/open.c pour repartir sur du propre..."
           git checkout fs/open.c || true
 
           echo "🧹 Purge des anciens résidus de KernelSU..."
@@ -85,6 +85,10 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
+
+          echo "🚀 Purge globale des mauvaises inclusions de chemins alternatifs..."
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' {} + || true
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/kernelSU/kernelsu/g' {} + || true
 
           # --- CHIRURGIE DE PRÉCISION VIA PYTHON ---
           python3 -c '
