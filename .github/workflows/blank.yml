@@ -81,10 +81,15 @@ jobs:
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
 
-          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU (Correctif ultime pour l'erreur 16)
-          echo "🚀 Forçage manuel de la version KernelSU à 12100..."
-          # On injecte la variable tout en haut du Makefile pour écraser l'ancien système de détection
-          echo "KSUD_VERSION := 12100" | cat - drivers/kernelsu/Makefile > temp && mv temp drivers/kernelsu/Makefile
+          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU SUR CELLE DU TÉLÉPHONE (11872)
+          echo "🚀 Remplacement et verrouillage de la version KernelSU à 11872..."
+          sed -i 's/KSUD_VERSION :=.*/KSUD_VERSION := 11872/g' drivers/kernelsu/Makefile
+          sed -i 's/KSUD_VERSION ?=.*/KSUD_VERSION := 11872/g' drivers/kernelsu/Makefile
+          
+          # On l'ajoute aussi à la toute fin du Makefile pour écraser n'importe quelle détection Git
+          echo "" >> drivers/kernelsu/Makefile
+          echo "KSUD_VERSION := 11872" >> drivers/kernelsu/Makefile
+          echo "ccflags-y += -DKSU_VERSION=11872" >> drivers/kernelsu/Makefile
 
           # 2. Détection dynamique de la version du Kernel
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
@@ -289,8 +294,8 @@ jobs:
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          echo "🚀 Compilation finale..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          echo "🚀 Compilation finale (Forçage variable 11872)..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
@@ -300,24 +305,27 @@ jobs:
           mkdir -p repack
           cp boot-stock.img repack/boot.img
           
-          # Téléchargement et préparation de magiskboot
+          # Téléchargement et préparation de magiskboot depuis l'APK officielle
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
           
+          rm -rf Magisk-v27.0.apk lib/
+          
           # Repackage
           cd repack
           ./magiskboot unpack boot.img
-          # Utilisation des variables pour le chemin du kernel
+          
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
+          
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
-      
-          
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
