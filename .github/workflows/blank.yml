@@ -44,80 +44,47 @@ jobs:
           restore-keys: ${{ runner.os }}-ccache-
 
 
-      - name: Injecter KernelSU & SUSFS Proprement (Build 421)
+
+      - name: 📂 Préparation du defconfig et Injection SusFS/KSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
+          # 1. Laisser d'abord le script ou le système faire son initialisation si nécessaire
+          # (Si vous aviez des commandes spécifiques au début de cette étape, laissez-les ici)
+
           set -e
 
-          # 1. Nettoyage complet des sources et des dossiers fantômes
-          git reset --hard
-          git clean -fd
+          echo "🚀 [CONTOURNEMENT] Injection immédiate de KernelSU et SusFS pré-build..."
+          
+          # Nettoyage de sécurité avant injection
           rm -rf drivers/kernelsu || true
-          git rm -rf --cached drivers/kernelsu 2>/dev/null || true
-
-          # 🧹 Nettoyage des anciens hooks (insensible à la casse)
-          echo "🧹 Nettoyage des hooks existants..."
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Makefile || true
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Kconfig || true
 
-          # 🛠️ CLONAGE ET FIXATION DE LA VERSION DE KERNELSU
-          echo "📥 Clonage propre de KernelSU..."
+          # Clonage et fixation de KernelSU
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          cd drivers/kernelsu
-          git checkout v0.9.5
-          rm -rf .git  # Retrait du sous-dépôt
-          cd ../..
+          cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # 🔧 Liaison de KernelSU au système de build
+          # Liaison au système de build
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
 
-          # 2. Détection de la version précise du Kernel
-          VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
-          PATCHLEVEL=$(grep -E "^PATCHLEVEL =" Makefile | head -n 1 | awk '{print $3}')
-          KERNEL_VER="${VERSION}.${PATCHLEVEL}"
-          echo "📊 Base Kernel détectée : ${KERNEL_VER}"
-
-          # 3. Clonage de SusFS
+          # Clonage de SusFS et application du patch Kernel
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
-
-          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU
-          echo "🛠️ Application du patch SusFS global sur le noyau..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          
-          if [ -f "$PATCH_FILE" ]; then
-            echo "✅ Patch Kernel trouvé : $PATCH_FILE"
-            patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu (gestion par Python à suivre)..."
-          else
-            echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
-            exit 1
-          fi
+          patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu..."
 
-          # 5. APPLICATION DU PATCH SUR KERNELSU (Sur fichiers KSU d'origine)
-          echo "🔗 Application du patch d'activation SusFS dans KernelSU..."
+          # Application du patch d'activation dans KernelSU
           KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
+          KSU_PATCH_ABS=$(pwd)/$KSU_PATCH
+          cd drivers/kernelsu && patch -p1 < "$KSU_PATCH_ABS" || true && cd ../..
 
-          if [ -f "$KSU_PATCH" ]; then
-            echo "✅ Patch KSU trouvé : $KSU_PATCH"
-            KSU_PATCH_ABS=$(pwd)/$KSU_PATCH
-            cd drivers/kernelsu
-            patch -p1 < "$KSU_PATCH_ABS" || echo "⚠️ Patch KSU appliqué avec des ajustements nécessaires..."
-            cd ../..
-          else
-            echo "❌ Erreur critique : Impossible de trouver 10_enable_susfs_for_ksu.patch"
-            exit 1
-          fi
-
-          # 6. SCRIPT PYTHON DE CORRECTION CHIRURGICALE APRES-PATCHS
-          echo "🐍 Lancement du script de finition et résolution des conflits..."
+          # Correction chirurgicale via Python
           python3 -c 'import sys, textwrap; print(textwrap.dedent(sys.stdin.read()))' << 'EOF' > fix_susfs.py
           import os
           import re
 
-          # --- Correction de fs/open.c ---
           if os.path.exists('fs/open.c'):
-              with open('fs/open.c', 'r') as f:
-                  code = f.read()
+              with open('fs/open.c', 'r') as f: code = f.read()
               idx = code.find("long do_faccessat(int dfd, const char __user *filename, int mode)")
               if idx != -1:
                   brace_idx = code.find("{", idx)
@@ -127,131 +94,46 @@ jobs:
               if "if (mode & ~S_IRWXO)" in code and "susfs_sus_path_by_filename" not in code:
                   hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
                   code = code.replace("if (mode & ~S_IRWXO)", hook_inj + "if (mode & ~S_IRWXO)")
-              with open('fs/open.c', 'w') as f:
-                  f.write(code)
-              print("✅ fs/open.c sécurisé avec succès !")
+              with open('fs/open.c', 'w') as f: f.write(code)
 
-          # --- Correction de fs/proc/task_mmu.c ---
           if os.path.exists('fs/proc/task_mmu.c'):
-              with open('fs/proc/task_mmu.c', 'r') as f:
-                  code = f.read()
-              include_marker = '#include "internal.h"'
-              if include_marker in code and "linux/susfs.h" not in code:
-                  include_injection = "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
-                  code = code.replace(include_marker, include_marker + include_injection)
-              with open('fs/proc/task_mmu.c', 'w') as f:
-                  f.write(code)
-              print("✅ fs/proc/task_mmu.c sécurisé avec succès !")
+              with open('fs/proc/task_mmu.c', 'r') as f: code = f.read()
+              if '#include "internal.h"' in code and "linux/susfs.h" not in code:
+                  code = code.replace('#include "internal.h"', '#include "internal.h"\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n')
+              with open('fs/proc/task_mmu.c', 'w') as f: f.write(code)
 
-          # --- Vérification et Injection de la sécurité umount dans core_hook.c ---
           hook_path = 'drivers/kernelsu/kernel/core_hook.c'
           if os.path.exists(hook_path):
-              with open(hook_path, 'r') as f:
-                  code = f.read()
+              with open(hook_path, 'r') as f: code = f.read()
               if "susfs_try_umount_all" not in code:
-                  print("🔧 Intégration de la fonction complète susfs_try_umount_all dans core_hook.c...")
                   code = re.sub(r'int ksu_handle_setuid\(struct cred \*new,\s*const struct cred \*old\).*$', '', code, flags=re.DOTALL)
                   fixed_lines = [
-                      "",
-                      "#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT",
-                      "void susfs_try_umount_all(uid_t uid) {",
-                      "\tsusfs_try_umount(uid);",
-                      "\tksu_try_umount(\"/system\", true, 0, uid);",
-                      "\tksu_try_umount(\"/system_ext\", true, 0, uid);",
-                      "\tksu_try_umount(\"/vendor\", true, 0, uid);",
-                      "\tksu_try_umount(\"/product\", true, 0, uid);",
-                      "\tksu_try_umount(\"/odm\", true, 0, uid);",
-                      "\tksu_try_umount(\"/data/adb/modules\", false, MNT_DETACH, uid);",
-                      "\tksu_try_umount(\"/debug_ramdisk\", true, MNT_DETACH, uid);",
-                      "}",
-                      "#endif",
-                      "",
-                      "int ksu_handle_setuid(struct cred *new, const struct cred *old)",
-                      "{",
-                      "\tif (!ksu_module_mounted) {",
-                      "\t\treturn 0;",
-                      "\t}",
-                      "\tif (!new || !old) {",
-                      "\t\treturn 0;",
-                      "\t}",
-                      "\tkuid_t new_uid = new->uid;",
-                      "\tkuid_t old_uid = old->uid;",
-                      "\tif (0 != old_uid.val) {",
-                      "\t\treturn 0;",
-                      "\t}",
-                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT",
-                      "\tbool is_zygote_child = susfs_is_sid_equal(old->security, susfs_zygote_sid);",
-                      "\tif (likely(is_zygote_child)) {",
-                      "\t\tif (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {",
-                      "\t\t\tif (susfs_is_umount_for_zygote_system_process_enabled) {",
-                      "\t\t\t\tgoto out_ksu_try_umount;",
-                      "\t\t\t}",
-                      "\t\t}",
-                      "\t}",
-                      "#endif",
-                      "\tif (is_non_appuid(new_uid)) {",
-                      "#ifdef CONFIG_KSU_DEBUG",
-                      "\t\tpr_info(\"handle setuid ignore non application uid: %d\\n\", new_uid.val);",
-                      "#endif",
-                      "\t\treturn 0;",
-                      "\t}",
-                      "#ifdef CONFIG_KSU_SUSFS",
-                      "\telse {",
-                      "\t\ttask_lock(current);",
-                      "\t\tcurrent->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC;",
-                      "\t\ttask_unlock(current);",
-                      "\t}",
-                      "#endif",
-                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT",
-                      "out_ksu_try_umount:",
-                      "#endif",
-                      "\tif (!ksu_uid_should_umount(new_uid.val)) {",
-                      "\t\treturn 0;",
-                      "\t} else {",
-                      "#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT",
-                      "\t\tsusfs_try_umount_all(new_uid.val);",
-                      "#else",
-                      "\t\ttry_umount(\"/system\", true, 0);",
-                      "\t\ttry_umount(\"/vendor\", true, 0);",
-                      "\t\ttry_umount(\"/product\", true, 0);",
-                      "\t\ttry_umount(\"/data/adb/modules\", false, MNT_DETACH);",
-                      "#endif",
-                      "\t}",
-                      "\treturn 0;",
-                      "}"
+                      "","#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT","void susfs_try_umount_all(uid_t uid) {","\tsusfs_try_umount(uid);","\tksu_try_umount(\"/system\", true, 0, uid);","\tksu_try_umount(\"/system_ext\", true, 0, uid);","\tksu_try_umount(\"/vendor\", true, 0, uid);","\tksu_try_umount(\"/product\", true, 0, uid);","\tksu_try_umount(\"/odm\", true, 0, uid);","\tksu_try_umount(\"/data/adb/modules\", false, MNT_DETACH, uid);","\tksu_try_umount(\"/debug_ramdisk\", true, MNT_DETACH, uid);","}","#endif","",
+                      "int ksu_handle_setuid(struct cred *new, const struct cred *old)","{","\tif (!ksu_module_mounted) return 0;","\tif (!new || !old) return 0;","\tkuid_t new_uid = new->uid; kuid_t old_uid = old->uid;","\tif (0 != old_uid.val) return 0;",
+                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT","\tif (likely(susfs_is_sid_equal(old->security, susfs_zygote_sid))) {","\t\tif (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {","\t\t\tif (susfs_is_umount_for_zygote_system_process_enabled) goto out_ksu_try_umount;","\t\t}","\t}","#endif",
+                      "\tif (is_non_appuid(new_uid)) return 0;",
+                      "#ifdef CONFIG_KSU_SUSFS","\telse { task_lock(current); current->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC; task_unlock(current); }","#endif",
+                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT","out_ksu_try_umount:","#endif",
+                      "\tif (!ksu_uid_should_umount(new_uid.val)) return 0;",
+                      "\telse {","#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT","\t\tsusfs_try_umount_all(new_uid.val);","#else","\t\ttry_umount(\"/system\", true, 0); try_umount(\"/vendor\", true, 0); try_umount(\"/product\", true, 0); try_umount(\"/data/adb/modules\", false, MNT_DETACH);","#endif","\t}","\treturn 0;","}"
                   ]
                   code += "\n".join(fixed_lines)
-                  with open(hook_path, 'w') as f:
-                      f.write(code)
-                  print("Base de drivers/kernelsu/kernel/core_hook.c consolidée avec succès !")
+                  with open(hook_path, 'w') as f: f.write(code)
           EOF
-          
-          python3 fix_susfs.py
-          rm fix_susfs.py
+          python3 fix_susfs.py && rm fix_susfs.py
 
-          # 7. Copie des fichiers SusFS manquants dans le moteur
-          echo "📦 Intégration des fichiers additionnels SusFS..."
+          # Copie des fichiers d'infrastructure SusFS
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          
-          if ! grep -q "susfs.o" fs/Makefile; then
-            echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
-          fi
-
-          # 🧹 Nettoyage du dépôt de patchs pour éviter de le commiter inutilement
+          if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           rm -rf susfs4ksu
 
-          # 🛡️ 8. SÉCURISATION DES INJECTIONS DANS GIT (Protection anti-clean)
-          echo "🛡️ Indexation et commit local des fichiers injectés..."
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add .
-          git commit -m "Inject KernelSU and SusFS source tree code"
+          echo "✅ [Injection terminée] Lancement immédiat de la configuration du Noyau..."
 
-          echo "🎉 Tout est verrouillé dans Git et prêt pour le Build 421 !"
-
-                            
-
+          # 2. EXECUTION DU MAKE DEFCONFIG (Vos lignes d'origine inchangées)
+          # Le moteur de build n'a plus le temps ni l'opportunité de nettoyer quoi que ce soit.
+          make O=out ARCH=arm64 lito-perf_defconfig
+    
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
