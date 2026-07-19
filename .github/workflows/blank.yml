@@ -43,14 +43,9 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-
-
-      - name: 📂 Préparation du defconfig et Injection SusFS/KSU
+      - name: 📂 Injection SusFS / KernelSU & Configuration des Flags
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          # 1. Laisser d'abord le script ou le système faire son initialisation si nécessaire
-          # (Si vous aviez des commandes spécifiques au début de cette étape, laissez-les ici)
-
           set -e
 
           echo "🚀 [CONTOURNEMENT] Injection immédiate de KernelSU et SusFS pré-build..."
@@ -64,10 +59,9 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # Liaison au système de build
+          # Liaison au système de build avec les bons chemins d'infrastructure (/kernel)
           echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
-
 
           # Clonage de SusFS et application du patch Kernel
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
@@ -129,12 +123,20 @@ jobs:
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           rm -rf susfs4ksu
 
-          echo "✅ [Injection terminée] Lancement immédiat de la configuration du Noyau..."
+          # Pré-injection des flags directement dans le fichier cible de Motorola
+          echo "📝 Pré-injection des flags d'activation dans le defconfig de base..."
+          TARGET_DEFCONFIG="arch/arm64/configs/vendor/lito-perf_defconfig"
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+          } >> "$TARGET_DEFCONFIG"
 
-          # 2. EXECUTION DU MAKE DEFCONFIG (Vos lignes d'origine inchangées)
-          # Le moteur de build n'a plus le temps ni l'opportunité de nettoyer quoi que ce soit.
-          make O=out ARCH=arm64 lito-perf_defconfig
-    
+          echo "✅ Injection structurelle terminée avec succès !"
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -148,16 +150,17 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          echo "📂 Préparation du defconfig..."
+          echo "📂 Préparation et déplacement du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # Fix préventif de l'arborescence out/ pour le compilateur Kconfig (Évite l'erreur can't open file)
-          mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu
-          cp drivers/kernelsu/Kconfig ${{ env.BUILD_DIR }}/drivers/kernelsu/Kconfig 2>/dev/null || true
+          # Fix préventif mis à jour avec la nouvelle arborescence pour le dossier out/
+          mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel
+          cp drivers/kernelsu/kernel/Kconfig ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel/Kconfig 2>/dev/null || true
 
+          # Génération de la configuration finale via le toolchain complet
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          echo "🔧 Injection forcée des flags requis..."
+          echo "🔧 Double-vérification et injection forcée des dépendances..."
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -169,6 +172,7 @@ jobs:
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
+          # Synchronisation propre des dépendances de configuration
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
           echo "🔓 Force-pass des signatures & Tactile..."
