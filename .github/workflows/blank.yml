@@ -102,9 +102,9 @@ jobs:
           if os.path.exists(open_c):
               with open(open_c, "r") as f: content = f.read()
               
-              # Ajout des en-têtes requis au début du fichier
+              # Correction stricte ici : correction des minuscules pour "kernelsu"
               headers = "#include " + chr(34) + "../drivers/kernelsu/kernel/ksu.h" + chr(34) + "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
-              if "drivers/kernelsu/kernel/ksu.h" not in content:
+              if "drivers/kernelsu/kernel/ksu.h" not in content and "kernelsu" not in content:
                   content = headers + content
 
               # Injection chirurgicale dans do_faccessat sans casser les variables locales existantes
@@ -125,7 +125,7 @@ jobs:
                               content = content[:idx_hook] + hook_inj + content[idx_hook:]
 
               with open(open_c, "w") as f: f.write(content)
-              print("✅ fs/open.c reconstruit proprement.")
+              print("✅ fs/open.c reconstruit proprement avec le bon chemin d-inclusion.")
 
           # 3. Réparation totale de fs/proc/task_mmu.c
           task_mmu_c = "fs/proc/task_mmu.c"
