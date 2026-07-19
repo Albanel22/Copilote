@@ -83,6 +83,8 @@ jobs:
 
           if os.path.exists('fs/open.c'):
               with open('fs/open.c', 'r') as f: code = f.read()
+              # Correction du faux chemin d'en-tête généré par le patch SusFS
+              code = code.replace('#include "../kernelSU/ksu.h"', '#include "../drivers/kernelsu/kernel/ksu.h"')
               idx = code.find("long do_faccessat(int dfd, const char __user *filename, int mode)")
               if idx != -1:
                   brace_idx = code.find("{", idx)
@@ -116,7 +118,12 @@ jobs:
                       "\telse {","#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT","\t\tsusfs_try_umount_all(new_uid.val);","#else","\t\ttry_umount(\"/system\", true, 0); try_umount(\"/vendor\", true, 0); try_umount(\"/product\", true, 0); try_umount(\"/data/adb/modules\", false, MNT_DETACH);","#endif","\t}","\treturn 0;","}"
                   ]
                   code += "\n".join(fixed_lines)
-                  with open(hook_path, 'w') as f: f.write(code)
+              
+              # Ajout indispensable de l'en-tête de sécurité SusFS au tout début de core_hook.c
+              if "linux/susfs.h" not in code:
+                  code = '#define LINUX_SUSFS_DEFINED\n#include <linux/susfs.h>\n' + code
+                  
+              with open(hook_path, 'w') as f: f.write(code)
           EOF
           python3 fix_susfs.py && rm fix_susfs.py
 
