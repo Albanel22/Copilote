@@ -91,47 +91,38 @@ jobs:
             exit 1
           fi
 
-          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE
+          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE (Sans chaînes multi-lignes briseuses d'indentation)
           echo "🐍 Lancement du script de correction des conflits..."
           cat << 'EOF' > fix_susfs.py
           import os
           import re
 
           # --- Correction de fs/open.c ---
-          open_path = 'fs/open.c'
-          if os.path.exists(open_path):
-              with open(open_path, 'r') as f:
+          if os.path.exists('fs/open.c'):
+              with open('fs/open.c', 'r') as f:
                   code = f.read()
-              
-              var_marker = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-              idx = code.find(var_marker)
+              idx = code.find("long do_faccessat(int dfd, const char __user *filename, int mode)")
               if idx != -1:
                   brace_idx = code.find("{", idx)
                   if brace_idx != -1 and "struct filename* fname;" not in code:
-                      var_injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n"
-                      code = code[:brace_idx+1] + var_injection + code[brace_idx+1:]
-              
-              hook_marker = "if (mode & ~S_IRWXO)"
-              if hook_marker in code and "susfs_sus_path_by_filename" not in code:
-                  hook_injection = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
-                  code = code.replace(hook_marker, hook_injection + hook_marker)
-                  
-              with open(open_path, 'w') as f:
+                      var_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n"
+                      code = code[:brace_idx+1] + var_inj + code[brace_idx+1:]
+              if "if (mode & ~S_IRWXO)" in code and "susfs_sus_path_by_filename" not in code:
+                  hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
+                  code = code.replace("if (mode & ~S_IRWXO)", hook_inj + "if (mode & ~S_IRWXO)")
+              with open('fs/open.c', 'w') as f:
                   f.write(code)
               print("✅ fs/open.c patché manuellement avec succès !")
 
           # --- Correction de fs/proc/task_mmu.c ---
-          mmu_path = 'fs/proc/task_mmu.c'
-          if os.path.exists(mmu_path):
-              with open(mmu_path, 'r') as f:
+          if os.path.exists('fs/proc/task_mmu.c'):
+              with open('fs/proc/task_mmu.c', 'r') as f:
                   code = f.read()
-              
               include_marker = '#include "internal.h"'
               if include_marker in code and "linux/susfs.h" not in code:
                   include_injection = "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
                   code = code.replace(include_marker, include_marker + include_injection)
-                  
-              with open(mmu_path, 'w') as f:
+              with open('fs/proc/task_mmu.c', 'w') as f:
                   f.write(code)
               print("✅ fs/proc/task_mmu.c patché manuellement avec succès !")
 
@@ -140,80 +131,79 @@ jobs:
           if os.path.exists(hook_path):
               with open(hook_path, 'r') as f:
                   code = f.read()
-              
               if "susfs_try_umount_all" not in code:
-                  print("🔧 Détection d'un patch core_hook.c tronqué. Injection...")
+                  print("🔧 Détection d'un patch core_hook.c tronqué. Injection des fonctions manquantes...")
                   code = re.sub(r'int ksu_handle_setuid\(struct cred \*new,\s*const struct cred \*old\).*$', '', code, flags=re.DOTALL)
-                  
-                  fixed_block = """
-          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-          void susfs_try_umount_all(uid_t uid) {
-          	susfs_try_umount(uid);
-          	ksu_try_umount("/system", true, 0, uid);
-          	ksu_try_umount("/system_ext", true, 0, uid);
-          	ksu_try_umount("/vendor", true, 0, uid);
-          	ksu_try_umount("/product", true, 0, uid);
-          	ksu_try_umount("/odm", true, 0, uid);
-          	ksu_try_umount("/data/adb/modules", false, MNT_DETACH, uid);
-          	ksu_try_umount("/debug_ramdisk", true, MNT_DETACH, uid);
-          }
-          #endif
-
-          int ksu_handle_setuid(struct cred *new, const struct cred *old)
-          {
-          	if (!ksu_module_mounted) {
-          		return 0;
-          	}
-          	if (!new || !old) {
-          		return 0;
-          	}
-          	kuid_t new_uid = new->uid;
-          	kuid_t old_uid = old->uid;
-          	if (0 != old_uid.val) {
-          		return 0;
-          	}
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          	bool is_zygote_child = susfs_is_sid_equal(old->security, susfs_zygote_sid);
-          	if (likely(is_zygote_child)) {
-          		if (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {
-          			if (susfs_is_umount_for_zygote_system_process_enabled) {
-          				goto out_ksu_try_umount;
-          			}
-          		}
-          	}
-          #endif
-          	if (is_non_appuid(new_uid)) {
-          #ifdef CONFIG_KSU_DEBUG
-          		pr_info("handle setuid ignore non application uid: %d\n", new_uid.val);
-          #endif
-          		return 0;
-          	}
-          #ifdef CONFIG_KSU_SUSFS
-          	else {
-          		task_lock(current);
-          		current->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC;
-          		task_unlock(current);
-          	}
-          #endif
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          out_ksu_try_umount:
-          #endif
-          	if (!ksu_uid_should_umount(new_uid.val)) {
-          		return 0;
-          	} else {
-          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-          		susfs_try_umount_all(new_uid.val);
-          #else
-          		try_umount("/system", true, 0);
-          		try_umount("/vendor", true, 0);
-          		try_umount("/product", true, 0);
-          		try_umount("/data/adb/modules", false, MNT_DETACH);
-          #endif
-          	}
-          	return 0;
-          }
-          """
-                  code += fixed_block
+                  fixed_lines = [
+                      "",
+                      "#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT",
+                      "void susfs_try_umount_all(uid_t uid) {",
+                      "\tsusfs_try_umount(uid);",
+                      "\tksu_try_umount(\"/system\", true, 0, uid);",
+                      "\tksu_try_umount(\"/system_ext\", true, 0, uid);",
+                      "\tksu_try_umount(\"/vendor\", true, 0, uid);",
+                      "\tksu_try_umount(\"/product\", true, 0, uid);",
+                      "\tksu_try_umount(\"/odm\", true, 0, uid);",
+                      "\tksu_try_umount(\"/data/adb/modules\", false, MNT_DETACH, uid);",
+                      "\tksu_try_umount(\"/debug_ramdisk\", true, MNT_DETACH, uid);",
+                      "}",
+                      "#endif",
+                      "",
+                      "int ksu_handle_setuid(struct cred *new, const struct cred *old)",
+                      "{",
+                      "\tif (!ksu_module_mounted) {",
+                      "\t\treturn 0;",
+                      "\t}",
+                      "\tif (!new || !old) {",
+                      "\t\treturn 0;",
+                      "\t}",
+                      "\tkuid_t new_uid = new->uid;",
+                      "\tkuid_t old_uid = old->uid;",
+                      "\tif (0 != old_uid.val) {",
+                      "\t\treturn 0;",
+                      "\t}",
+                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT",
+                      "\tbool is_zygote_child = susfs_is_sid_equal(old->security, susfs_zygote_sid);",
+                      "\tif (likely(is_zygote_child)) {",
+                      "\t\tif (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {",
+                      "\t\t\tif (susfs_is_umount_for_zygote_system_process_enabled) {",
+                      "\t\t\t\tgoto out_ksu_try_umount;",
+                      "\t\t\t}",
+                      "\t\t}",
+                      "\t}",
+                      "#endif",
+                      "\tif (is_non_appuid(new_uid)) {",
+                      "#ifdef CONFIG_KSU_DEBUG",
+                      "\t\tpr_info(\"handle setuid ignore non application uid: %d\\n\", new_uid.val);",
+                      "#endif",
+                      "\t\treturn 0;",
+                      "\t}",
+                      "#ifdef CONFIG_KSU_SUSFS",
+                      "\telse {",
+                      "\t\ttask_lock(current);",
+                      "\t\tcurrent->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC;",
+                      "\t\ttask_unlock(current);",
+                      "\t}",
+                      "#endif",
+                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT",
+                      "out_ksu_try_umount:",
+                      "#endif",
+                      "\tif (!ksu_uid_should_umount(new_uid.val)) {",
+                      "\t\treturn 0;",
+                      "\t} else {",
+                      "#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT",
+                      "\t\tsusfs_try_umount_all(new_uid.val);",
+                      "#else",
+                      "\t\ttry_umount(\"/system\", true, 0);",
+                      "\t\ttry_umount(\"/vendor\", true, 0);",
+                      "\t\ttry_umount(\"/product\", true, 0);",
+                      "\t\ttry_umount(\"/data/adb/modules\", false, MNT_DETACH);",
+                      "#endif",
+                      "\t}",
+                      "\treturn 0;",
+                      "}"
+                  ]
+                  code += "\n".join(fixed_lines)
                   with open(hook_path, 'w') as f:
                       f.write(code)
                   print("✅ drivers/kernelsu/kernel/core_hook.c opérationnel et sécurisé !")
