@@ -48,97 +48,78 @@ jobs:
         run: |
           set -e
 
-          echo "🧹 Purge des anciens résidus de KernelSU du Makefile principal..."
+          echo "🧹 Purge des anciens résidus de KernelSU..."
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' Makefile || true
 
-          echo "🚀 [CONTOURNEMENT] Injection immédiate de KernelSU et SusFS pré-build..."
-          
-          # Nettoyage de sécurité avant injection
+          # Nettoyage et clonage de KernelSU
           rm -rf drivers/kernelsu || true
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Makefile || true
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Kconfig || true
 
-          # Clonage et fixation de KernelSU
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # Liaison au système de build avec les bons chemins d'infrastructure (/kernel)
+          # Liaison au système de build
           echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
 
-          # Clonage de SusFS et application du patch Kernel
+          # Clonage de SusFS et application du patch Noyau natif
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu..."
+          patch -p1 < "$PATCH_FILE" || echo "⚠️ Des fragments de patch ont échoué, on corrige après..."
 
-          # Application du patch d'activation dans KernelSU
-          KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
-          KSU_PATCH_ABS=$(pwd)/$KSU_PATCH
-          cd drivers/kernelsu && patch -p1 < "$KSU_PATCH_ABS" || true && cd ../..
+          # Application du patch SusFS sur KernelSU
+          if [ -d susfs4ksu/kernel_patches/KernelSU ]; then
+            KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
+            if [ -f "$KSU_PATCH" ]; then
+              cd drivers/kernelsu && patch -p1 < "../../$KSU_PATCH" || echo "⚠️ Patch KSU partiel" && cd ../..
+            fi
+          fi
 
-          # Correction chirurgicale via Python
-          python3 -c 'import sys, textwrap; print(textwrap.dedent(sys.stdin.read()))' << 'EOF' > fix_susfs.py
-          import os
-          import re
-
-          if os.path.exists('fs/open.c'):
-              with open('fs/open.c', 'r') as f: code = f.read()
-              # Correction du faux chemin d'en-tête généré par le patch SusFS
-              code = code.replace('#include "../kernelSU/ksu.h"', '#include "../drivers/kernelsu/kernel/ksu.h"')
-              idx = code.find("long do_faccessat(int dfd, const char __user *filename, int mode)")
-              if idx != -1:
-                  brace_idx = code.find("{", idx)
-                  if brace_idx != -1 and "struct filename* fname;" not in code:
-                      var_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n"
-                      code = code[:brace_idx+1] + var_inj + code[brace_idx+1:]
-              if "if (mode & ~S_IRWXO)" in code and "susfs_sus_path_by_filename" not in code:
-                  hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
-                  code = code.replace("if (mode & ~S_IRWXO)", hook_inj + "if (mode & ~S_IRWXO)")
-              with open('fs/open.c', 'w') as f: f.write(code)
-
-          if os.path.exists('fs/proc/task_mmu.c'):
-              with open('fs/proc/task_mmu.c', 'r') as f: code = f.read()
-              if '#include "internal.h"' in code and "linux/susfs.h" not in code:
-                  code = code.replace('#include "internal.h"', '#include "internal.h"\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n')
-              with open('fs/proc/task_mmu.c', 'w') as f: f.write(code)
-
-          hook_path = 'drivers/kernelsu/kernel/core_hook.c'
-          if os.path.exists(hook_path):
-              with open(hook_path, 'r') as f: code = f.read()
-              if "susfs_try_umount_all" not in code:
-                  code = re.sub(r'int ksu_handle_setuid\(struct cred \*new,\s*const struct cred \*old\).*$', '', code, flags=re.DOTALL)
-                  fixed_lines = [
-                      "","#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT","void susfs_try_umount_all(uid_t uid) {","\tsusfs_try_umount(uid);","\tksu_try_umount(\"/system\", true, 0, uid);","\tksu_try_umount(\"/system_ext\", true, 0, uid);","\tksu_try_umount(\"/vendor\", true, 0, uid);","\tksu_try_umount(\"/product\", true, 0, uid);","\tksu_try_umount(\"/odm\", true, 0, uid);","\tksu_try_umount(\"/data/adb/modules\", false, MNT_DETACH, uid);","\tksu_try_umount(\"/debug_ramdisk\", true, MNT_DETACH, uid);","}","#endif","",
-                      "int ksu_handle_setuid(struct cred *new, const struct cred *old)","{","\tif (!ksu_module_mounted) return 0;","\tif (!new || !old) return 0;","\tkuid_t new_uid = new->uid; kuid_t old_uid = old->uid;","\tif (0 != old_uid.val) return 0;",
-                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT","\tif (likely(susfs_is_sid_equal(old->security, susfs_zygote_sid))) {","\t\tif (unlikely(new_uid.val < 10000 && new_uid.val >= 1000)) {","\t\t\tif (susfs_is_umount_for_zygote_system_process_enabled) goto out_ksu_try_umount;","\t\t}","\t}","#endif",
-                      "\tif (is_non_appuid(new_uid)) return 0;",
-                      "#ifdef CONFIG_KSU_SUSFS","\telse { task_lock(current); current->susfs_task_state |= TASK_STRUCT_NON_ROOT_USER_APP_PROC; task_unlock(current); }","#endif",
-                      "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT","out_ksu_try_umount:","#endif",
-                      "\tif (!ksu_uid_should_umount(new_uid.val)) return 0;",
-                      "\telse {","#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT","\t\tsusfs_try_umount_all(new_uid.val);","#else","\t\ttry_umount(\"/system\", true, 0); try_umount(\"/vendor\", true, 0); try_umount(\"/product\", true, 0); try_umount(\"/data/adb/modules\", false, MNT_DETACH);","#endif","\t}","\treturn 0;","}"
-                  ]
-                  code += "\n".join(fixed_lines)
-              
-              # Ajout indispensable de l'en-tête de sécurité SusFS au tout début de core_hook.c
-              if "linux/susfs.h" not in code:
-                  code = '#define LINUX_SUSFS_DEFINED\n#include <linux/susfs.h>\n' + code
-                  
-              with open(hook_path, 'w') as f: f.write(code)
-          EOF
-          python3 fix_susfs.py && rm fix_susfs.py
-
-          # Copie des fichiers d'infrastructure SusFS
+          # Copie des fichiers d'infrastructure SusFS indispensables
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
+
+          # --- CHIRURGIE DE PRÉCISION VIA PYTHON ---
+          python3 -c '
+          import os
+
+          # 1. Réparation des inclusions de types manquants dans susfs.h
+          susfs_h = "include/linux/susfs.h"
+          if os.path.exists(susfs_h):
+              with open(susfs_h, "r") as f: content = f.read()
+              if "linux/mm_types.h" not in content:
+                  content = "#include <linux/mm_types.h>\n#include <linux/fs.h>\n" + content
+                  with open(susfs_h, "w") as f: f.write(content)
+              print("✅ include/linux/susfs.h sécurisé.")
+
+          # 2. Correction du mauvais chemin d'\''en-tête généré par le patch dans fs/open.c
+          open_c = "fs/open.c"
+          if os.path.exists(open_c):
+              with open(open_c, "r") as f: content = f.read()
+              content = content.replace('\''#include "../kernelSU/ksu.h"\'', '\''#include "../drivers/kernelsu/kernel/ksu.h"\'')
+              with open(open_c, "w") as f: f.write(content)
+              print("✅ Chemin d'\''en-tête ksu.h corrigé dans fs/open.c.")
+
+          # 3. Injection de l'\''en-tête global SusFS dans core_hook.c pour exposer les définitions manquantes
+          hook_c = "drivers/kernelsu/kernel/core_hook.c"
+          if os.path.exists(hook_c):
+              with open(hook_c, "r") as f: content = f.read()
+              if "linux/susfs.h" not in content:
+                  # Ajout au sommet du fichier de manière prioritaire
+                  content = "#include <linux/susfs.h>\n" + content
+                  with open(hook_c, "w") as f: f.write(content)
+              print("✅ Visibilité SusFS injectée dans core_hook.c.")
+          '
+
           rm -rf susfs4ksu
 
-          # Correction de la variable obsolète mmap_sem vers mmap_lock (spécifique aux branches Lineage récentes)
-          echo "🔧 Correction adaptative de mmap_sem vers mmap_lock dans fs/proc/base.c..."
+          # Correction adaptative mmap_sem vers mmap_lock (spécifique Android 11+ / Lineage)
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
+          sed -i 's/mmap_sem/mmap_lock/g' fs/proc/task_mmu.c || true
 
-          # Pré-injection des flags directement dans le fichier cible de Motorola
-          echo "📝 Pré-injection des flags d'activation dans le defconfig de base..."
+          # Pré-injection des flags indispensables directement dans le defconfig Motorola original
           TARGET_DEFCONFIG="arch/arm64/configs/vendor/lito-perf_defconfig"
           {
             echo "CONFIG_KSU=y"
@@ -149,7 +130,7 @@ jobs:
             echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
           } >> "$TARGET_DEFCONFIG"
 
-          echo "✅ Injection structurelle terminée avec succès !"
+          echo "✅ Phase d'ajustement structurel achevée."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -164,17 +145,13 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          echo "📂 Préparation et déplacement du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          
-          # Fix préventif mis à jour avec la nouvelle arborescence pour le dossier out/
           mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel
-          cp drivers/kernelsu/kernel/Kconfig ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel/Kconfig 2>/dev/null || true
-
-          # Génération de la configuration finale via le toolchain complet
+          
+          # Génération de la base .config
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          echo "🔧 Double-vérification et injection forcée des dépendances..."
+          # Forçage strict des configurations requises
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -186,14 +163,13 @@ jobs:
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
-          # Synchronisation propre des dépendances de configuration
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          echo "🔓 Force-pass des signatures & Tactile..."
+          # Hacks de contournement indispensables (Signatures & Dalle Tactile Motorola)
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          echo "🚀 Compilation finale (Forçage variable 11872)..."
+          # Lancement de la compilation
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
@@ -204,20 +180,15 @@ jobs:
           mkdir -p repack
           cp boot-stock.img repack/boot.img
           
-          # Téléchargement et préparation de magiskboot depuis l'APK officielle
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
-          
           rm -rf Magisk-v27.0.apk lib/
           
-          # Repackage
           cd repack
           ./magiskboot unpack boot.img
-          
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
-          
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           
@@ -226,7 +197,7 @@ jobs:
           mv final_boot.img final_output/boot.img
 
       - name: Upload Finished Packaged Assets
-        uses: actions/upload-artifact@v4
+        uses: uses/upload-artifact@v4
         with:
           name: kernel-motorola_final
           path: final_output/boot.img
