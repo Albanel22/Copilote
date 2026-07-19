@@ -43,6 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
+
       - name: Injecter KernelSU & SUSFS Proprement (Build 421)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -64,6 +65,7 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu
           git checkout v0.9.5
+          rm -rf .git  # 🌟 Élimine le statut de sous-dépôt pour tromper les scripts de nettoyage
           cd ../..
 
           # 🔧 Liaison de KernelSU au système de build
@@ -221,7 +223,7 @@ jobs:
                   code += "\n".join(fixed_lines)
                   with open(hook_path, 'w') as f:
                       f.write(code)
-                  print("✅ drivers/kernelsu/kernel/core_hook.c consolidé avec succès !")
+                  print("Base de drivers/kernelsu/kernel/core_hook.c consolidée avec succès !")
           EOF
           
           python3 fix_susfs.py
@@ -238,6 +240,7 @@ jobs:
 
           echo "🎉 Tout est parfaitement aligné et corrigé pour le Build 421 !"
 
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
