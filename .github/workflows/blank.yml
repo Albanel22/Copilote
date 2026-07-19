@@ -65,8 +65,9 @@ jobs:
           cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
           # Liaison au système de build
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          echo "obj-y += kernelsu/" >> drivers/Makefile
+          echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
+          echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
+
 
           # Clonage de SusFS et application du patch Kernel
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
