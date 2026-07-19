@@ -81,7 +81,7 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
 
-          # --- CHIRURGIE DE PRÉCISION VIA PYTHON (CORRIGÉ) ---
+          # --- CHIRURGIE DE PRÉCISION VIA PYTHON ---
           python3 -c '
           import os
 
@@ -94,17 +94,14 @@ jobs:
                   with open(susfs_h, "w") as f: f.write(content)
               print("✅ include/linux/susfs.h sécurisé.")
 
-          # 2. Correction adaptative de fs/open.c (Hunk 3 manquant + redirection ksu.h)
+          # 2. Correction adaptative de fs/open.c
           open_c = "fs/open.c"
           if os.path.exists(open_c):
               with open(open_c, "r") as f: content = f.read()
-              
-              # Correction du chemin d-en-tête (syntaxe sécurisée sans guillemets conflictuels)
               old_inc = "#include " + chr(34) + "../kernelSU/ksu.h" + chr(34)
               new_inc = "#include " + chr(34) + "../drivers/kernelsu/kernel/ksu.h" + chr(34)
               content = content.replace(old_inc, new_inc)
               
-              # Injection manuelle du hook dans do_faccessat si le patch automatique a échoué
               if "susfs_sus_path_by_filename" not in content:
                   idx = content.find("long do_faccessat(int dfd, const char __user *filename, int mode)")
                   if idx != -1:
@@ -113,11 +110,20 @@ jobs:
                       if target_idx != -1:
                           hook = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
                           content = content[:target_idx] + hook + content[target_idx:]
-                          
               with open(open_c, "w") as f: f.write(content)
               print("✅ fs/open.c entièrement réparé et synchronisé.")
 
-          # 3. Injection de l-en-tête global SusFS dans core_hook.c
+          # 3. Réparation totale de fs/proc/task_mmu.c (Forçage de la visibilité des définitions SusFS)
+          task_mmu_c = "fs/proc/task_mmu.c"
+          if os.path.exists(task_mmu_c):
+              with open(task_mmu_c, "r") as f: content = f.read()
+              if "linux/susfs.h" not in content:
+                  # Forçage des en-têtes requis tout en haut du fichier pour assurer la définition de SUSFS_MAX_LEN_PATHNAME
+                  content = "#define CONFIG_KSU_SUSFS 1\n#include <linux/susfs.h>\n" + content
+                  with open(task_mmu_c, "w") as f: f.write(content)
+              print("✅ fs/proc/task_mmu.c blindé et synchronisé.")
+
+          # 4. Injection de l-en-tête global SusFS dans core_hook.c
           hook_c = "drivers/kernelsu/kernel/core_hook.c"
           if os.path.exists(hook_c):
               with open(hook_c, "r") as f: content = f.read()
