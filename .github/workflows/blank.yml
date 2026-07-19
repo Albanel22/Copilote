@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Injecter KernelSU & SUSFS Proprement (Build 418)
+      - name: Injecter KernelSU & SUSFS Proprement (Build 420)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
@@ -77,20 +77,19 @@ jobs:
           # 3. Clonage de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
 
-          # 4. APPLICATION DU PATCH OFFICIEL (On ignore l'erreur stricte des 2 rejets)
-          echo "🛠️ Application du patch SusFS global..."
+          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU (Avec notre fix Python juste après)
+          echo "🛠️ Application du patch SusFS global sur le noyau..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
           if [ -f "$PATCH_FILE" ]; then
-            echo "✅ Patch trouvé : $PATCH_FILE"
-            # On autorise le patch à renvoyer un code d'avertissement car on gère les rejets juste après
+            echo "✅ Patch Kernel trouvé : $PATCH_FILE"
             patch -p1 < "$PATCH_FILE" || echo "⚠️ Des hunks ont échoué comme prévu, application des correctifs chirurgicaux..."
           else
             echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
             exit 1
           fi
 
-          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE POUR LES REJETS
+          # 5. SCRIPT PYTHON DE CORRECTION CHIRURGICALE POUR LES REJETS DE OPEN.C
           echo "🐍 Lancement du script de correction des conflits..."
           cat << 'EOF' > fix_susfs.py
           import os
@@ -101,7 +100,6 @@ jobs:
               with open(open_path, 'r') as f:
                   code = f.read()
               
-              # Injection des variables au début de do_faccessat
               var_marker = "long do_faccessat(int dfd, const char __user *filename, int mode)"
               idx = code.find(var_marker)
               if idx != -1:
@@ -110,7 +108,6 @@ jobs:
                       var_injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n"
                       code = code[:brace_idx+1] + var_injection + code[brace_idx+1:]
               
-              # Injection du hook de masquage avant la validation du mode
               hook_marker = "if (mode & ~S_IRWXO)"
               if hook_marker in code and "susfs_sus_path_by_filename" not in code:
                   hook_injection = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
@@ -148,12 +145,22 @@ jobs:
             echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          # 7. Application des patchs spécifiques à KernelSU pour SusFS
-          echo "🔗 Liaison SusFS <-> KernelSU..."
-          cp -r susfs4ksu/kernel_patches/KernelSU/ext/* drivers/kernelsu/
+          # 7. APPLICATION DU PATCH SUR KERNELSU (Ce que pointait ton lien Github)
+          echo "🔗 Application du patch d'activation SusFS dans KernelSU..."
+          KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
 
-          echo "🎉 Tout est aligné et corrigé pour le Build 418 !"
-          
+          if [ -f "$KSU_PATCH" ]; then
+            echo "✅ Patch KSU trouvé : $KSU_PATCH"
+            patch -p1 < "$KSU_PATCH"
+            echo "✅ KernelSU est maintenant lié à SusFS !"
+          else
+            echo "❌ Erreur critique : Impossible de trouver 10_enable_susfs_for_ksu.patch"
+            exit 1
+          fi
+
+          echo "🎉 Tout est parfaitement aligné pour le Build 420 !"
+                
+              
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
