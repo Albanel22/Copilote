@@ -43,222 +43,69 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Injecter KernelSU & SUSFS Dynamiquement
+      - name: Injecter KernelSU & SUSFS Proprement (Build 416)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
+          set -e # Coupe le build immédiatement si une étape échoue (évite les monstres bancals)
+
           # 1. Nettoyage complet des sources
           git reset --hard
           git clean -fd
 
-          # 🧹 NEUTRALISATION DES ANCIENS HOOKS CONFLICTUELS DU DÉPÔT
-          echo "🧹 Désactivation des anciennes traces KernelSU corrompues..."
-          python3 -c '
-          import os
-          targets = ["Makefile", "drivers/Makefile", "drivers/Kconfig", "arch/arm64/Makefile"]
-          for path in targets:
-              if os.path.exists(path):
-                  with open(path, "r") as f:
-                      lines = f.readlines()
-                  with open(path, "w") as f:
-                      for line in lines:
-                          if "KernelSU" in line or "kernelsu" in line:
-                              f.write("# " + line if not line.strip().startswith("#") else line)
-                          else:
-                              f.write(line)
-          print("✅ Anciens hooks nettoyés et mis en commentaire.")
-          '
+          # 🧹 Désactivation des anciennes traces si présentes
+          echo "🧹 Nettoyage des hooks existants..."
+          sed -i '/kernelsu/d' drivers/Makefile || true
+          sed -i '/KernelSU/d' drivers/Kconfig || true
 
-          # 🛠️ INSTALLATION MANUELLE DE KERNELSU DANS DRIVERS
-          echo "📥 Clonage propre de KernelSU v0.9.5..."
-          git clone https://github.com/tiann/KernelSU.git -b v0.9.5 KernelSU_tmp
-          
-          echo "📦 Injection du sous-ensemble de KernelSU dans drivers/kernelsu..."
-          mv KernelSU_tmp/kernel drivers/kernelsu
-          rm -rf KernelSU_tmp
+          # 🛠️ CLONAGE ET FIXATION DE LA VERSION DE KERNELSU
+          echo "📥 Clonage propre de KernelSU..."
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
+          cd drivers/kernelsu
+          git checkout v0.9.5
+          cd ../..
 
-          # 🔧 Liaison de KernelSU au système de build officiel
-          echo "🔧 Liaison de KernelSU au système de build officiel..."
+          # 🔧 Liaison de KernelSU au système de build
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
 
-          # 🚀 FORÇAGE DE LA VERSION DE KERNELSU SUR CELLE DU TÉLÉPHONE (11872)
-          echo "🚀 Remplacement et verrouillage de la version KernelSU à 11872..."
-          sed -i 's/KSUD_VERSION :=.*/KSUD_VERSION := 11872/g' drivers/kernelsu/Makefile
-          sed -i 's/KSUD_VERSION ?=.*/KSUD_VERSION := 11872/g' drivers/kernelsu/Makefile
-          
-          # On l'ajoute aussi à la toute fin du Makefile pour écraser n'importe quelle détection Git
-          echo "" >> drivers/kernelsu/Makefile
-          echo "KSUD_VERSION := 11872" >> drivers/kernelsu/Makefile
-          echo "ccflags-y += -DKSU_VERSION=11872" >> drivers/kernelsu/Makefile
-
-          # 2. Détection dynamique de la version du Kernel
+          # 2. Détection de la version précise du Kernel
           VERSION=$(grep -E "^VERSION =" Makefile | head -n 1 | awk '{print $3}')
           PATCHLEVEL=$(grep -E "^PATCHLEVEL =" Makefile | head -n 1 | awk '{print $3}')
           KERNEL_VER="${VERSION}.${PATCHLEVEL}"
-          echo "📊 Version du Kernel détectée : ${KERNEL_VER}"
+          echo "📊 Base Kernel détectée : ${KERNEL_VER}"
 
-          # 3. Sélection et clonage de la branche SUSFS correspondante
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "kernel-${KERNEL_VER}" --depth=1 susfs4ksu || {
-            echo "⚠️ Branche kernel-${KERNEL_VER} introuvable, repli sur la branche principale..."
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
-          }
+          # 3. Clonage de SusFS
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
+
+          # 4. APPLICATION DU PATCH OFFICIEL SUR LE NOYAU (Le cœur du correctif)
+          echo "🛠️ Application du patch SusFS sur l'arborescence du noyau..."
+          # On cherche le patch 4.19 dans le dépôt susfs
+          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
-          # 4. Détection dynamique des chemins pour KernelSU
-          CORE_HOOK=$(find . -name "core_hook.c" | head -n 1)
-          KSU_C=$(find . -name "ksu.c" | head -n 1)
-          KSU_H=$(find . -type f -name "ksu.h" | grep -E "kernel/|drivers/" | head -n 1)
-          RULES_C=$(find . -name "rules.c" | grep "selinux" | head -n 1)
-          KSU_ROOT=$(dirname "$CORE_HOOK")
-
-          echo "✅ Fichiers KernelSU trouvés : $CORE_HOOK, $KSU_C, $KSU_H, $RULES_C"
-
-          # Alignement structurel requis pour KernelSU
-          mkdir -p kernelSU
-          cp "$KSU_H" kernelSU/ksu.h
-
-          # 🛠️ STRATÉGIE DE COPIE DES HEADERS SUSFS
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ 2>/dev/null || cp $(find susfs4ksu/ -name "susfs.c") fs/
-          
-          if [ -d "susfs4ksu/kernel_patches/include" ]; then
-            cp -r susfs4ksu/kernel_patches/include/* include/
-            echo "✅ Arborescence complète des fichiers d'en-tête SUSFS intégrée."
+          if [ -f "$PATCH_FILE" ]; then
+            echo "✅ Patch trouvé : $PATCH_FILE"
+            patch -p1 < "$PATCH_FILE"
           else
-            echo "⚠️ Structure alternative détectée dans l'arborescence SUSFS, répartition manuelle..."
-            mkdir -p include/linux include/uapi/linux
-            find susfs4ksu/ -name "susfs.h" | while read -r f; do
-              if [[ "$f" == *"uapi"* ]]; then
-                cp "$f" include/uapi/linux/
-              else
-                cp "$f" include/linux/
-              fi
-            done
-            find susfs4ksu/ -name "susfs_def.h" -exec cp {} include/linux/ \; 2>/dev/null || true
+            echo "❌ Erreur : Impossible de trouver le patch SusFS pour noyau 4.19"
+            exit 1
           fi
 
-          echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
-
-          # 🔧 FORCE-DEFINE & VISIBILITÉ DES TYPES POUR LE COMPILATEUR
-          [ -f include/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/linux/susfs.h
-          [ -f include/uapi/linux/susfs.h ] && sed -i '1i #define CONFIG_KSU 1\n#define CONFIG_KSU_SUSFS 1\n#include <linux/mm.h>\n#include <linux/fs.h>\nstruct filename;' include/uapi/linux/susfs.h
-
-          # 🛠️ INJECTION DES FALLBACKS ADAPTATIFS DANS LES HEADERS
-          if [ -f include/linux/susfs.h ]; then
-            cat << 'EOF' >> include/linux/susfs.h
-
-          /* --- Début Fallbacks de Compatibilité Moteur SUSFS Modernes --- */
-          #ifndef SYSCALL_FAMILY_ALL_ENOENT
-          #define SYSCALL_FAMILY_ALL_ENOENT 0
-          #endif
-
-          #ifndef SUSFS_DONT_LOG
-          #define SUSFS_DONT_LOG 0
-          #endif
-
-          #ifndef SYSCALL_FAMILY_ALL_EACCES
-          #define SYSCALL_FAMILY_ALL_EACCES 1
-          #endif
-
-          #include <linux/types.h>
-          #ifdef CONFIG_KSU_SUSFS
-          extern int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family);
-          void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid);
-          #else
-          static inline int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) { return 0; }
-          static inline void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {}
-          #endif
-          /* --- Fin Fallbacks --- */
-          EOF
-            echo "✅ Fallbacks de sécurité et prototype ksu_try_umount injectés dans include/linux/susfs.h"
+          # 5. Copie des fichiers SusFS manquants dans le moteur
+          echo "📦 Intégration des fichiers additionnels SusFS..."
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+          
+          # Si le patch n'a pas mis à jour le Makefile de fs/, on l'ajoute
+          if ! grep -q "susfs.o" fs/Makefile; then
+            echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           fi
 
-          # 🛠️ SÉCURISATION DU LINKER
-          if [ -f fs/susfs.c ]; then
-            if ! grep -q "susfs_sus_path_by_filename" fs/susfs.c; then
-              cat << 'EOF' >> fs/susfs.c
+          # 6. Application des patchs spécifiques à KernelSU pour SusFS
+          echo "🔗 Liaison SusFS <-> KernelSU..."
+          cp susfs4ksu/kernel_patches/KernelSU/ext/* drivers/kernelsu/
 
-          /* Stub adaptatif généré automatiquement pour satisfaire les hooks du dépôt */
-          int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family) {
-              return 0;
-          }
-          EOF
-              echo "✅ Stub de liaison injecté dans fs/susfs.c"
-            fi
-          fi
-
-          # Patch ciblé pour fs/open.c
-          python3 -c '
-          import re
-          file_path = "fs/open.c"
-          with open(file_path, "r") as f:
-              code = f.read()
+          echo "✅ Injection terminée avec succès pour le Build 416 !"
           
-          extern_decl = "\n#ifdef CONFIG_KSU\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n"
-          if "ksu_handle_faccessat" in code and "extern int ksu_handle_faccessat" not in code:
-              code = code.replace("long do_faccessat", extern_decl + "long do_faccessat")
-              print("🎉 Prototype de ksu_handle_faccessat injecté.")
-          
-          pattern = r"(long\s+do_faccessat\s*\([^)]+\)\s*\{)"
-          match = re.search(pattern, code)
-          if match:
-              func_start_idx = match.end()
-              local_window = code[func_start_idx:func_start_idx+400]
-              
-              variables_to_inject = ""
-              if "struct path path;" not in local_window:
-                  variables_to_inject += "\n\tstruct path path;"
-              if "struct inode *inode;" not in local_window:
-                  variables_to_inject += "\n\tstruct inode *inode;"
-              if "struct vfsmount *mnt;" not in local_window:
-                  variables_to_inject += "\n\tstruct vfsmount *mnt;"
-                  
-              if variables_to_inject:
-                  code = code[:func_start_idx] + variables_to_inject + code[func_start_idx:]
-                  print("🎉 Variables locales injectées avec succès dans do_faccessat !")
-          
-          with open(file_path, "w") as f:
-              f.write(code)
-          '
-
-          # 5. Injection dans Kconfig et Makefile de KernelSU
-          cat << 'EOF' >> "$KSU_ROOT/Kconfig"
-          menu "KernelSU - SUSFS"
-          config KSU_SUSFS
-              bool "KernelSU addon - SUSFS"
-              depends on KSU
-              default y
-          config KSU_SUSFS_SUS_PATH
-              bool "Enable to hide suspicious path"
-              depends on KSU_SUSFS
-              default y
-          config KSU_SUSFS_TRY_UMOUNT
-              bool "Enable to use ksu's try_umount"
-              depends on KSU_SUSFS
-              default y
-          endmenu
-          EOF
-
-          cat << 'EOF' >> "$KSU_ROOT/Makefile"
-          ifdef KSU_SUSFS
-          ccflags-y += -DKSU_SUSFS
-          endif
-          ifdef KSU_SUSFS_SUS_PATH
-          ccflags-y += -DKSU_SUSFS_SUS_PATH
-          endif
-          ifdef KSU_SUSFS_TRY_UMOUNT
-          ccflags-y += -DKSU_SUSFS_TRY_UMOUNT
-          endif
-          EOF
-
-          # 6. Injections des hooks KernelSU essentiels
-          sed -i '/#include "kernel_compat.h"/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif' "$CORE_HOOK"
-          sed -i '/try_umount("\/system"/i #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT\n\tsusfs_try_umount(new_uid.val);\n#endif' "$CORE_HOOK"
-          sed -i '/ksu_core_init();/i #ifdef CONFIG_KSU_SUSFS\n\tsusfs_init();\n#endif' "$KSU_C"
-          sed -i '/ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");/a #ifdef CONFIG_KSU_SUSFS\n\tksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");\n#endif' "$RULES_C"
-
-          # 7. 🛠️ CRÉATION DU PONT DE LIAISON API
-          echo -e "\n/* --- Pont de liaison SusFS <-> KernelSU --- */\nvoid ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid) {\n\ttry_umount(mnt, check_mnt, flags);\n}" >> "$CORE_HOOK"
-          echo "🎉 Pont d'API pour ksu_try_umount greffé à la fin de $CORE_HOOK"
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
