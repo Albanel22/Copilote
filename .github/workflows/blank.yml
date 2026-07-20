@@ -98,8 +98,10 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
-          # Correctif : Contournement de path_umount non exporté dans le noyau 4.19 Motorola
-          sed -i 's/ret = path_umount(/ret = 0;\/\//g' fs/susfs.c || true
+          # Fix : Déclaration externe de path_umount pour éviter l'erreur undefined symbol
+          if ! grep -q "path_umount" fs/susfs.c; then
+            sed -i '1i extern int path_umount(struct path *path, int flags);' fs/susfs.c
+          fi
           
           rm -rf susfs4ksu
 
