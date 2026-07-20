@@ -48,14 +48,10 @@ jobs:
         run: |
           set -e
           
-          # Copie de ton defconfig personnel dans les sources clonées
+          # Copie de ton defconfig personnel directement au bon endroit dans vendor/
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
 
           cd ${{ env.KERNEL_PATH }}
-
-          # 🧹 C'EST ICI QU'IL FAUT L'AJOUTER : On nettoie proprement avant tout
-          echo "🧹 Nettoyage profond des sources (make mrproper)..."
-          make mrproper
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
@@ -276,11 +272,15 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
-          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS pour GKI..."
+          echo "🧹 Nettoyage rigoureux des sources parentes (make mrproper)..."
+          make mrproper
+
+          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS..."
           make gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> .config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> .config
           make olddefconfig
+
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
