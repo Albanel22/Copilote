@@ -97,7 +97,10 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
-
+          
+          # Correctif : Contournement de path_umount non exporté dans le noyau 4.19 Motorola
+          sed -i 's/ret = path_umount(/ret = 0;\/\//g' fs/susfs.c || true
+          
           rm -rf susfs4ksu
 
           echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
