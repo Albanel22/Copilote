@@ -272,8 +272,8 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
-          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS dans le .config..."
-          make ${{ env.DEFCONFIG }}
+          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS pour GKI..."
+          make gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> .config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> .config
           make olddefconfig
