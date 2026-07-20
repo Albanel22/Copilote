@@ -98,8 +98,8 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
-          # Correctif universel : Remplacement direct de toute ligne appelant path_umount
-          sed -i '/path_umount/s/.*/\treturn -EINVAL;\/\/.*/' fs/susfs.c || true
+          # 🛡️ Correctif propre pour path_umount sur le kernel 4.19 (Évite l'erreur de type void et de variable err)
+          sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
           rm -rf susfs4ksu
 
