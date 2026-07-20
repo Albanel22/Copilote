@@ -53,6 +53,10 @@ jobs:
 
           cd ${{ env.KERNEL_PATH }}
 
+          # 🧹 C'EST ICI QU'IL FAUT L'AJOUTER : On nettoie proprement avant tout
+          echo "🧹 Nettoyage profond des sources (make mrproper)..."
+          make mrproper
+
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
