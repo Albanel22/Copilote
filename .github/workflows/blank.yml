@@ -98,8 +98,8 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
-          # Correctif définitif : Neutralisation complète de l'appel à path_umount dans susfs.c
-          sed -i '/int susfs_try_umount/,/}/ { /path_umount/ { s/.*/\treturn -EINVAL;/ } }' fs/susfs.c || true
+          # Correctif universel : Remplacement direct de toute ligne appelant path_umount
+          sed -i '/path_umount/s/.*/\treturn -EINVAL;\/\/.*/' fs/susfs.c || true
           
           rm -rf susfs4ksu
 
