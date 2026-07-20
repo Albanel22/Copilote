@@ -59,8 +59,8 @@ jobs:
           echo "📥 Téléchargement direct des sources SUSFS..."
           mkdir -p include/linux
           
-          curl -LSs "https://raw.githubusercontent.com/gki-susfs/susfs4linux/gki-android-4.19/fs/susfs.c" -o fs/susfs.c
-          curl -LSs "https://raw.githubusercontent.com/gki-susfs/susfs4linux/gki-android-4.19/include/linux/susfs.h" -o include/linux/susfs.h
+          curl -LSs "https://raw.githubusercontent.com/simonpunk/susfs4ksu/main/kernel_patches/fs/susfs.c" -o fs/susfs.c
+          curl -LSs "https://raw.githubusercontent.com/simonpunk/susfs4ksu/main/kernel_patches/include/linux/susfs.h" -o include/linux/susfs.h
 
           # Vérification de sécurité pour s'assurer que le téléchargement a fonctionné
           if [ ! -s fs/susfs.c ] || [ ! -s include/linux/susfs.h ]; then
