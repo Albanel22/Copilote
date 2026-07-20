@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Structurelle SusFS & KernelSU (Manual Hooks)
+      - name: 📂 Intégration Structurelle SusFS & KernelSU
         run: |
           set -e
           
@@ -56,30 +56,15 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
-          echo "📥 Téléchargement de KernelSU v0.9.5..."
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
+          echo "📥 Installation de KernelSU v0.9.5 via le setup officiel (pour la version 11872)..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-          # Liaison native de KernelSU au build-system
-          if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
-          if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
-
-          echo "Création du miroir structurel attendu par le patch SusFS..."
-          mkdir -p kernelSU
-          cp drivers/kernelsu/kernel/ksu.h kernelSU/ksu.h
-          
-          # Injection des stubs de sécurité
-          {
-            echo -e "\n/* --- Stubs de sécurité SusFS --- */"
-            echo "#define ksu_handle_faccessat(...) do {} while(0)"
-            echo "#define ksu_handle_stat(...) do {} while(0)"
-            echo "#define ksu_handle_vfs_read(...) do {} while(0)"
-            echo "#define ksu_handle_setattr(...) do {} while(0)"
-            echo "#define ksu_handle_sys_read(...) do {} while(0)"
-          } >> kernelSU/ksu.h
+          # Liaison au Kconfig (requis par le script officiel)
+          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then 
+            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+          fi
 
           echo "📥 Application des Manual Hooks officiels pour Kernel 4.19 (ResukiSu)..."
-          # On crée et applique directement le patch des manual hooks
           cat << 'EOF' > manual_hooks.patch
           From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
           From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
@@ -236,6 +221,7 @@ jobs:
           SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
           		void __user *, arg)
           {
+          	int res;
           	int ret = 0;
           	char buffer[256];
           
@@ -281,7 +267,6 @@ jobs:
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
-
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
