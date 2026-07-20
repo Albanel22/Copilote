@@ -93,8 +93,9 @@ jobs:
           # 2. Ajout des vrais headers de Linux pour éviter les "incompatible pointer types"
           sed -i '1i #include <linux/fs.h>\n#include <linux/stat.h>\n#include <linux/sched.h>' include/linux/susfs.h
           
-          # 3. KSU v0.9.5 utilise les KPROBES. On efface les vieux appels manuels insérés par le patch SusFS !
+          # 3. KSU v0.9.5 utilise les KPROBES. On efface les vieux appels manuels ET les inclusions ksu.h obsolètes dans le VFS !
           find fs/ -type f -name "*.c" -exec sed -i '/ksu_handle_/d' {} + || true
+          find fs/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/ksu\.h/d' {} + || true
 
           # 4. Sécurisation de fs/proc/task_mmu.c au cas où le patch aurait raté un en-tête
           sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c || true
