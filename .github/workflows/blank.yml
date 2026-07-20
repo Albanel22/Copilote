@@ -53,6 +53,10 @@ jobs:
 
           cd ${{ env.KERNEL_PATH }}
 
+          # 🧹 NETTOYAGE TOTAL DE LA RACINE EN PREMIER (Résout définitivement le "is not clean")
+          echo "🧹 Nettoyage profond de la racine des sources (make mrproper)..."
+          make mrproper || true
+
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
@@ -271,9 +275,6 @@ jobs:
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
-
-          echo "🧹 Nettoyage rigoureux des sources parentes (make mrproper)..."
-          make mrproper
 
           echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS..."
           make gki_defconfig
