@@ -11,7 +11,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
   build:
@@ -189,7 +189,7 @@ jobs:
           def fix_task_mmu(filepath):
               if os.path.exists(filepath):
                   with open(filepath, "r") as f: content = f.read()
-                  if "SUSFS_MAX_LEN_PATHNAME" not in content:
+                  if "#include <linux/susfs.h>" not in content:
                       safety_headers = (
                           "#ifndef CONFIG_KSU_SUSFS\n"
                           "#define CONFIG_KSU_SUSFS 1\n"
