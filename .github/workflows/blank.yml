@@ -51,10 +51,6 @@ jobs:
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
 
-          # 🔧 AJOUT 1 : On force l'activation de SusFS directement dans le Defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-
           cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
@@ -141,7 +137,7 @@ jobs:
           index 5c0043d4b807..98d50c79c414 100644
           --- a/fs/open.c
           +++ b/fs/open.c
-          @@ -345,6 +345,10> SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
+          @@ -345,6 +345,10 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
            * We do this by temporarily clearing all FS-related capabilities and
            * switching the fsuid/fsgid around to the real ones.
            */
@@ -214,7 +210,8 @@ jobs:
           diff --git a/kernel/reboot.c b/kernel/reboot.c
           index 790c2f514a55..bcedeac75d3a 100644
           --- a/kernel/reboot.c
-          🇪🇸 @@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
+          +++ b/kernel/reboot.c
+          @@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
            *
            * reboot doesn't sync: do that yourself before calling this.
            */
@@ -251,7 +248,7 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           
-          # 🔧 AJOUT 2 : On force l'inclusion de susfs.o en dur dans le Makefile de fs/
+          # Inclusion de susfs.o en dur dans le Makefile de fs/
           if ! grep -q "susfs.o" fs/Makefile; then 
             echo 'obj-y += susfs.o' >> fs/Makefile
           fi
@@ -274,6 +271,12 @@ jobs:
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
+
+          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS dans le .config..."
+          make ${{ env.DEFCONFIG }}
+          echo "CONFIG_KSU_SUSFS=y" >> .config
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> .config
+          make olddefconfig
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
