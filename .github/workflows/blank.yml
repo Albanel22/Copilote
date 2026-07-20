@@ -108,8 +108,12 @@ jobs:
             sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
           fi
 
-          # Correction de la structure mmap_sem propre à LineageOS
+          # Correction de la structure mmap_sem propre à LineageOS & inclusion SusFS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
+          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
+            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
+          fi
+
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
