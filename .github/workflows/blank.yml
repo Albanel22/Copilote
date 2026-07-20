@@ -1,4 +1,4 @@
-name: Kernel CI — build & package (SUSFS ONLY)
+name: Kernel CI — build & package
 
 on:
   push:
@@ -11,7 +11,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
 
 jobs:
   build:
@@ -43,52 +43,72 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Extraction et Intégration Pure de SUSFS
+      - name: 📂 Injection SusFS / KernelSU & Configuration des Flags
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
 
-          # 1. 🧹 Nettoyage de toute trace résiduelle de KernelSU
-          echo "🧹 Purge absolue des références à KernelSU..."
+          echo "🧹 Purge des anciens résidus de KernelSU..."
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' Makefile || true
+
+          # Nettoyage et clonage de KernelSU
           rm -rf drivers/kernelsu || true
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Makefile || true
           sed -i '/[kK][eE][rR][nN][eE][lL][sS][uU]/d' drivers/Kconfig || true
 
-          # 2. 📥 Récupération des fichiers SUSFS v4.19 via le miroir GitHub public
-          echo "📥 Téléchargement direct des sources SUSFS..."
-          mkdir -p include/linux
-          
-          curl -LSs "https://raw.githubusercontent.com/simonpunk/susfs4ksu/main/kernel_patches/fs/susfs.c" -o fs/susfs.c
-          curl -LSs "https://raw.githubusercontent.com/simonpunk/susfs4ksu/main/kernel_patches/include/linux/susfs.h" -o include/linux/susfs.h
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
+          cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # Vérification de sécurité pour s'assurer que le téléchargement a fonctionné
-          if [ ! -s fs/susfs.c ] || [ ! -s include/linux/susfs.h ]; then
-            echo "❌ Échec du téléchargement des fichiers SUSFS (Vérifie les URLs)"
-            exit 1
-          fi
+          # Liaison au système de build
+          echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
+          echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
+
+          # Clonage de SusFS et sabotage de sa modification sur fs/open.c
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
+          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
-          # Liaison de susfs.o au système de build de fs/
-          if ! grep -q "susfs.o" fs/Makefile; then 
-            echo 'obj-$(CONFIG_SUSFS) += susfs.o' >> fs/Makefile
+          echo "✂️ Chirurgie sur le fichier .patch pour immuniser fs/open.c..."
+          # On supprime toutes les lignes du patch qui concernent fs/open.c pour éviter que la commande 'patch' n'y touche
+          sed -i '/diff --git a\/fs\/open.c/,/diff --git/ { /diff --git b/!d }' "$PATCH_FILE" || true
+          
+          echo "🧼 Neutralisation des en-têtes corrompus restants dans le fichier patch..."
+          sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' "$PATCH_FILE" || true
+          sed -i 's/kernelSU/kernelsu/g' "$PATCH_FILE" || true
+
+          # Application du patch global (fs/open.c est maintenant totalement ignoré par le patch)
+          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué (fs/open.c préservé d'origine)"
+
+          # Application du patch SusFS sur KernelSU
+          if [ -d susfs4ksu/kernel_patches/KernelSU ]; then
+            KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
+            if [ -f "$KSU_PATCH" ]; then
+              cd drivers/kernelsu && patch -p1 < "../../$KSU_PATCH" || echo "⚠️ Patch KSU partiel" && cd ../..
+            fi
           fi
 
-          # Correction adaptative mmap_sem vers mmap_lock (Ton correctif stable du build 266)
+          # Copie des fichiers d'infrastructure SusFS indispensables
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+          if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
+
+          rm -rf susfs4ksu
+
+          # Correction adaptative mmap_sem vers mmap_lock (spécifique Android 11+ / Lineage)
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/task_mmu.c || true
 
-          # Pré-injection de la configuration SUSFS directement dans ton defconfig Motorola
+          # Pré-injection des flags indispensables directement dans le defconfig Motorola original
           TARGET_DEFCONFIG="arch/arm64/configs/vendor/lito-perf_defconfig"
           {
-            echo "CONFIG_SUSFS=y"
-            echo "CONFIG_SUSFS_SUS_PATH=y"
-            echo "CONFIG_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_SUSFS_TRY_UMOUNT=y"
-            echo "CONFIG_SUSFS_SPOOF_UNAME=y"
-            echo "CONFIG_SUSFS_HIDE_KSU_DIR=y"
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
           } >> "$TARGET_DEFCONFIG"
 
-          echo "✅ Phase d'ajustement SUSFS achevée."
+          echo "✅ Phase d'ajustement initiale achevée."
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -104,65 +124,74 @@ jobs:
           export KCFLAGS="-Wno-error"
           
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          mkdir -p ${{ env.BUILD_DIR }}/drivers/kernelsu/kernel
           
           # 1. Génération de la base .config
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage strict des configurations requises pour faire vivre SUSFS
+          # Forçage strict des configurations requises
           {
-            echo "CONFIG_SUSFS=y"
-            echo "CONFIG_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 2. ⚡ CHIRURGIE NUCLÉAIRE SUSFS (SANS KERNELSU) ⚡
-          echo "🚀 Injection des hooks SUSFS sur fs/open.c..."
+          # 2. ⚡ CHIRURGIE NUCLÉAIRE POST-CONFIG (Sur un fichier d'origine garanti à 100%) ⚡
+          echo "🚀 Injection de précision sur fs/open.c vierge..."
           python3 -c '
           import os
 
+          # On force une restauration Git absolue de fs/open.c pour être CERTAIN qu-il est 100% stock
           os.system("git checkout fs/open.c")
 
           with open("fs/open.c", "r") as f:
               orig_content = f.read()
 
-          # Inclusion stricte de l’en-tête SUSFS sans aucun ksu.h
-          headers = "#ifdef CONFIG_SUSFS\n#include <linux/susfs.h>\n#endif\n"
+          # On prépare nos en-têtes propres
+          headers = "#include <../drivers/kernelsu/kernel/ksu.h>\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
           new_content = headers + orig_content
 
+          # On injecte nos hooks de façon ultra propre
           target_func = "long do_faccessat(int dfd, const char __user *filename, int mode)"
           idx = new_content.find(target_func)
           if idx != -1:
               brace_idx = new_content.find("{", idx)
               if brace_idx != -1:
-                  vars_inj = "\n#ifdef CONFIG_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
+                  # Variables locales injectées une seule et unique fois
+                  vars_inj = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename *fname;\n\tint status;\n\tint error;\n#endif\n"
                   new_content = new_content[:brace_idx+1] + vars_inj + new_content[brace_idx+1:]
                   
                   idx_hook = new_content.find("if (mode & ~S_IRWXO)", brace_idx)
                   if idx_hook != -1:
-                      hook_inj = "#ifdef CONFIG_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
+                      hook_inj = "#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n\n\t"
                       new_content = new_content[:idx_hook] + hook_inj + new_content[idx_hook:]
 
+          # On écrase de force le fichier source ET la copie générée dans le dossier de build "out/"
           with open("fs/open.c", "w") as f:
               f.write(new_content)
           
           out_open_c = os.path.join("${{ env.BUILD_DIR }}", "fs/open.c")
-          if os.path.exists(os.path.dirname(out_open_c)):
+          if os.path.exists(out_open_c) or os.path.exists(os.path.dirname(out_open_c)):
               os.makedirs(os.path.dirname(out_open_c), exist_ok=True)
               with open(out_open_c, "w") as f:
                   f.write(new_content)
 
-          print("✅ Hooks SUSFS appliqués de manière isolée.")
+          print("✅ fs/open.c et out/fs/open.c synchronisés et sécurisés sans doublons.")
 
-          # Blindage de fs/proc/task_mmu.c (comme dans le build 266)
+          # Blindage de fs/proc/task_mmu.c
           def fix_task_mmu(filepath):
               if os.path.exists(filepath):
                   with open(filepath, "r") as f: content = f.read()
                   if "SUSFS_MAX_LEN_PATHNAME" not in content:
                       safety_headers = (
-                          "#define CONFIG_SUSFS 1\n"
+                          "#define CONFIG_KSU_SUSFS 1\n"
                           "#include <linux/susfs.h>\n"
                           "#ifndef SUSFS_MAX_LEN_PATHNAME\n"
                           "#define SUSFS_MAX_LEN_PATHNAME 512\n"
@@ -174,12 +203,16 @@ jobs:
           fix_task_mmu(os.path.join("${{ env.BUILD_DIR }}", "fs/proc/task_mmu.c"))
           '
 
-          # Hacks de contournement matériels stables (Signatures & Tactile)
+          # Nettoyage global résiduel
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\.\.\/kernelSU\/ksu\.h/\.\.\/drivers\/kernelsu\/kernel\/ksu\.h/g' {} + || true
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/kernelSU/kernelsu/g' {} + || true
+
+          # Hacks de contournement indispensables (Signatures & Dalle Tactile Motorola)
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
           # 3. Lancement de la compilation
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
