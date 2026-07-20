@@ -40,9 +40,30 @@ jobs:
           restore-keys: ${{ runner.os }}-ccache-
 
       - name: 📂 Intégration Structurelle SusFS & KernelSU
-        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
+          
+          echo "🔍 Vérification de l'emplacement actuel :"
+          pwd
+          ls -la
+          
+          # On cherche où se trouve réellement le dossier contenant le Makefile du noyau
+          if [ -f "Makefile" ]; then
+            echo "✓ Noyau trouvé à la racine du dépôt."
+          elif [ -d "kernel_src" ]; then
+            echo "✓ Dossier kernel_src trouvé. Déplacement..."
+            cd kernel_src
+          else
+            echo "⚠️ Structure inconnue, recherche du Makefile..."
+            MAKEFILE_PATH=$(find . -maxdepth 3 -name "Makefile" | grep -v "out/" | head -n 1)
+            if [ -n "$MAKEFILE_PATH" ]; then
+              cd $(dirname "$MAKEFILE_PATH")
+              echo "✓ Déplacement dans : $(pwd)"
+            else
+              echo "❌ Impossible de trouver les sources du noyau (Makefile manquant)."
+              exit 1
+            fi
+          fi
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
@@ -51,15 +72,15 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # Liaison native de KernelSU au build-system dans kernel_src
+          # Liaison native de KernelSU au build-system
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
-          echo "Création du miroir structurel attendu par le patch SusFS à la racine des sources..."
+          echo "Création du miroir structurel attendu par le patch SusFS..."
           mkdir -p kernelSU
           cp drivers/kernelsu/kernel/ksu.h kernelSU/ksu.h
           
-          # Injection des stubs de sécurité pour éviter le nettoyage destructeur par sed
+          # Injection des stubs de sécurité
           {
             echo -e "\n/* --- Stubs de sécurité SusFS --- */"
             echo "#define ksu_handle_faccessat(...) do {} while(0)"
@@ -101,7 +122,7 @@ jobs:
 
           # Correction de la structure mmap_sem propre à LineageOS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
-
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
