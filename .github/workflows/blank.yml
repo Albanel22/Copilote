@@ -32,6 +32,11 @@ jobs:
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
 
+      - name: Clone Motorola Kernel Source
+        run: |
+          echo "📥 Récupération des sources du noyau..."
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -43,27 +48,10 @@ jobs:
         run: |
           set -e
           
-          echo "🔍 Vérification de l'emplacement actuel :"
-          pwd
-          ls -la
-          
-          # On cherche où se trouve réellement le dossier contenant le Makefile du noyau
-          if [ -f "Makefile" ]; then
-            echo "✓ Noyau trouvé à la racine du dépôt."
-          elif [ -d "kernel_src" ]; then
-            echo "✓ Dossier kernel_src trouvé. Déplacement..."
-            cd kernel_src
-          else
-            echo "⚠️ Structure inconnue, recherche du Makefile..."
-            MAKEFILE_PATH=$(find . -maxdepth 3 -name "Makefile" | grep -v "out/" | head -n 1)
-            if [ -n "$MAKEFILE_PATH" ]; then
-              cd $(dirname "$MAKEFILE_PATH")
-              echo "✓ Déplacement dans : $(pwd)"
-            else
-              echo "❌ Impossible de trouver les sources du noyau (Makefile manquant)."
-              exit 1
-            fi
-          fi
+          # Copie de ton defconfig personnel dans les sources clonées
+          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+
+          cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
