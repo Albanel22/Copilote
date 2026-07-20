@@ -32,10 +32,6 @@ jobs:
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
 
-      - name: Clone Kernel Source
-        run: |
-          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -43,28 +39,42 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Propre de SusFS & KernelSU
+      - name: 📂 Intégration Structurelle SusFS & KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
 
-          echo "🧼 Nettoyage des dossiers obsolètes..."
-          rm -rf drivers/kernelsu || true
+          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
+          rm -rf drivers/kernelsu kernelSU || true
 
           echo "📥 Téléchargement de KernelSU v0.9.5..."
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
 
-          # Liaison native de KernelSU au build-system
+          # Liaison native de KernelSU au build-system dans kernel_src
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
+
+          echo "Création du miroir structurel attendu par le patch SusFS à la racine des sources..."
+          mkdir -p kernelSU
+          cp drivers/kernelsu/kernel/ksu.h kernelSU/ksu.h
+          
+          # Injection des stubs de sécurité pour éviter le nettoyage destructeur par sed
+          {
+            echo -e "\n/* --- Stubs de sécurité SusFS --- */"
+            echo "#define ksu_handle_faccessat(...) do {} while(0)"
+            echo "#define ksu_handle_stat(...) do {} while(0)"
+            echo "#define ksu_handle_vfs_read(...) do {} while(0)"
+            echo "#define ksu_handle_setattr(...) do {} while(0)"
+            echo "#define ksu_handle_sys_read(...) do {} while(0)"
+          } >> kernelSU/ksu.h
 
           echo "📥 Téléchargement et application de SusFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
-          # Application brute du patch (on laisse faire l'outil natif sans retoucher les fichiers)
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec quelques décalages acceptables"
+          # Application du patch d'origine
+          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec décalages"
 
           # Application du patch SusFS spécifique à KernelSU
           if [ -d susfs4ksu/kernel_patches/KernelSU ]; then
@@ -81,12 +91,15 @@ jobs:
 
           rm -rf susfs4ksu
 
-          echo "🛠️ Injection du Header de sécurité Anti-Avalanche..."
-          # On ajoute nos définitions de secours tout en haut du header susfs.h
-          # Cela va neutraliser les résidus de ksu_handle_ obsolètes sans casser la syntaxe C des fichiers du noyau
-          sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>\n#define vm_flags_t unsigned long\n#ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif\n#define ksu_handle_faccessat(...) do {} while(0)\n#define ksu_handle_stat(...) do {} while(0)\n#define ksu_handle_vfs_read(...) do {} while(0)\n#define ksu_handle_setattr(...) do {} while(0)\n#define ksu_handle_sys_read(...) do {} while(0)' include/linux/susfs.h
+          echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
+          sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
+          sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
+          
+          if ! grep -q "SUSFS_MAX_LEN_PATHNAME" include/linux/susfs.h; then
+            sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
+          fi
 
-          # Correction d'une divergence de structure propre aux branches Android 11+ (mmap_sem -> mmap_lock)
+          # Correction de la structure mmap_sem propre à LineageOS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
 
       - name: Multi-stage Kernel Compilation
@@ -100,16 +113,14 @@ jobs:
           ccache -M ${{ env.CCACHE_SIZE }}
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          
-          # LE CHEAT CODE : On force l'activation globale de SusFS et on force l'inclusion de notre header de secours partout
-          export KCFLAGS="-Wno-error -DCONFIG_KSU_SUSFS=1 -DCONFIG_KSU_SUSFS_SUS_PATH=1 -DCONFIG_KSU_SUSFS_SUS_MOUNT=1 -DCONFIG_KSU_SUSFS_TRY_UMOUNT=1 -DCONFIG_KSU_SUSFS_SPOOF_UNAME=1 -include linux/susfs.h"
+          export KCFLAGS="-Wno-error"
           
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Consolidation du fichier .config étendu
+          # Forçage des drapeaux de configuration
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -126,7 +137,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Ajustements indispensables spécifiques au code source Motorola (Dalle tactile & Signatures)
+          # Fixs signatures modules & Dalle tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
