@@ -11,7 +11,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260628/boot.img'
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
 
 jobs:
   build:
