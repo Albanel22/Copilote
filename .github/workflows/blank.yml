@@ -47,7 +47,7 @@ jobs:
 
       - name: ⚙️ Setup Environment & Dependencies Additions
         run: |
-          sudo apt-get install -y build-time-reducer ca-certificates python3-pip rsync zlib1g-dev
+          sudo apt-get install -y ca-certificates python3-pip rsync zlib1g-dev
 
       - name: 📂 Intégration Structurelle SusFS & ReSukiSU (Manual Hooks)
         run: |
@@ -257,9 +257,9 @@ jobs:
           --- a/fs/stat.c
           +++ b/fs/stat.c
           @@ -165,6 +165,9 @@ EXPORT_SYMBOL(vfs_statx_fd);
-           *
-           * 0 will be returned on success, and a -ve error code if unsuccessful.
-           */
+            *
+            * 0 will be returned on success, and a -ve error code if unsuccessful.
+            */
           #ifdef CONFIG_KSU
           extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
           #endif
@@ -282,9 +282,9 @@ jobs:
           --- a/kernel/reboot.c
           +++ b/kernel/reboot.c
           @@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
-           *
-           * reboot doesn't sync: do that yourself before calling this.
-           */
+            *
+            * reboot doesn't sync: do that yourself before calling this.
+            */
           #ifdef CONFIG_KSU
           extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
           #endif
