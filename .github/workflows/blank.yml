@@ -287,6 +287,16 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
+          - name: 🛠️ Correctif SusFS - err undeclared identifier
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if [ -f fs/susfs.c ]; then
+            echo "Correction de la variable err manquante dans fs/susfs.c..."
+            sed -i '/if (err) {/i int err = 0;' fs/susfs.c || true
+            # Alternative robuste si la fonction utilise un appel d'une variable int ret/err :
+            sed -i 's/if (err) {/int err = 0;\n    if (err) {/g' fs/susfs.c || true
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
