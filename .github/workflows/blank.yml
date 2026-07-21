@@ -34,8 +34,8 @@ jobs:
 
       - name: Clone Motorola Kernel Source
         run: |
-          echo "📥 Récupération de tes sources du noyau (déjà patchées)..."
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          echo "📥 Récupération de ton fork personnalisé..."
+          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
           # Note: Si tu as poussé tes sources modifiées sur ton propre dépôt de kernel, remplace l'URL ci-dessus par ton propre repo de kernel !
 
       - name: Setup ccache
