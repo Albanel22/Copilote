@@ -245,47 +245,52 @@ jobs:
           echo "📥 Téléchargement et application de SusFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          
+        
           # Application du patch d'origine de SusFS
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
-          # 🔍 AJOUTE CES LIGNES ICI POUR VOIR LES ERREURS DANS LES LOGS :
-          if [ -f fs/open.c.rej ]; then
-            echo "--- CONTENU DE fs/open.c.rej ---"
-            cat fs/open.c.rej
+          echo "🔧 Correction ciblée des hunks rejetés de SusFS..."
+
+          # 1. Injection propre dans fs/proc/task_mmu.c
+          if ! grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c; then
+          sed -i '/#include "internal.h"/a \
+          \
+          #ifdef CONFIG_KSU_SUSFS\
+          #include <linux/susfs.h>\
+          #endif' fs/proc/task_mmu.c
+          echo "✅ fs/proc/task_mmu.c corrigé avec succès !"
           fi
-          
-          if [ -f fs/proc/task_mmu.c.rej ]; then
-            echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
-            cat fs/proc/task_mmu.c.rej
-          fi
+
+          # 2. Correction directe de fs/open.c en une ligne (sans Python)
+          sed -i '/unsigned int lookup_flags = LOOKUP_FOLLOW;/a \
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif' fs/open.c || true
 
           echo "📦 Copie des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          
+        
           # Inclusion de susfs.o en dur dans le Makefile de fs/
           if ! grep -q "susfs.o" fs/Makefile; then 
-            echo 'obj-y += susfs.o' >> fs/Makefile
+          echo 'obj-y += susfs.o' >> fs/Makefile
           fi
-          
+        
           # Neutralisation propre de path_umount pour éviter l'erreur du linker
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
-          
+        
           rm -rf susfs4ksu
 
           echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
           sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
           sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
-          
+        
           if ! grep -q "SUSFS_MAX_LEN_PATHNAME" include/linux/susfs.h; then
-            sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
+          sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
           fi
 
           # Correction de la structure mmap_sem propre à LineageOS & inclusion SusFS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
+          sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
           
