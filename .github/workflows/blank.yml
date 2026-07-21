@@ -292,7 +292,8 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
           
           echo "🚀 Lancement de la compilation du noyau..."
-          make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu-
+          # AJOUT DE HOSTCFLAGS="-Wno-error" pour ignorer les erreurs de syntaxe/warnings sur les outils hôtes récents
+          make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-error"
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "❌ Erreur : Image du noyau introuvable."
