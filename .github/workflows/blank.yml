@@ -1,63 +1,40 @@
-name: Kernel CI — build & package
+name: 🚀 Build Custom Kernel & Repack Boot.img
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 env:
+  KERNEL_REPO: https://github.com/Albanel22/android_kernel_motorola_sm8250
+  KERNEL_BRANCH: lineage-23.2
   KERNEL_PATH: kernel_src
-  BUILD_DIR: out
-  ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
-  CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
+  BOOT_IMG_URL: https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img
 
 jobs:
-  build:
+  build-kernel:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout Repository
+      - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: ⚙️ Setup Environment & Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+          sudo apt-get install -y bc bison build-time-reducer ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget unzip
 
-      - name: Download Stock Boot Image
-        shell: bash
+      - name: 📥 Download Kernel Source & Official Boot.img
         run: |
-          set -euo pipefail
-          echo "📥 Téléchargement du boot.img d'origine..."
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
-
-      - name: Clone Motorola Kernel Source
-        run: |
-          echo "📥 Récupération des sources du noyau..."
-          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
-      - name: Setup ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-
-      - name: ⚙️ Setup Environment & Dependencies Additions
-        run: |
-          sudo apt-get install -y ca-certificates python3-pip rsync zlib1g-dev
+          git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
+          wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
       - name: 📂 Intégration Structurelle SusFS & ReSukiSU (Manual Hooks)
         run: |
           set -e
           
-          # Vérification de l'existence du defconfig personnalisé, sinon utilisation du defconfig natif
-          if [ -f "kiev_perfect_defconfig" ]; then
-            cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          fi
-
           cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
@@ -75,10 +52,8 @@ jobs:
           mkdir -p KernelSU/kernel/tools drivers/kernelsu/kernel/tools
           touch KernelSU/kernel/tools/inline_hook_check.mk drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
 
-          # Copie globale pour le noyau
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-
-          # Copie ultra-élargie pour ReSukiSU
+          
           mkdir -p drivers/kernelsu/include/linux
           mkdir -p drivers/kernelsu/kernel/include/linux
           mkdir -p drivers/kernelsu/include
@@ -86,7 +61,6 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/kernel/include/linux/
           cp -r susfs4ksu/kernel_patches/include/linux/*.h drivers/kernelsu/include/
           cp -r susfs4ksu/kernel_patches/include/linux/*.h drivers/kernelsu/
-          # ---------------------------------------------------------
           
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
@@ -96,12 +70,10 @@ jobs:
           
           if [ -f drivers/kernelsu/uapi/ksu.h ]; then
             cp drivers/kernelsu/uapi/ksu.h kernelSU/ksu.h
-            echo "✅ Fichier uapi/ksu.h copié avec succès vers kernelSU/ksu.h"
           else
             KSU_H_PATH=$(find drivers/kernelsu -name "ksu.h" | head -n 1)
             if [ -n "$KSU_H_PATH" ]; then
               cp "$KSU_H_PATH" kernelSU/ksu.h
-              echo "✅ Fichier ksu.h trouvé via find et copié depuis $KSU_H_PATH"
             else
               touch kernelSU/ksu.h
             fi
@@ -116,65 +88,42 @@ jobs:
             echo "#define ksu_handle_sys_read(...) do {} while(0)"
           } >> kernelSU/ksu.h
 
-          echo "📥 Application ciblée des Manual Hooks & modifications de fichiers sensibles..."
+          echo "📥 Application ciblée des Manual Hooks..."
           
-          # 1. fs/open.c
           python3 -c '
           path = "fs/open.c"
           with open(path, "r") as f:
               content = f.read()
-
           target = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-          hook = """#ifdef CONFIG_KSU
-          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
-          #endif
-          """
-          body_target = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{"
-          body_replacement = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
-
+          hook = """#ifdef CONFIG_KSU\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n"""
+          body_target = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n\tint res;"
+          body_replacement = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n\tint res;\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
           if "ksu_handle_faccessat" not in content:
-              if target in content:
-                  content = content.replace(target, hook + target, 1)
-              if body_target in content:
-                  content = content.replace(body_target, body_replacement, 1)
-              with open(path, "w") as f:
-                  f.write(content)
-              print("✅ Hook fs/open.c injecté avec succès.")
-          else:
-              print("ℹ️ Hook fs/open.c déjà présent.")
+              if target in content: content = content.replace(target, hook + target, 1)
+              if body_target in content: content = content.replace(body_target, body_replacement, 1)
+              with open(path, "w") as f: f.write(content)
           '
 
-          # 2. fs/proc/task_mmu.c
           python3 -c '
           path = "fs/proc/task_mmu.c"
-          with open(path, "r") as f:
-              content = f.read()
-
+          with open(path, "r") as f: content = f.read()
           content = content.replace("mmap_sem", "mmap_lock")
-
-          if "linux/susfs.h" not in content:
-              content = "#include <linux/susfs.h>\n" + content
-
-          with open(path, "w") as f:
-              f.write(content)
-          print("✅ Traitement de fs/proc/task_mmu.c effectué avec succès.")
+          if "linux/susfs.h" not in content: content = "#include <linux/susfs.h>\n" + content
+          with open(path, "w") as f: f.write(content)
           '
 
-          # 3. Patchs additionnels (manual_hooks.patch)
           cat << 'EOF' > manual_hooks.patch
           From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
           From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
           Date: Mon, 24 Nov 2025 13:04:18 +0000
           Subject: [PATCH] RKSU: Add manual hook support minus open.c
-
           ---
-           drivers/input/input.c |  8 ++++++++
-           fs/exec.c             | 13 +++++++++++++
-           fs/read_write.c       |  9 +++++++++
-           fs/stat.c             |  7 +++++++
-           kernel/reboot.c       |  7 +++++++
-           5 files changed, 44 insertions(+)
-
+          drivers/input/input.c |  8 ++++++++
+          fs/exec.c             | 13 +++++++++++++
+          fs/read_write.c       |  9 +++++++++
+          fs/stat.c             |  7 +++++++
+          kernel/reboot.c       |  7 +++++++
+          5 files changed, 44 insertions(+)
           diff --git a/drivers/input/input.c b/drivers/input/input.c
           index 45fdb9bdf08d..db5db9a858d5 100644
           --- a/drivers/input/input.c
@@ -182,7 +131,6 @@ jobs:
           @@ -375,11 +375,19 @@ static int input_get_disposition(struct input_dev *dev,
           	return disposition;
           }
-          
           #ifdef CONFIG_KSU
           extern bool ksu_input_hook __read_mostly;
           extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
@@ -191,14 +139,12 @@ jobs:
           					 unsigned int type, unsigned int code, int value)
           {
           	int disposition = input_get_disposition(dev, type, code, &value);
-          
           #ifdef CONFIG_KSU
           	if (unlikely(ksu_input_hook))
           		ksu_handle_input_handle_event(&type, &code, &value);
           #endif
           	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
           		add_input_randomness(type, code, value);
-          
           diff --git a/fs/exec.c b/fs/exec.c
           index d50d65857823..1199c1216a49 100644
           --- a/fs/exec.c
@@ -206,7 +152,6 @@ jobs:
           @@ -1904,11 +1904,24 @@ static int __do_execve_file(int fd, struct filename *filename,
           	return retval;
           }
-          
           #ifdef CONFIG_KSU
           extern bool ksu_execveat_hook __read_mostly;
           extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
@@ -227,7 +172,6 @@ jobs:
           #endif
           	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
           }
-          
           diff --git a/fs/read_write.c b/fs/read_write.c
           index 93d06b4c5f78..40b1bb3f33e0 100644
           --- a/fs/read_write.c
@@ -235,7 +179,6 @@ jobs:
           @@ -443,10 +443,19 @@ ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
           }
           EXPORT_SYMBOL_NS(kernel_read, ANDROID_GKI_VFS_EXPORT_ONLY);
-          
           #ifdef CONFIG_KSU
           extern bool ksu_vfs_read_hook __read_mostly;
           extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
@@ -244,7 +187,6 @@ jobs:
           ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
           {
           	ssize_t ret;
-          
           #ifdef CONFIG_KSU 
           	if (unlikely(ksu_vfs_read_hook))
           		ksu_handle_vfs_read(&file, &buf, &count, &pos);
@@ -257,9 +199,9 @@ jobs:
           --- a/fs/stat.c
           +++ b/fs/stat.c
           @@ -165,6 +165,9 @@ EXPORT_SYMBOL(vfs_statx_fd);
-            *
-            * 0 will be returned on success, and a -ve error code if unsuccessful.
-            */
+           *
+           * 0 will be returned on success, and a -ve error code if unsuccessful.
+           */
           #ifdef CONFIG_KSU
           extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
           #endif
@@ -268,23 +210,20 @@ jobs:
           {
           	int error = -EINVAL;
           	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
-          
           #ifdef CONFIG_KSU
           	ksu_handle_stat(&dfd, &filename, &flags);
           #endif
-          
           	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
           		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
           		return -EINVAL;
-          
           diff --git a/kernel/reboot.c b/kernel/reboot.c
           index 790c2f514a55..bcedeac75d3a 100644
           --- a/kernel/reboot.c
           +++ b/kernel/reboot.c
           @@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
-            *
-            * reboot doesn't sync: do that yourself before calling this.
-            */
+           *
+           * reboot doesn't sync: do that yourself before calling this.
+           */
           #ifdef CONFIG_KSU
           extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
           #endif
@@ -293,10 +232,9 @@ jobs:
           {
           	int ret = 0;
           	char buffer[256];
-          
           #ifdef CONFIG_KSU 
           	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-          
+          #endif
           	/* We only trust the superuser with rebooting the system. */
           	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
           		return -EPERM;
@@ -307,9 +245,8 @@ jobs:
 
           echo "📥 Application principale de SusFS..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages (poursuite...)"
+          patch -p1 < "$PATCH_FILE" || true
 
-          echo "📦 Copie et adaptation des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           
@@ -322,22 +259,18 @@ jobs:
           
           python3 -c '
           path = "fs/susfs.c"
-          with open(path, "r") as f:
-              content = f.read()
+          with open(path, "r") as f: content = f.read()
           target_code = "if (err) {"
           replacement_code = "int err = 0;\n\tif (err) {"
           if target_code in content and "int err = 0;" not in content:
               content = content.replace(target_code, replacement_code, 1)
           else:
               content = content.replace("int susfs_try_umount(", "int susfs_try_umount(void) {\n    int err = 0;\n    ")
-          with open(path, "w") as f:
-              f.write(content)
-          print("✅ Adaptation de fs/susfs.c terminée.")
+          with open(path, "w") as f: f.write(content)
           '
 
           rm -rf susfs4ksu
 
-          echo "🛠️ Alignement des types de données SusFS..."
           sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
           sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
           
@@ -347,74 +280,53 @@ jobs:
 
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
 
-      - name: Multi-stage Kernel Compilation
-        working-directory: ${{ env.KERNEL_PATH }}
+      - name: 🔨 Compilation & Repack du Boot.img
         run: |
-          set -uo pipefail
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          ccache -M ${{ env.CCACHE_SIZE }}
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS="-Wno-error"
+          cd ${{ env.KERNEL_PATH }}
           
-          mkdir -p ${{ env.BUILD_DIR }}
-          if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
-            cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          echo "⚙️ Configuration du defconfig..."
+          make O=out ${{ env.DEFCONFIG }}
+          
+          echo "🔧 Activation de KernelSU et SusFS dans le .config..."
+          scripts/config --file out/.config --enable CONFIG_KSU
+          scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          
+          echo "🚀 Lancement de la compilation du noyau..."
+          make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu-
+
+          if [ ! -f out/arch/arm64/boot/Image ]; then
+            echo "❌ Erreur : Image du noyau introuvable."
+            exit 1
+          fi
+
+          echo "📦 Repackage automatique avec magiskboot..."
+          cd ..
+          # Téléchargement de l'outil magiskboot pour Linux
+          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          unzip Magisk-v27.0.apk lib/armeabi-v7a/libmagiskboot.so
+          mv lib/armeabi-v7a/libmagiskboot.so magiskboot
+          chmod +x magiskboot
+
+          # Décompression du boot.img d'origine
+          ./magiskboot unpack boot.img
+
+          # Remplacement du noyau par l'Image compilée
+          cp ${{ env.KERNEL_PATH }}/out/arch/arm64/boot/Image kernel
+
+          # Repackage final
+          ./magiskboot repack boot.img
+          
+          mkdir -p output_artifacts
+          if [ -f new-boot.img ]; then
+            cp new-boot.img output_artifacts/new-boot.img
+            echo "✅ new-boot.img généré avec succès !"
+          else
+            echo "❌ Erreur lors du repackage du boot.img"
+            exit 1
           fi
           
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          
-          {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-          
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
-          
-          echo "🚀 Lancement de la compilation de l'Image..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
-
-      - name: Repack & Finalize
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p repack
-          cp boot-stock.img repack/boot.img
-          
-          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
-          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
-          mv lib/x86_64/libmagiskboot.so repack/magiskboot
-          chmod +x repack/magiskboot
-          rm -rf Magisk-v27.0.apk lib/
-          
-          cd repack
-          ./magiskboot unpack boot.img
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../final_boot.img
-          
-          cd ..
-          mkdir -p final_output
-          mv final_boot.img final_output/boot.img
-
-      - name: Upload Finished Packaged Assets
+      - name: 📤 Upload du new-boot.img Prêt à Flasher
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola_final
-          path: final_output/boot.img
+          name: motorola-kiev-new-boot
+          path: output_artifacts/new-boot.img
