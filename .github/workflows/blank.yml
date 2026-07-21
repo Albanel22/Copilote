@@ -265,14 +265,32 @@ jobs:
           
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
-          echo "📦 Copie des fichiers d'infrastructure SusFS..."
+                    echo "📦 Copie et adaptation des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
+          # Nettoyage chirurgical des déclarations 'err' en double via Python
+          python3 -c '
+          path = "fs/susfs.c"
+          with open(path, "r") as f:
+              lines = f.readlines()
+
+          new_lines = []
+          for line in lines:
+              if "int err = 0;" in line:
+                  continue
+              new_lines.append(line)
+
+          with open(path, "w") as f:
+              f.writelines(new_lines)
+          print("✅ Nettoyage de fs/susfs.c effectué avec succès.")
+          '
+
           rm -rf susfs4ksu
+
 
           echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
           sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
@@ -285,16 +303,6 @@ jobs:
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
-
-      - name: 🛠️ Correctif SusFS - err undeclared identifier
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f fs/susfs.c ]; then
-            echo "Correction de la variable err manquante dans fs/susfs.c..."
-            sed -i '/if (err) {/i int err = 0;' fs/susfs.c || true
-            # Alternative robuste si la fonction utilise un appel d'une variable int ret/err :
-            sed -i 's/if (err) {/int err = 0;\n    if (err) {/g' fs/susfs.c || true
           fi
 
       - name: Multi-stage Kernel Compilation
