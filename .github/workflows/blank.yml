@@ -24,7 +24,7 @@ jobs:
       - name: ⚙️ Setup Environment & Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-time-reducer ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget unzip
+          sudo apt-get install -y bc bison ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget unzip
 
       - name: 📥 Download Kernel Source & Official Boot.img
         run: |
@@ -301,19 +301,13 @@ jobs:
 
           echo "📦 Repackage automatique avec magiskboot..."
           cd ..
-          # Téléchargement de l'outil magiskboot pour Linux
           curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
           unzip Magisk-v27.0.apk lib/armeabi-v7a/libmagiskboot.so
           mv lib/armeabi-v7a/libmagiskboot.so magiskboot
           chmod +x magiskboot
 
-          # Décompression du boot.img d'origine
           ./magiskboot unpack boot.img
-
-          # Remplacement du noyau par l'Image compilée
           cp ${{ env.KERNEL_PATH }}/out/arch/arm64/boot/Image kernel
-
-          # Repackage final
           ./magiskboot repack boot.img
           
           mkdir -p output_artifacts
