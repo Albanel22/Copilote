@@ -59,10 +59,19 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           cd drivers/kernelsu && rm -rf .git && cd ../..
 
-          # --- Neutralisation du contrôle via le bon chemin (KernelSU) ---
+          # --- Neutralisation et copie blindée des en-têtes SusFS ---
           rm -f KernelSU/kernel/tools/inline_hook_check.mk || true
           touch KernelSU/kernel/tools/inline_hook_check.mk || true
-          # -------------------------------------------------------------
+
+          # Copie globale pour le noyau
+          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+
+          # Copie ciblée et structurelle pour ReSukiSU dans TOUS ses sous-dossiers potentiels d'includes
+          mkdir -p drivers/kernelsu/include/linux
+          mkdir -p drivers/kernelsu/kernel/include/linux
+          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/include/linux/
+          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/kernel/include/linux/
+          # ---------------------------------------------------------
           
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
