@@ -317,6 +317,23 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
+          # ========================================================
+          # 📂 APPLICATION DES VOS PATCHS LOCAUX DE MANUAL HOOKS :
+          # ========================================================
+          echo "📂 Application de vos patchs locaux (stat, open, read_write, selinux)..."
+          for patch in ../patches/*.patch; do
+            if [ -f "$patch" ]; then
+              echo "Application de $(basename "$patch")..."
+              git apply --stat "$patch" || true
+              git apply "$patch" || {
+                echo "❌ Erreur lors de l'application du patch $patch"
+                exit 1
+              }
+            fi
+          done
+          echo "✅ Tous vos patchs locaux ont été appliqués avec succès !"
+          # ========================================================
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
