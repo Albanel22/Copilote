@@ -1,29 +1,62 @@
-name: 🚀 Build Custom Kernel with KernelSU & SusFS
+name: Kernel CI — build & package
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  KERNEL_PATH: kernel_src
+  BUILD_DIR: out
+  ARCH: arm64
+  DEFCONFIG: lito-perf_defconfig
+  CCACHE_SIZE: 5G
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: 📥 Checkout Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup Environment & Dependencies
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-time-reducer ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev
+          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
+      - name: Download Stock Boot Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📥 Téléchargement du boot.img d'origine..."
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
+
+      - name: Clone Motorola Kernel Source
+        run: |
+          echo "📥 Récupération des sources du noyau..."
+          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-kernel
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: ⚙️ Setup Environment & Dependencies Additions
+        run: |
+          sudo apt-get install -y build-time-reducer ca-certificates python3-pip rsync zlib1g-dev
 
       - name: 📂 Intégration Structurelle SusFS & ReSukiSU (Manual Hooks)
         run: |
           set -e
           
-          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          # Vérification de l'existence du defconfig personnalisé, sinon utilisation du defconfig natif
+          if [ -f "kiev_perfect_defconfig" ]; then
+            cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          fi
 
           cd ${{ env.KERNEL_PATH }}
 
@@ -45,7 +78,7 @@ jobs:
           # Copie globale pour le noyau
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
 
-          # Copie ultra-élargie pour ReSukiSU (pour que sucompat.c trouve tous les susfs_*.h)
+          # Copie ultra-élargie pour ReSukiSU
           mkdir -p drivers/kernelsu/include/linux
           mkdir -p drivers/kernelsu/kernel/include/linux
           mkdir -p drivers/kernelsu/include
@@ -85,12 +118,12 @@ jobs:
 
           echo "📥 Application ciblée des Manual Hooks & modifications de fichiers sensibles..."
           
-          # 1. fs/open.c (Injection sécurisée du hook faccessat via Python)
+          # 1. fs/open.c
           python3 -c '
           path = "fs/open.c"
           with open(path, "r") as f:
               content = f.read()
-          
+
           target = "long do_faccessat(int dfd, const char __user *filename, int mode)"
           hook = """#ifdef CONFIG_KSU
           extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
@@ -111,7 +144,7 @@ jobs:
               print("ℹ️ Hook fs/open.c déjà présent.")
           '
 
-          # 2. fs/proc/task_mmu.c (Injection sécurisée de l'en-tête et adaptation mmap_sem/mmap_lock)
+          # 2. fs/proc/task_mmu.c
           python3 -c '
           path = "fs/proc/task_mmu.c"
           with open(path, "r") as f:
@@ -127,7 +160,7 @@ jobs:
           print("✅ Traitement de fs/proc/task_mmu.c effectué avec succès.")
           '
 
-          # 3. Application des autres hooks manuels restants via patch standard
+          # 3. Patchs additionnels (manual_hooks.patch)
           cat << 'EOF' > manual_hooks.patch
           From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
           From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
@@ -135,12 +168,12 @@ jobs:
           Subject: [PATCH] RKSU: Add manual hook support minus open.c
 
           ---
-          drivers/input/input.c |  8 ++++++++
-          fs/exec.c             | 13 +++++++++++++
-          fs/read_write.c       |  9 +++++++++
-          fs/stat.c             |  7 +++++++
-          kernel/reboot.c       |  7 +++++++
-          5 files changed, 44 insertions(+)
+           drivers/input/input.c |  8 ++++++++
+           fs/exec.c             | 13 +++++++++++++
+           fs/read_write.c       |  9 +++++++++
+           fs/stat.c             |  7 +++++++
+           kernel/reboot.c       |  7 +++++++
+           5 files changed, 44 insertions(+)
 
           diff --git a/drivers/input/input.c b/drivers/input/input.c
           index 45fdb9bdf08d..db5db9a858d5 100644
@@ -263,7 +296,6 @@ jobs:
           
           #ifdef CONFIG_KSU 
           	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-          #endif
           
           	/* We only trust the superuser with rebooting the system. */
           	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
@@ -281,7 +313,6 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           
-          # Copie additionnelle pour que ReSukiSU trouve les en-têtes SusFS en interne
           mkdir -p drivers/kernelsu/include/linux
           cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/include/linux/
 
@@ -289,7 +320,6 @@ jobs:
           
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
-          # Nettoyage chirurgical de la variable 'err' via Python
           python3 -c '
           path = "fs/susfs.c"
           with open(path, "r") as f:
@@ -307,7 +337,7 @@ jobs:
 
           rm -rf susfs4ksu
 
-          echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
+          echo "🛠️ Alignement des types de données SusFS..."
           sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
           sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
           
@@ -317,42 +347,74 @@ jobs:
 
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
 
-          # ========================================================
-          # 📂 APPLICATION DE VOS PATCHS LOCAUX INDIVIDUELS :
-          # ========================================================
-          echo "📂 Application de vos patchs locaux..."
-          for patch in ../patches/*.patch; do
-            if [ -f "$patch" ]; then
-              echo "➡️ Application de : $(basename "$patch")"
-              patch -p1 --forward < "$patch" || {
-                echo "⚠️ Avertissement ou erreur mineure sur $patch (poursuite...)"
-              }
-            fi
-          done
-          echo "✅ Application des patchs terminée !"
-          # ========================================================
-
-      - name: 🔨 Compilation & Repack du Noyau
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          cd ${{ env.KERNEL_PATH }}
+          set -uo pipefail
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
+          ccache -M ${{ env.CCACHE_SIZE }}
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
           
-          echo "⚙️ Configuration du defconfig..."
-          make O=out ${{ env.DEFCONFIG }}
+          mkdir -p ${{ env.BUILD_DIR }}
+          if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
+            cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          fi
           
-          echo "🔧 Activation de KernelSU et SusFS dans le .config..."
-          scripts/config --file out/.config --enable CONFIG_KSU
-          scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          echo "🚀 Lancement de la compilation du noyau..."
-          make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu-
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+          
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
+          
+          echo "🚀 Lancement de la compilation de l'Image..."
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
-          echo "📦 Extraction et repackage de l'image (AnyKernel3 / Repack)..."
-          # (Insérez ici vos commandes de repackage ou d'archivage des artefacts)
-          mkdir -p ../output_artifacts
-          cp out/arch/arm64/boot/Image ../output_artifacts/
+      - name: Repack & Finalize
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p repack
+          cp boot-stock.img repack/boot.img
           
-      - name: 📤 Upload des Artefacts du Noyau
+          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
+          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
+          mv lib/x86_64/libmagiskboot.so repack/magiskboot
+          chmod +x repack/magiskboot
+          rm -rf Magisk-v27.0.apk lib/
+          
+          cd repack
+          ./magiskboot unpack boot.img
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          ./magiskboot repack boot.img new-boot.img
+          mv new-boot.img ../final_boot.img
+          
+          cd ..
+          mkdir -p final_output
+          mv final_boot.img final_output/boot.img
+
+      - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
-          name: custom-kernel-image
-          path: output_artifacts/Image
+          name: kernel-motorola_final
+          path: final_output/boot.img
