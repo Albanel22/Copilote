@@ -48,7 +48,6 @@ jobs:
         run: |
           set -e
           
-          # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
 
           cd ${{ env.KERNEL_PATH }}
@@ -60,15 +59,25 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           cd drivers/kernelsu && rm -rf .git && cd ../..
 
-          # Liaison native de ReSukiSU au build-system
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
           echo "Création du miroir structurel attendu par le patch SusFS..."
           mkdir -p kernelSU
-          cp drivers/kernelsu/kernel/ksu.h kernelSU/ksu.h
           
-          # Injection des stubs de sécurité
+          if [ -f drivers/kernelsu/uapi/ksu.h ]; then
+            cp drivers/kernelsu/uapi/ksu.h kernelSU/ksu.h
+            echo "✅ Fichier uapi/ksu.h copié avec succès vers kernelSU/ksu.h"
+          else
+            KSU_H_PATH=$(find drivers/kernelsu -name "ksu.h" | head -n 1)
+            if [ -n "$KSU_H_PATH" ]; then
+              cp "$KSU_H_PATH" kernelSU/ksu.h
+              echo "✅ Fichier ksu.h trouvé via find et copié depuis $KSU_H_PATH"
+            else
+              touch kernelSU/ksu.h
+            fi
+          fi
+          
           {
             echo -e "\n/* --- Stubs de sécurité SusFS --- */"
             echo "#define ksu_handle_faccessat(...) do {} while(0)"
@@ -79,7 +88,6 @@ jobs:
           } >> kernelSU/ksu.h
 
           echo "📥 Application des Manual Hooks officiels pour Kernel 4.19 (ResukiSu)..."
-          # On crée et applique directement le patch des manual hooks
           cat << 'EOF' > manual_hooks.patch
           From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
           From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
@@ -255,7 +263,6 @@ jobs:
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
           
-          # Application du patch d'origine de SusFS
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
           echo "📦 Copie des fichiers d'infrastructure SusFS..."
@@ -263,7 +270,6 @@ jobs:
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
-          # Neutralisation propre de path_umount pour éviter l'erreur du linker
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
           rm -rf susfs4ksu
@@ -276,7 +282,6 @@ jobs:
             sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
           fi
 
-          # Correction de la structure mmap_sem propre à LineageOS & inclusion SusFS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
@@ -300,7 +305,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -317,7 +321,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Fixs signatures modules & Dalle tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
