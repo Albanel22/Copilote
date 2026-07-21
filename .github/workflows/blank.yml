@@ -53,7 +53,10 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU || true
+          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+
+          echo "📥 Téléchargement de SusFS en amont..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
 
           echo "📥 Téléchargement de ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
@@ -274,10 +277,8 @@ jobs:
           patch -p1 < manual_hooks.patch || echo "⚠️ Patch manual hooks appliqué avec des décalages"
           rm -f manual_hooks.patch
 
-          echo "📥 Téléchargement et application de SusFS..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
+          echo "📥 Application principale de SusFS..."
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
           echo "📦 Copie et adaptation des fichiers d'infrastructure SusFS..."
@@ -292,7 +293,7 @@ jobs:
           
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
-          # Nettoyage chirurgical de la variable 'err' via Python (comme vu précédemment)
+          # Nettoyage chirurgical de la variable 'err' via Python
           python3 -c '
           path = "fs/susfs.c"
           with open(path, "r") as f:
@@ -338,7 +339,7 @@ jobs:
           done
           echo "✅ Application des patchs terminée !"
           # ========================================================
-
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
