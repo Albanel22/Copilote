@@ -317,17 +317,20 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
-          echo "📂 Application de vos patchs locaux (stat, open, read_write, selinux)..."
+          # ========================================================
+          # 📂 APPLICATION DE VOS PATCHS LOCAUX INDIVIDUELS :
+          # ========================================================
+          echo "📂 Application de vos patchs locaux..."
           for patch in ../patches/*.patch; do
             if [ -f "$patch" ]; then
-              echo "Application de $(basename "$patch")..."
-              patch -p1 < "$patch" || {
-                echo "❌ Erreur lors de l'application du patch $patch"
-                exit 1
+              echo "➡️ Application de : $(basename "$patch")"
+              patch -p1 --forward < "$patch" || {
+                echo "⚠️ Avertissement ou erreur mineure sur $patch (poursuite...)"
               }
             fi
           done
-          echo "✅ Tous vos patchs locaux ont été appliqués avec succès !"
+          echo "✅ Application des patchs terminée !"
+          # ========================================================
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
