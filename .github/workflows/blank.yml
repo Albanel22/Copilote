@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Structurelle SusFS & KernelSU (Manual Hooks)
+      - name: 📂 Intégration Structurelle SusFS & ReSukiSU (Manual Hooks)
         run: |
           set -e
           
@@ -56,11 +56,11 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
-          echo "📥 Téléchargement de KernelSU v0.9.5..."
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
+          echo "📥 Téléchargement de ReSukiSU..."
+          git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/kernelsu --depth=1
+          cd drivers/kernelsu && rm -rf .git && cd ../..
 
-          # Liaison native de KernelSU au build-system
+          # Liaison native de ReSukiSU au build-system
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
@@ -108,7 +108,7 @@ jobs:
           extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
           #endif
           static void input_handle_event(struct input_dev *dev,
-          			       unsigned int type, unsigned int code, int value)
+          			        unsigned int type, unsigned int code, int value)
           {
           	int disposition = input_get_disposition(dev, type, code, &value);
           
@@ -282,7 +282,6 @@ jobs:
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
 
-          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
