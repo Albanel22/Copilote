@@ -285,7 +285,7 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
           
           echo "⚙️ Configuration du defconfig..."
-          make O=out ${{ env.DEFCONFIG }}
+          make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
           echo "🔧 Activation de KernelSU et SusFS dans le .config..."
           scripts/config --file out/.config --enable CONFIG_KSU
