@@ -249,6 +249,17 @@ jobs:
           # Application du patch d'origine de SusFS
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
+          # 🔍 AJOUTE CES LIGNES ICI POUR VOIR LES ERREURS DANS LES LOGS :
+          if [ -f fs/open.c.rej ]; then
+            echo "--- CONTENU DE fs/open.c.rej ---"
+            cat fs/open.c.rej
+          fi
+          
+          if [ -f fs/proc/task_mmu.c.rej ]; then
+            echo "--- CONTENU DE fs/proc/task_mmu.c.rej ---"
+            cat fs/proc/task_mmu.c.rej
+          fi
+
           echo "📦 Copie des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
