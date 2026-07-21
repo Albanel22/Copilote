@@ -61,9 +61,6 @@ jobs:
         run: |
           set -e
           
-          # Téléchargement d'un patch de hooks propre ou application directe
-          curl -sSL "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" || true
-          
           # Téléchargement et application de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
@@ -71,17 +68,32 @@ jobs:
 
           python3 -c '
           import sys
-          for path, target, add in [
-              ("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"),
-              ("fs/open.c", "unsigned int lookup_flags = LOOKUP_FOLLOW;", "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif")
-          ]:
-              try:
-                  with open(path, "r") as f: c = f.read()
-                  if add.strip() not in c and target in c:
-                      with open(path, "w") as f: f.write(c.replace(target, target + add, 1))
-                      print(f"✅ {path} patché !")
-              except Exception as e:
-                  print(f"⚠️ Erreur sur {path}: {e}")
+          
+          # 1. Patch task_mmu.c
+          path = "fs/proc/task_mmu.c"
+          target = "#include \"internal.h\""
+          add = "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
+          with open(path, "r") as f: c = f.read()
+          if add.strip() not in c and target in c:
+              with open(path, "w") as f: f.write(c.replace(target, target + add, 1))
+              print(f"✅ {path} patché !")
+
+          # 2. Patch propre de fs/open.c directement dans do_faccessat
+          path = "fs/open.c"
+          with open(path, "r") as f: c = f.read()
+          
+          # On s"assure que l"en-tête ksu est présent si besoin ou on injecte l"appel au bon endroit
+          target_func = "long do_faccessat("
+          injection = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n"
+          
+          # Cherche et remplace la signature de la fonction pour y inclure l appel KSU au tout début
+          if "ksu_handle_faccessat" not in c:
+              # On cherche un pattern classique de la fonction do_faccessat
+              old_sig = "long do_faccessat(int dfd, const char __user *filename, int mode)"
+              if old_sig in c:
+                  c = c.replace(old_sig, "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif")
+                  with open(path, "w") as f: f.write(c)
+                  print("✅ fs/open.c injecté proprement dans do_faccessat !")
           '
 
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
