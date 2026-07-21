@@ -36,7 +36,27 @@ jobs:
         run: |
           echo "📥 Récupération de ton fork personnalisé..."
           git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-          # Note: Si tu as poussé tes sources modifiées sur ton propre dépôt de kernel, remplace l'URL ci-dessus par ton propre repo de kernel !
+
+      - name: Apply KernelSU Hooks & SusFS Integration
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          echo "--> Application du patch des hooks manuels KernelSU..."
+          curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/manual_hook/kernel-4.19_5.4.patch -o kernelsu_hooks.patch
+          patch -p1 < kernelsu_hooks.patch
+
+          echo "--> Intégration des composants SusFS..."
+          mkdir -p include/linux
+          mkdir -p fs/susfs
+
+          curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/susfs/include/linux/susfs.h -o include/linux/susfs.h
+          curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/susfs/fs/susfs/susfs.c -o fs/susfs/susfs.c
+          curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/susfs/fs/susfs/Makefile -o fs/susfs/Makefile
+          curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/susfs/fs/susfs/Kconfig -o fs/susfs/Kconfig
+
+          echo "obj-y += susfs/" >> fs/Makefile
+          echo 'source "fs/susfs/Kconfig"' >> fs/Kconfig
+          echo "--> Patchs et SusFS intégrés avec succès !"
 
       - name: Setup ccache
         uses: actions/cache@v4
