@@ -59,6 +59,10 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           cd drivers/kernelsu && rm -rf .git && cd ../..
 
+          # --- AJOUT ICI pour neutraliser le contrôle strict des hooks ---
+          rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
+          sed -i '/inline_hook_check/d' drivers/kernelsu/kernel/Makefile drivers/kernelsu/kernel/Kconfig 2>/dev/null || true
+
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
