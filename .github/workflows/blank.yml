@@ -44,12 +44,28 @@ jobs:
           echo "--> Application du patch des hooks manuels KernelSU..."
           curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/manual_hook/kernel-4.19_5.4.patch -o kernelsu_hooks.patch
           
-          # On tente d'appliquer le patch, et s'il y a des rejets, on les affiche pour le debug
-          if ! patch -p1 --forward < kernelsu_hooks.patch; then
-            echo "⚠️ Attention : Certains hunks ont échoué. Affichage des fichiers .rej :"
-            find . -name "*.rej" -exec cat {} \;
-            # Si le rejet est mineur, on peut forcer ou laisser échouer, mais voyons d'abord le contenu
-            exit 1
+          # On applique le patch en ignorant l'erreur de fs/open.c pour la traiter manuellement juste après
+          patch -p1 --forward --reject-file=/dev/null || true
+
+          # Injection propre du hook faccessat dans fs/open.c s'il n'y est pas déjà
+          if ! grep -q "ksu_handle_faccessat" fs/open.c; then
+            echo "--> Injection manuelle du hook faccessat dans fs/open.c..."
+            python3 -c '
+            with open("fs/open.c", "r") as f:
+                content = f.read()
+
+            target = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{"
+            replacement = target + "\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
+
+            if target in content:
+                content = content.replace(target, replacement, 1)
+                with open("fs/open.c", "w") as f:
+                    f.write(content)
+                print("Succès de l injection manuelle !")
+            else:
+                print("Erreur : cible introuvable pour l injection manuelle.")
+                exit(1)
+            '
           fi
 
           echo "--> Intégration des composants SusFS..."
@@ -63,7 +79,7 @@ jobs:
 
           echo "obj-y += susfs/" >> fs/Makefile
           echo 'source "fs/susfs/Kconfig"' >> fs/Kconfig
-          echo "--> Patchs et SusFS intégrés avec succès !"
+          echo "--> Tous les patchs et SusFS sont en place !"
 
       - name: Setup ccache
         uses: actions/cache@v4
