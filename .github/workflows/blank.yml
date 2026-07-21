@@ -44,235 +44,56 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Structurelle SusFS & KernelSU
+      - name: Intégration Structurelle SusFS & KernelSU
         run: |
           set -e
-          
-          # Copie de ton defconfig personnel directement au bon endroit dans vendor/
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-
           cd ${{ env.KERNEL_PATH }}
-
-          # 🧹 NETTOYAGE TOTAL ET RADICAL (Sources + Dossier out)
-          echo "🧹 Nettoyage profond de la racine (make mrproper) et du dossier de sortie..."
           make mrproper || true
-          rm -rf out || true
-
-          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU || true
-
-          echo "📥 Installation de KernelSU v0.9.5 via le setup officiel (pour la version 11872)..."
+          rm -rf out drivers/kernelsu kernelSU || true
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-
-          # Liaison au Kconfig (requis par le script officiel)
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then 
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
-          echo "📥 Application des Manual Hooks officiels pour Kernel 4.19 (ResukiSu)..."
-          cat << 'EOF' > manual_hooks.patch
-From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
-From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
-Date: Mon, 24 Nov 2025 13:04:18 +0000
-Subject: [PATCH] RKSU: Add manual hook support
-
----
- drivers/input/input.c |  8 ++++++++
- fs/exec.c             | 13 +++++++++++++
- fs/open.c             |  7 +++++++
- fs/read_write.c       |  9 +++++++++
- fs/stat.c             |  7 +++++++
- kernel/reboot.c       |  7 +++++++
- 6 files changed, 51 insertions(+)
-
-diff --git a/drivers/input/input.c b/drivers/input/input.c
-index 45fdb9bdf08d..db5db9a858d5 100644
---- a/drivers/input/input.c
-+++ b/drivers/input/input.c
-@@ -375,11 +375,19 @@ static int input_get_disposition(struct input_dev *dev,
- 	return disposition;
- }
- 
- #ifdef CONFIG_KSU
- extern bool ksu_input_hook __read_mostly;
- extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
- #endif
- static void input_handle_event(struct input_dev *dev,
- 			       unsigned int type, unsigned int code, int value)
- {
- 	int disposition = input_get_disposition(dev, type, code, &value);
- 
- #ifdef CONFIG_KSU
- 	if (unlikely(ksu_input_hook))
- 		ksu_handle_input_handle_event(&type, &code, &value);
- #endif
- 	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
- 		add_input_randomness(type, code, value);
- 
-diff --git a/fs/exec.c b/fs/exec.c
-index d50d65857823..1199c1216a49 100644
---- a/fs/exec.c
-+++ b/fs/exec.c
-@@ -1904,11 +1904,24 @@ static int __do_execve_file(int fd, struct filename *filename,
- 	return retval;
- }
- 
- #ifdef CONFIG_KSU
- extern bool ksu_execveat_hook __read_mostly;
- extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
- 			void *envp, int *flags);
- extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
- 				 void *argv, void *envp, int *flags);
- #endif
- static int do_execveat_common(int fd, struct filename *filename,
- 			      struct user_arg_ptr argv,
- 			      struct user_arg_ptr envp,
- 			      int flags)
- {
- #ifdef CONFIG_KSU
- 	if (unlikely(ksu_execveat_hook))
- 		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
- 	else
- 		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
- #endif
- 	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
- }
- 
-diff --git a/fs/open.c b/fs/open.c
-index 5c0043d4b807..98d50c79c414 100644
---- a/fs/open.c
-+++ b/fs/open.c
-@@ -345,6 +345,10 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
-  * We do this by temporarily clearing all FS-related capabilities and
-  * switching the fsuid/fsgid around to the real ones.
-  */
- #ifdef CONFIG_KSU
- extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
- 			 int *flags);
- #endif
- long do_faccessat(int dfd, const char __user *filename, int mode)
- {
- 	const struct cred *old_cred;
-@@ -354,6 +358,9 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
- 	int res;
- 	unsigned int lookup_flags = LOOKUP_FOLLOW;
- 
- #ifdef CONFIG_KSU
- 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
- #endif
- 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
- 		return -EINVAL;
- 
-diff --git a/fs/read_write.c b/fs/read_write.c
-index 93d06b4c5f78..40b1bb3f33e0 100644
---- a/fs/read_write.c
-+++ b/fs/read_write.c
-@@ -443,10 +443,19 @@ ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
- }
- EXPORT_SYMBOL_NS(kernel_read, ANDROID_GKI_VFS_EXPORT_ONLY);
- 
- #ifdef CONFIG_KSU
- extern bool ksu_vfs_read_hook __read_mostly;
- extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
- 			size_t *count_ptr, loff_t **pos);
- #endif
- ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
- {
- 	ssize_t ret;
- 
- #ifdef CONFIG_KSU 
- 	if (unlikely(ksu_vfs_read_hook))
- 		ksu_handle_vfs_read(&file, &buf, &count, &pos);
- #endif
- 	if (!(file->f_mode & FMODE_READ))
- 		return -EBADF;
- 	if (!(file->f_mode & FMODE_CAN_READ))
-diff --git a/fs/stat.c b/fs/stat.c
-index 298eb77668a7..bf6a3f937948 100644
---- a/fs/stat.c
-+++ b/fs/stat.c
-@@ -165,6 +165,9 @@ EXPORT_SYMBOL(vfs_statx_fd);
-  *
-  * 0 will be returned on success, and a -ve error code if unsuccessful.
-  */
- #ifdef CONFIG_KSU
- extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
- #endif
- int vfs_statx(int dfd, const char __user *filename, int flags,
- 	      struct kstat *stat, u32 request_mask)
- {
- 	int error = -EINVAL;
- 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
- 
- #ifdef CONFIG_KSU
- 	ksu_handle_stat(&dfd, &filename, &flags);
- #endif
- 
- 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
- 		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
- 		return -EINVAL;
- 
-diff --git a/kernel/reboot.c b/kernel/reboot.c
-index 790c2f514a55..bcedeac75d3a 100644
---- a/kernel/reboot.c
-+++ b/kernel/reboot.c
-@@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
-  *
-  * reboot doesn't sync: do that yourself before calling this.
-  */
- #ifdef CONFIG_KSU
- extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
- #endif
- SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
- 		void __user *, arg)
- {
- 	int res;
- 	int ret = 0;
- 	char buffer[256];
- 
- #ifdef CONFIG_KSU 
- 	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
- #endif
- 
- 	/* We only trust the superuser with rebooting the system. */
- 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
- 		return -EPERM;
- EOF
-
-          patch -p1 < manual_hooks.patch || echo "⚠️ Patch manual hooks appliqué avec des décalages"
-          rm -f manual_hooks.patch
-
-          echo "📥 Téléchargement et application de SusFS..."
+      - name: Application des Patches (KSU Hooks & SusFS)
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -e
+          
+          # Téléchargement d'un patch de hooks propre ou application directe
+          curl -sSL "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" || true
+          
+          # Téléchargement et application de SusFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
           PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          
-          # Application du patch d'origine de SusFS
           patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
 
-          echo "🔧 Sécurisation compacte des fichiers récalcitrants..."
-          python3 -c 'import sys
-for path, target, add in [("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"), ("fs/open.c", "unsigned int lookup_flags = LOOKUP_FOLLOW;", "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif")]:
-    with open(path, "r") as f: c = f.read()
-    if add.strip() not in c and target in c:
-        with open(path, "w") as f: f.write(c.replace(target, target + add, 1))
-        print(f"✅ {path} patché !")
-'
+          python3 -c '
+          import sys
+          for path, target, add in [
+              ("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"),
+              ("fs/open.c", "unsigned int lookup_flags = LOOKUP_FOLLOW;", "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif")
+          ]:
+              try:
+                  with open(path, "r") as f: c = f.read()
+                  if add.strip() not in c and target in c:
+                      with open(path, "w") as f: f.write(c.replace(target, target + add, 1))
+                      print(f"✅ {path} patché !")
+              except Exception as e:
+                  print(f"⚠️ Erreur sur {path}: {e}")
+          '
 
-          echo "📦 Copie des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
           
-          # Inclusion de susfs.o en dur dans le Makefile de fs/
           if ! grep -q "susfs.o" fs/Makefile; then 
             echo 'obj-y += susfs.o' >> fs/Makefile
           fi
           
-          # Neutralisation propre de path_umount pour éviter l'erreur du linker
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
-          
           rm -rf susfs4ksu
 
-          echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
           sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
           sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
           
@@ -280,12 +101,11 @@ for path, target, add in [("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#
             sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
           fi
 
-          # Correction de la structure mmap_sem propre à LineageOS & inclusion SusFS
           sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
-          
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -304,7 +124,6 @@ for path, target, add in [("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
@@ -321,11 +140,9 @@ for path, target, add in [("fs/proc/task_mmu.c", "#include \"internal.h\"", "\n#
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Fixs signatures modules & Dalle tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
