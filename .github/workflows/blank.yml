@@ -278,8 +278,19 @@ jobs:
 
           echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS..."
           make gki_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> .config
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> .config
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+          } >> .config
           make olddefconfig
 
           
