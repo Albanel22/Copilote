@@ -273,30 +273,29 @@ jobs:
           echo "📦 Copie et adaptation des fichiers d'infrastructure SusFS..."
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+          
+          # Copie additionnelle pour que ReSukiSU trouve les en-têtes SusFS en interne
+          mkdir -p drivers/kernelsu/include/linux
+          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/include/linux/
+
           if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
           
           sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
           
-          # Correction chirurgicale et propre de fs/susfs.c via Python
+          # Nettoyage chirurgical de la variable 'err' via Python (comme vu précédemment)
           python3 -c '
           path = "fs/susfs.c"
           with open(path, "r") as f:
               content = f.read()
-
-          # On cible précisément le bloc if (err) dans la fonction umount pour s assurer que err est déclaré
           target_code = "if (err) {"
           replacement_code = "int err = 0;\n\tif (err) {"
-
           if target_code in content and "int err = 0;" not in content:
               content = content.replace(target_code, replacement_code, 1)
-              print("✅ Déclaration de int err ajoutée avec succès.")
           else:
-              # Fallback : si c est déjà présent ou structuré différemment, on injecte au début de susfs_try_umount
               content = content.replace("int susfs_try_umount(", "int susfs_try_umount(void) {\n    int err = 0;\n    ")
-              print("✅ Injection de secours de err effectuée.")
-
           with open(path, "w") as f:
               f.write(content)
+          print("✅ Adaptation de fs/susfs.c terminée.")
           '
 
           rm -rf susfs4ksu
