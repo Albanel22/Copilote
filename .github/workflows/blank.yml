@@ -57,7 +57,7 @@ jobs:
           rm -rf drivers/kernelsu kernelSU || true
 
           echo "📥 Téléchargement de ReSukiSU..."
-          git clone https://github.com/ReSukiSU/ReSukiSU.git drivers/kernelsu --depth=1
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           cd drivers/kernelsu && rm -rf .git && cd ../..
 
           # Liaison native de ReSukiSU au build-system
