@@ -10,7 +10,7 @@ env:
   KERNEL_REPO: https://github.com/Albanel22/android_kernel_motorola_sm8250
   KERNEL_BRANCH: lineage-23.2
   KERNEL_PATH: kernel_src
-  DEFCONFIG: lito-perf_defconfig
+  DEFCONFIG: vendor/lito-perf_defconfig 
   BOOT_IMG_URL: https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img
 
 jobs:
