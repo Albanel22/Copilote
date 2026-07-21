@@ -53,9 +53,10 @@ jobs:
 
           cd ${{ env.KERNEL_PATH }}
 
-          # 🧹 NETTOYAGE TOTAL DE LA RACINE EN PREMIER (Résout définitivement le "is not clean")
-          echo "🧹 Nettoyage profond de la racine des sources (make mrproper)..."
+          # 🧹 NETTOYAGE TOTAL ET RADICAL (Sources + Dossier out)
+          echo "🧹 Nettoyage profond de la racine (make mrproper) et du dossier de sortie..."
           make mrproper || true
+          rm -rf out || true
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
@@ -275,23 +276,6 @@ jobs:
           if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
             sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
           fi
-
-          echo "🔧 Génération et forçage ultime de CONFIG_KSU_SUSFS..."
-          make gki_defconfig
-          {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-          } >> .config
-          make olddefconfig
 
           
       - name: Multi-stage Kernel Compilation
