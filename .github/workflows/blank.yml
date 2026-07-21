@@ -40,10 +40,17 @@ jobs:
       - name: Apply KernelSU Hooks & SusFS Integration
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           echo "--> Application du patch des hooks manuels KernelSU..."
           curl -sL https://raw.githubusercontent.com/rksuorg/kernel_patches/master/manual_hook/kernel-4.19_5.4.patch -o kernelsu_hooks.patch
-          patch -p1 < kernelsu_hooks.patch
+          
+          # On tente d'appliquer le patch, et s'il y a des rejets, on les affiche pour le debug
+          if ! patch -p1 --forward < kernelsu_hooks.patch; then
+            echo "⚠️ Attention : Certains hunks ont échoué. Affichage des fichiers .rej :"
+            find . -name "*.rej" -exec cat {} \;
+            # Si le rejet est mineur, on peut forcer ou laisser échouer, mais voyons d'abord le contenu
+            exit 1
+          fi
 
           echo "--> Intégration des composants SusFS..."
           mkdir -p include/linux
