@@ -34,8 +34,9 @@ jobs:
 
       - name: Clone Motorola Kernel Source
         run: |
-          echo "📥 Récupération des sources du noyau..."
+          echo "📥 Récupération de tes sources du noyau (déjà patchées)..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          # Note: Si tu as poussé tes sources modifiées sur ton propre dépôt de kernel, remplace l'URL ci-dessus par ton propre repo de kernel !
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -43,80 +44,6 @@ jobs:
           path: ~/.cache/ccache
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
-
-      - name: Intégration Structurelle SusFS & KernelSU
-        run: |
-          set -e
-          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          cd ${{ env.KERNEL_PATH }}
-          make mrproper || true
-          rm -rf out drivers/kernelsu kernelSU || true
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then 
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-          fi
-
-      - name: Application des Patches (KSU Hooks & SusFS)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -e
-          
-          # Téléchargement et application de SusFS
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
-          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch SusFS appliqué avec décalages"
-
-          python3 -c '
-          import sys
-          
-          # 1. Patch task_mmu.c
-          path = "fs/proc/task_mmu.c"
-          target = "#include \"internal.h\""
-          add = "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs.h>\n#endif\n"
-          with open(path, "r") as f: c = f.read()
-          if add.strip() not in c and target in c:
-              with open(path, "w") as f: f.write(c.replace(target, target + add, 1))
-              print(f"✅ {path} patché !")
-
-          # 2. Patch propre de fs/open.c directement dans do_faccessat
-          path = "fs/open.c"
-          with open(path, "r") as f: c = f.read()
-          
-          # On s"assure que l"en-tête ksu est présent si besoin ou on injecte l"appel au bon endroit
-          target_func = "long do_faccessat("
-          injection = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n"
-          
-          # Cherche et remplace la signature de la fonction pour y inclure l appel KSU au tout début
-          if "ksu_handle_faccessat" not in c:
-              # On cherche un pattern classique de la fonction do_faccessat
-              old_sig = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-              if old_sig in c:
-                  c = c.replace(old_sig, "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif")
-                  with open(path, "w") as f: f.write(c)
-                  print("✅ fs/open.c injecté proprement dans do_faccessat !")
-          '
-
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          
-          if ! grep -q "susfs.o" fs/Makefile; then 
-            echo 'obj-y += susfs.o' >> fs/Makefile
-          fi
-          
-          sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
-          rm -rf susfs4ksu
-
-          sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
-          sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
-          
-          if ! grep -q "SUSFS_MAX_LEN_PATHNAME" include/linux/susfs.h; then
-            sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
-          fi
-
-          sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -152,9 +79,11 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
+          # Fixs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
+          echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
