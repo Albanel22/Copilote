@@ -44,6 +44,9 @@ jobs:
           cp -r ../kernelSU/* drivers/kernelsu/kernel/
           rm -rf drivers/kernelsu/kernel/.git || true
 
+          echo "🔧 Correction du chemin d'inclusion de supercall.h dans ksu.h..."
+          sed -i 's|#include "../uapi/supercall.h"|#include "uapi/supercall.h"|g' drivers/kernelsu/kernel/ksu.h || true
+          
           echo "🔧 Correction des chemins d'inclusion internes de KernelSU..."
           find drivers/kernelsu/kernel/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|#include "uapi/|#include "../uapi/|g' {} + || true
 
