@@ -1,4 +1,4 @@
-name: 🚀 Build Custom Kernel & Repack Boot.img
+name: 🚀 Build Kernel with ReSukiSU Only
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ env:
   KERNEL_REPO: https://github.com/Albanel22/android_kernel_motorola_sm8250
   KERNEL_BRANCH: lineage-23.2
   KERNEL_PATH: kernel_src
-  DEFCONFIG: vendor/lito-perf_defconfig 
+  DEFCONFIG: vendor/lito-perf_defconfig
   BOOT_IMG_URL: https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img
 
 jobs:
@@ -31,64 +31,23 @@ jobs:
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
           wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
-      - name: 📂 Intégration Structurelle SusFS & ReSukiSU (Manual Hooks)
+      - name: 📂 Intégration de ReSukiSU (KernelSU)
         run: |
           set -e
           
           cd ${{ env.KERNEL_PATH }}
 
-          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
-
-          echo "📥 Téléchargement de SusFS en amont..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
+          echo "🧼 Nettoyage des dossiers temporaires..."
+          rm -rf drivers/kernelsu kernelSU || true
 
           echo "📥 Téléchargement de ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           cd drivers/kernelsu && rm -rf .git && cd ../..
 
-          # --- Neutralisation et copie blindée des en-têtes SusFS ---
-          rm -f KernelSU/kernel/tools/inline_hook_check.mk drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
-          mkdir -p KernelSU/kernel/tools drivers/kernelsu/kernel/tools
-          touch KernelSU/kernel/tools/inline_hook_check.mk drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
-
-          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          
-          mkdir -p drivers/kernelsu/include/linux
-          mkdir -p drivers/kernelsu/kernel/include/linux
-          mkdir -p drivers/kernelsu/include
-          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/include/linux/
-          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/kernel/include/linux/
-          cp -r susfs4ksu/kernel_patches/include/linux/*.h drivers/kernelsu/include/
-          cp -r susfs4ksu/kernel_patches/include/linux/*.h drivers/kernelsu/
-          
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
-          echo "Création du miroir structurel attendu par le patch SusFS..."
-          mkdir -p kernelSU
-          
-          if [ -f drivers/kernelsu/uapi/ksu.h ]; then
-            cp drivers/kernelsu/uapi/ksu.h kernelSU/ksu.h
-          else
-            KSU_H_PATH=$(find drivers/kernelsu -name "ksu.h" | head -n 1)
-            if [ -n "$KSU_H_PATH" ]; then
-              cp "$KSU_H_PATH" kernelSU/ksu.h
-            else
-              touch kernelSU/ksu.h
-            fi
-          fi
-          
-          {
-            echo -e "\n/* --- Stubs de sécurité SusFS --- */"
-            echo "#define ksu_handle_faccessat(...) do {} while(0)"
-            echo "#define ksu_handle_stat(...) do {} while(0)"
-            echo "#define ksu_handle_vfs_read(...) do {} while(0)"
-            echo "#define ksu_handle_setattr(...) do {} while(0)"
-            echo "#define ksu_handle_sys_read(...) do {} while(0)"
-          } >> kernelSU/ksu.h
-
-          echo "📥 Application ciblée des Manual Hooks..."
+          echo "📥 Application des Manual Hooks (tactile et système)..."
           
           python3 -c '
           path = "fs/open.c"
@@ -102,14 +61,6 @@ jobs:
               if target in content: content = content.replace(target, hook + target, 1)
               if body_target in content: content = content.replace(body_target, body_replacement, 1)
               with open(path, "w") as f: f.write(content)
-          '
-
-          python3 -c '
-          path = "fs/proc/task_mmu.c"
-          with open(path, "r") as f: content = f.read()
-          content = content.replace("mmap_sem", "mmap_lock")
-          if "linux/susfs.h" not in content: content = "#include <linux/susfs.h>\n" + content
-          with open(path, "w") as f: f.write(content)
           '
 
           cat << 'EOF' > manual_hooks.patch
@@ -243,43 +194,6 @@ jobs:
           patch -p1 < manual_hooks.patch || true
           rm -f manual_hooks.patch
 
-          echo "📥 Application principale de SusFS..."
-          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          patch -p1 < "$PATCH_FILE" || true
-
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          
-          mkdir -p drivers/kernelsu/include/linux
-          cp -r susfs4ksu/kernel_patches/include/linux/* drivers/kernelsu/include/linux/
-
-          if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
-          
-          sed -i '/path_umount/ { s/.*/\t\/\/ path_umount neutralise\n\treturn;/ }' fs/susfs.c || true
-          
-          python3 -c '
-          path = "fs/susfs.c"
-          with open(path, "r") as f: content = f.read()
-          target_code = "if (err) {"
-          replacement_code = "int err = 0;\n\tif (err) {"
-          if target_code in content and "int err = 0;" not in content:
-              content = content.replace(target_code, replacement_code, 1)
-          else:
-              content = content.replace("int susfs_try_umount(", "int susfs_try_umount(void) {\n    int err = 0;\n    ")
-          with open(path, "w") as f: f.write(content)
-          '
-
-          rm -rf susfs4ksu
-
-          sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
-          sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
-          
-          if ! grep -q "SUSFS_MAX_LEN_PATHNAME" include/linux/susfs.h; then
-            sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
-          fi
-
-          sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c || true
-
       - name: 🔨 Compilation & Repack du Boot.img
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -287,12 +201,10 @@ jobs:
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
-          echo "🔧 Activation de KernelSU et SusFS dans le .config..."
+          echo "🔧 Activation de KernelSU dans le .config..."
           scripts/config --file out/.config --enable CONFIG_KSU
-          scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
           
           echo "🚀 Lancement de la compilation du noyau..."
-          # AJOUT DE HOSTCFLAGS="-Wno-error" pour ignorer les erreurs de syntaxe/warnings sur les outils hôtes récents
           make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-error"
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
@@ -323,5 +235,5 @@ jobs:
       - name: 📤 Upload du new-boot.img Prêt à Flasher
         uses: actions/upload-artifact@v4
         with:
-          name: motorola-kiev-new-boot
-          path: output_artifacts/new-boot.img
+          name: motorola-kiev-boot
+          path: output_artifacts/boot.img
