@@ -31,8 +31,6 @@ jobs:
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
           wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
-      
-
       - name: 📂 Intégration de ton dossier kernelSU local & Application des Hooks
         run: |
           set -e
@@ -47,7 +45,6 @@ jobs:
           rm -rf drivers/kernelsu/kernel/.git || true
           
           echo "🔧 Correction radicale des chemins d'en-tête uapi dans ksu.h..."
-          # On remplace n'importe quelle remontée de dossier pour uapi par un accès direct
           sed -i 's|#include "\.\./uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
           sed -i 's|#include <uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
 
@@ -96,8 +93,8 @@ jobs:
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
           fi
 
-          echo "🚀 Lancement de la compilation du noyau..."
-          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error"
+          echo "🚀 Lancement de la compilation du noyau en direct..."
+          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error" --output-sync=none V=1
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "❌ Erreur : Image du noyau introuvable."
@@ -122,7 +119,7 @@ jobs:
           else
             echo "❌ Erreur lors du repackage du boot.img"
             exit 1
-          fi   
+          fi
           
       - name: 📤 Upload du new-boot.img Prêt à Flasher
         uses: actions/upload-artifact@v4
