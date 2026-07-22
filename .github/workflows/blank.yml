@@ -63,7 +63,6 @@ jobs:
           if [ -f drivers/kernelsu/Kbuild ]; then
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
             sed -i '/error.*TP hooks are only supported/s/^/#/' drivers/kernelsu/Kbuild || true
-            # Commenter le bloc d'erreur global si besoin dans le Kbuild de ReSukiSU
             sed -i 's/error /warning /g' drivers/kernelsu/Kbuild || true
           fi
 
@@ -85,9 +84,10 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration (Sans SusFS)
+          # Forçage des drapeaux de configuration ReSukiSU (Manual Hook activé)
           {
             echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_MANUAL_HOOK=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
