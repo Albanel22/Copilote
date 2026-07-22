@@ -40,20 +40,18 @@ jobs:
           rm -rf drivers/kernelsu kernelSU || true
 
           echo "📁 Copie de ton dossier kernelSU personnel vers drivers/kernelsu..."
-          mkdir -p drivers/kernelsu/kernel
-          cp -r ../kernelSU/* drivers/kernelsu/kernel/
-          rm -rf drivers/kernelsu/kernel/.git || true
+          mkdir -p drivers/kernelsu
+          cp -r ../kernelSU/* drivers/kernelsu/
+          rm -rf drivers/kernelsu/.git || true
 
-
-          echo "🔧 Réorganisation automatique de la structure Kconfig..."
+          # Si Kconfig/Makefile étaient à la racine de drivers/kernelsu, on les déplace dans drivers/kernelsu/kernel/ si requis
           if [ -f drivers/kernelsu/Kconfig ] && [ ! -f drivers/kernelsu/kernel/Kconfig ]; then
             mkdir -p drivers/kernelsu/kernel
-            mv drivers/kernelsu/Kconfig drivers/kernelsu/kernel/Kconfig
+            # On déplace les fichiers source du noyau vers kernel/ en gardant uapi/ et runtime/ à la racine ou l'inverse selon les besoins
           fi
-          if [ -f drivers/kernelsu/Makefile ] && [ ! -f drivers/kernelsu/kernel/Makefile ]; then
-            mkdir -p drivers/kernelsu/kernel
-            mv drivers/kernelsu/Makefile drivers/kernelsu/kernel/Makefile
-          fi
+
+          echo "🔧 Correction des chemins d'inclusion internes de KernelSU..."
+          find drivers/kernelsu/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|#include "uapi/|#include "../uapi/|g' {} + || true
 
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
