@@ -203,6 +203,16 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           
+          echo "🩹 Application des patches personnalisés..."
+          for patch_file in ../patches/open.patch ../patches/read_write.patch ../patches/selinux.patch ../patches/stat.patch; do
+            if [ -f "$patch_file" ]; then
+              echo "Application de $(basename "$patch_file")..."
+              git apply "$patch_file" || patch -p1 < "$patch_file" || true
+            else
+              echo "⚠️ Avertissement : $patch_file introuvable."
+            fi
+          done
+
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
@@ -210,11 +220,9 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU
           scripts/config --file out/.config --disable CONFIG_KSU_SUSFS || true
           
-          echo "🛡️ Configuration de ReSukiSU pour un noyau Non-GKI (Désactivation des TP Hooks)..."
+          echo "🛡️ Configuration de ReSukiSU pour un noyau Non-GKI..."
           if [ -f drivers/kernelsu/Kbuild ]; then
-            # Désactive la vérification stricte ou force le type de hook compatible
             sed -i 's/CONFIG_KSU_SUSFS=y/# CONFIG_KSU_SUSFS is not set/g' drivers/kernelsu/Kbuild || true
-            # Neutralise l'erreur fatale des TP hooks sur les noyaux Non-GKI dans le Kbuild
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
           fi
 
