@@ -64,6 +64,12 @@ jobs:
 
           # ---> NOUVEAU : On commente le blocage des TP hooks dans Kbuild <---
           sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild
+
+      - name: 💉 Application des patches manuels du noyau 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          git apply $GITHUB_WORKSPACE/kernelsu_manual_hooks.patch
+          echo "✅ Patches appliqués avec succès !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
