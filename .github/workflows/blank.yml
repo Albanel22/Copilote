@@ -203,13 +203,21 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           
-          echo "🩹 Application du patch global KernelSU (kernel-4.19_5.4.patch)..."
+          echo "🩹 Application du patch global KernelSU..."
           if [ -f ../patches/kernel-4.19_5.4.patch ]; then
             git apply ../patches/kernel-4.19_5.4.patch || patch -p1 < ../patches/kernel-4.19_5.4.patch || true
-          else
-            echo "⚠️ Avertissement : Le patch global est introuvable."
           fi
 
+          echo "🔧 Correction des chemins d'inclusion dans fs/open.c..."
+          if [ -f fs/open.c ]; then
+            sed -i 's|../kernelSU/ksu.h|../drivers/kernelsu/ksu.h|g' fs/open.c || true
+          fi
+
+          echo "🔧 Correction de fsnotify_ops pour le noyau 4.19 dans pkg_observer.c..."
+          if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
+            sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
+          fi
+          
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
