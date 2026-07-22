@@ -205,7 +205,8 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU
           
           echo "🚀 Lancement de la compilation du noyau..."
-          make -j$(nproc) O=out ARCH=arm64 CC=gcc CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-error"
+          # On force HOSTCC=gcc et HOSTCXX=g++ pour que les outils de la machine hôte ne prennent pas les options ARM
+          make -j$(nproc) O=out ARCH=arm64 CC=gcc HOSTCC=gcc HOSTCXX=g++ CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-error"
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "❌ Erreur : Image du noyau introuvable."
