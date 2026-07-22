@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Structurelle ReSukiSU
+      - name: 📂 Intégration ReSukiSU
         run: |
           set -e
           
@@ -56,41 +56,13 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
-          echo "📥 Clonage de votre dossier ReSukiSU personnel..."
-          # On clone ou récupère votre source ReSukiSU directement dans drivers/kernelsu
-          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu || true
-          # Si vos sources locales de ReSukiSU sont déjà présentes dans le dépôt parent, on gère la copie :
-          if [ -d "../kernelSU" ]; then
-            rm -rf drivers/kernelsu
-            mkdir -p drivers/kernelsu
-            cp -r ../kernelSU/* drivers/kernelsu/
-          fi
-          rm -rf drivers/kernelsu/.git || true
+          echo "📥 Téléchargement de ReSukiSU..."
+          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
+          cd drivers/kernelsu && rm -rf .git && cd ../..
 
-          # Liaison native de ReSukiSU au build-system
+          # Liaison native de KernelSU au build-system
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
-
-          # Correction propre des chemins d'en-tête et inclusions pour ReSukiSU
-          find drivers/kernelsu/ -type f -name "*.h" -exec sed -i 's|#include "../uapi/|#include "uapi/|g' {} + || true
-          find drivers/kernelsu/ -type f -name "*.h" -exec sed -i 's|#include <uapi/|#include "uapi/|g' {} + || true
-
-          # Ajout du Kbuild renforcé avec chemins globaux pour ReSukiSU
-          cat << 'EOF' > drivers/kernelsu/kernel/Kbuild
-          ccflags-y += -I$(srctree)/drivers/kernelsu/kernel
-          ccflags-y += -I$(srctree)/drivers/kernelsu/kernel/uapi
-
-          obj-y += core.o
-          obj-y += cred.o
-          obj-y += epath.o
-          obj-y += fs.o
-          obj-y += hooks.o
-          obj-y += ksu.o
-          obj-y += manager.o
-          obj-y += net.o
-          obj-y += supercall.o
-          obj-y += uid_cache.o
-          EOF
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -127,7 +99,7 @@ jobs:
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
           echo "🚀 Lancement de la compilation de l'Image..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS -I$(pwd)/drivers/kernelsu/kernel -I$(pwd)/drivers/kernelsu/kernel/uapi" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=11872 KSU_VERSION=11872 -j$(nproc) Image
 
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
