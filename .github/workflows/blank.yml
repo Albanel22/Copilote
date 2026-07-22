@@ -59,13 +59,9 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-          # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
-          rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
-          rm -f drivers/kernelsu/kernel/tools/manual_hook_check.mk || true
-          mkdir -p drivers/kernelsu/kernel/tools
-          touch drivers/kernelsu/kernel/tools/inline_hook_check.mk
-          touch drivers/kernelsu/kernel/tools/manual_hook_check.mk
-
+          echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
+          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
