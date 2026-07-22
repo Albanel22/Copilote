@@ -107,8 +107,8 @@ jobs:
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
           fi
 
-          echo "🚀 Lancement de la compilation du noyau en direct..."
-          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error" --output-sync=none V=1
+          echo "🚀 Lancement de la compilation du noyau (propre et en direct)..."
+          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error" --output-sync=none
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "❌ Erreur : Image du noyau introuvable."
