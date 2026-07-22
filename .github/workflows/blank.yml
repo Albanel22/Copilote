@@ -208,7 +208,15 @@ jobs:
           
           echo "🔧 Activation de KernelSU dans le .config..."
           scripts/config --file out/.config --enable CONFIG_KSU
+          # S'assurer que SusFS est bien désactivé dans le .config
+          scripts/config --file out/.config --disable CONFIG_KSU_SUSFS || true
           
+          echo "🛡️ Désactivation forcée de SuSFS dans les sources de ReSukiSU..."
+          # On force la variable KSU_SUSFS à 0 dans le Kbuild de ReSukiSU si elle existe
+          if [ -f drivers/kernelsu/Kbuild ]; then
+            sed -i 's/CONFIG_KSU_SUSFS=y/# CONFIG_KSU_SUSFS is not set/g' drivers/kernelsu/Kbuild || true
+          fi
+
           echo "🛡️ Destruction définitive des vérifications de hooks bloquantes..."
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk
           touch drivers/kernelsu/kernel/tools/inline_hook_check.mk
