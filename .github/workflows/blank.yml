@@ -64,7 +64,10 @@ jobs:
 
           # ---> NOUVEAU : On commente le blocage des TP hooks dans Kbuild <---
           sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild
-
+          # ---> NOUVEAU : Injection de ton pkg_observer.c corrigé pour le noyau 4.19 <---
+          cp $GITHUB_WORKSPACE/pkg_observer.c drivers/kernelsu/manager/pkg_observer.c
+          echo "✅ Fichier pkg_observer.c remplacé avec succès !"
+      
       - name: 💉 Application des patches manuels du noyau 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
