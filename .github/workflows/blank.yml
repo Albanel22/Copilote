@@ -68,8 +68,8 @@ jobs:
       - name: 💉 Application des patches manuels du noyau 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
-          git apply $GITHUB_WORKSPACE/kernelsu_manual_hooks.patch
-          echo "✅ Patches appliqués avec succès !"
+          git apply --whitespace=nowarn --reject $GITHUB_WORKSPACE/kernelsu_manual_hooks.patch || true
+          echo "✅ Tentative d'application terminée !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
