@@ -1,4 +1,4 @@
-name: 🚀 Build Kernel with ReSukiSU Only
+Name: 🚀 Build Kernel with ReSukiSU Only
 
 on:
   workflow_dispatch:
@@ -43,6 +43,16 @@ jobs:
           mkdir -p drivers
           cp -r ../kernelSU drivers/kernelsu
           rm -rf drivers/kernelsu/.git || true
+
+          echo "🔧 Réorganisation automatique de la structure Kconfig..."
+          if [ -f drivers/kernelsu/Kconfig ] && [ ! -f drivers/kernelsu/kernel/Kconfig ]; then
+            mkdir -p drivers/kernelsu/kernel
+            mv drivers/kernelsu/Kconfig drivers/kernelsu/kernel/Kconfig
+          fi
+          if [ -f drivers/kernelsu/Makefile ] && [ ! -f drivers/kernelsu/kernel/Makefile ]; then
+            mkdir -p drivers/kernelsu/kernel
+            mv drivers/kernelsu/Makefile drivers/kernelsu/kernel/Makefile
+          fi
 
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
