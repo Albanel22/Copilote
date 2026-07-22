@@ -31,6 +31,8 @@ jobs:
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
           wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
+      
+
       - name: 📂 Intégration de ton dossier kernelSU local & Application des Hooks
         run: |
           set -e
@@ -44,8 +46,10 @@ jobs:
           cp -r ../kernelSU/* drivers/kernelsu/kernel/
           rm -rf drivers/kernelsu/kernel/.git || true
           
-          echo "🔧 Correction globale des chemins d'en-tête uapi dans ksu.h..."
-          sed -i 's|#include "../uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
+          echo "🔧 Correction radicale des chemins d'en-tête uapi dans ksu.h..."
+          # On remplace n'importe quelle remontée de dossier pour uapi par un accès direct
+          sed -i 's|#include "\.\./uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
+          sed -i 's|#include <uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
 
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
@@ -118,7 +122,7 @@ jobs:
           else
             echo "❌ Erreur lors du repackage du boot.img"
             exit 1
-          fi
+          fi   
           
       - name: 📤 Upload du new-boot.img Prêt à Flasher
         uses: actions/upload-artifact@v4
