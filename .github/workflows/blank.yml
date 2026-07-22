@@ -224,8 +224,8 @@ jobs:
           fi
 
           echo "🚀 Lancement de la compilation du noyau..."
-          # On ajoute KCFLAGS="-Wno-error" pour neutraliser le rejet de -mlittle-endian par le gcc hôte
-          make -j$(nproc) O=out ARCH=arm64 CC=gcc HOSTCC=gcc HOSTCXX=g++ CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error"
+          # Utilisation correcte du cross-compiler sans forcer CC=gcc sur le code cible
+          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error"
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "❌ Erreur : Image du noyau introuvable."
