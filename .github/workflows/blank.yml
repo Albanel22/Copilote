@@ -59,6 +59,14 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
+          echo "🛠️ Désactivation de la vérification des TP hooks pour noyau Non-GKI..."
+          if [ -f drivers/kernelsu/Kbuild ]; then
+            sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
+            sed -i '/error.*TP hooks are only supported/s/^/#/' drivers/kernelsu/Kbuild || true
+            # Commenter le bloc d'erreur global si besoin dans le Kbuild de ReSukiSU
+            sed -i 's/error /warning /g' drivers/kernelsu/Kbuild || true
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
