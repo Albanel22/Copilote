@@ -1,4 +1,4 @@
-des: 🚀 Build Kernel with ReSukiSU Only
+name: 🚀 Build Kernel with ReSukiSU Only
 
 on:
   workflow_dispatch:
@@ -23,7 +23,9 @@ jobs:
 
       - name: ⚙️ Setup Environment & Dependencies
         run: |
-          sudo apt-get uupdate          sudo apt-get install -y bc bison ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget uunzip
+          sudo apt-get update
+          sudo apt-get install -y bc bison ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget unzip
+
       - name: 📥 Download Kernel Source & Official Boot.img
         run: |
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
@@ -98,26 +100,6 @@ jobs:
             exit 1
           fi
 
-          echo "📦 Repackage automatique avec magiskboot..."
-          cd ..
-          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
-          unzip Magisk-v27.0.apk lib/armeabi-v7a/libmagiskboot.so
-          mv lib/armeabi-v7a/libmagiskboot.so magiskboot
-          chmod +x magiskboot
-
-          ./magiskboot unpack boot.img
-          cp ${{ env.KERNEL_PATH }}/out/arch/arm64/boot/Image kernel
-          ./magiskboot repack boot.img
-          
-          mkdir -p output_artifacts
-          if [ -f new-boot.img ]; then
-            cp new-boot.img output_artifacts/boot.img
-            echo "✅ boot.img généré et renommé avec succès !"
-          else
-            echo "❌ Erreur lors du repackage du boot.img"
-            exit 1
-          fi
-      
           echo "📦 Repackage automatique avec magiskboot..."
           cd ..
           curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
