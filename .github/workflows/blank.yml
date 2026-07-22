@@ -1,4 +1,4 @@
-Name: 🚀 Build Kernel with ReSukiSU Only
+name: 🚀 Build Kernel with ReSukiSU Only
 
 on:
   workflow_dispatch:
