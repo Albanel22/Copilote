@@ -31,10 +31,9 @@ jobs:
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
           wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
-      - name: 📂 Intégration de ReSukiSU (KernelSU)
+      - name: 📂 Intégration de ReSukiSU & Application Propre des Hooks
         run: |
           set -e
-          
           cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires..."
@@ -52,172 +51,23 @@ jobs:
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
-          echo "📥 Application des Manual Hooks (tactile et système)..."
-          
-          python3 -c '
-          path = "fs/open.c"
-          with open(path, "r") as f:
-              content = f.read()
-          target = "long do_faccessat(int dfd, const char __user *filename, int mode)"
-          hook = """#ifdef CONFIG_KSU\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n"""
-          body_target = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n\tint res;"
-          body_replacement = "long do_faccessat(int dfd, const char __user *filename, int mode)\n{\n\tint res;\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
-          if "ksu_handle_faccessat" not in content:
-              if target in content: content = content.replace(target, hook + target, 1)
-              if body_target in content: content = content.replace(body_target, body_replacement, 1)
-              with open(path, "w") as f: f.write(content)
-          '
-
-          cat << 'EOF' > manual_hooks.patch
-          From f74cc327cd2da3cf51d6a23eadc330e3f1fe38af Mon Sep 17 00:00:00 2001
-          From: fc5b87cf <90097027+rsuntk@users.noreply.github.com>
-          Date: Mon, 24 Nov 2025 13:04:18 +0000
-          Subject: [PATCH] RKSU: Add manual hook support minus open.c
-          ---
-          drivers/input/input.c |  8 ++++++++
-          fs/exec.c             | 13 +++++++++++++
-          fs/read_write.c       |  9 +++++++++
-          fs/stat.c             |  7 +++++++
-          kernel/reboot.c       |  7 +++++++
-          5 files changed, 44 insertions(+)
-          diff --git a/drivers/input/input.c b/drivers/input/input.c
-          index 45fdb9bdf08d..db5db9a858d5 100644
-          --- a/drivers/input/input.c
-          +++ b/drivers/input/input.c
-          @@ -375,11 +375,19 @@ static int input_get_disposition(struct input_dev *dev,
-          	return disposition;
-          }
-          #ifdef CONFIG_KSU
-          extern bool ksu_input_hook __read_mostly;
-          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
-          #endif
-          static void input_handle_event(struct input_dev *dev,
-          					 unsigned int type, unsigned int code, int value)
-          {
-          	int disposition = input_get_disposition(dev, type, code, &value);
-          #ifdef CONFIG_KSU
-          	if (unlikely(ksu_input_hook))
-          		ksu_handle_input_handle_event(&type, &code, &value);
-          #endif
-          	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
-          		add_input_randomness(type, code, value);
-          diff --git a/fs/exec.c b/fs/exec.c
-          index d50d65857823..1199c1216a49 100644
-          --- a/fs/exec.c
-          +++ b/fs/exec.c
-          @@ -1904,11 +1904,24 @@ static int __do_execve_file(int fd, struct filename *filename,
-          	return retval;
-          }
-          #ifdef CONFIG_KSU
-          extern bool ksu_execveat_hook __read_mostly;
-          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-          			void *envp, int *flags);
-          extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
-          				 void *argv, void *envp, int *flags);
-          #endif
-          static int do_execveat_common(int fd, struct filename *filename,
-          			      struct user_arg_ptr argv,
-          			      struct user_arg_ptr envp,
-          			      int flags)
-          {
-          #ifdef CONFIG_KSU
-          	if (unlikely(ksu_execveat_hook))
-          		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-          	else
-          		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
-          #endif
-          	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
-          }
-          diff --git a/fs/read_write.c b/fs/read_write.c
-          index 93d06b4c5f78..40b1bb3f33e0 100644
-          --- a/fs/read_write.c
-          +++ b/fs/read_write.c
-          @@ -443,10 +443,19 @@ ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
-          }
-          EXPORT_SYMBOL_NS(kernel_read, ANDROID_GKI_VFS_EXPORT_ONLY);
-          #ifdef CONFIG_KSU
-          extern bool ksu_vfs_read_hook __read_mostly;
-          extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
-          			size_t *count_ptr, loff_t **pos);
-          #endif
-          ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
-          {
-          	ssize_t ret;
-          #ifdef CONFIG_KSU 
-          	if (unlikely(ksu_vfs_read_hook))
-          		ksu_handle_vfs_read(&file, &buf, &count, &pos);
-          #endif
-          	if (!(file->f_mode & FMODE_READ))
-          		return -EBADF;
-          	if (!(file->f_mode & FMODE_CAN_READ))
-          diff --git a/fs/stat.c b/fs/stat.c
-          index 298eb77668a7..bf6a3f937948 100644
-          --- a/fs/stat.c
-          +++ b/fs/stat.c
-          @@ -165,6 +165,9 @@ EXPORT_SYMBOL(vfs_statx_fd);
-           *
-           * 0 will be returned on success, and a -ve error code if unsuccessful.
-           */
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-          #endif
-          int vfs_statx(int dfd, const char __user *filename, int flags,
-          	      struct kstat *stat, u32 request_mask)
-          {
-          	int error = -EINVAL;
-          	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
-          #ifdef CONFIG_KSU
-          	ksu_handle_stat(&dfd, &filename, &flags);
-          #endif
-          	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
-          		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
-          		return -EINVAL;
-          diff --git a/kernel/reboot.c b/kernel/reboot.c
-          index 790c2f514a55..bcedeac75d3a 100644
-          --- a/kernel/reboot.c
-          +++ b/kernel/reboot.c
-          @@ -310,6 +310,9 @@ DEFINE_MUTEX(system_transition_mutex);
-           *
-           * reboot doesn't sync: do that yourself before calling this.
-           */
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
-          #endif
-          SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
-          		void __user *, arg)
-          {
-          	int ret = 0;
-          	char buffer[256];
-          #ifdef CONFIG_KSU 
-          	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-          #endif
-          	/* We only trust the superuser with rebooting the system. */
-          	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
-          		return -EPERM;
-          EOF
-
-          patch -p1 < manual_hooks.patch || true
-          rm -f manual_hooks.patch
-
-      - name: 🔨 Compilation & Repack du Boot.img
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          
-          echo "🩹 Application du patch global KernelSU..."
+          echo "🩹 Application du patch global KernelSU (kernel-4.19_5.4.patch)..."
           if [ -f ../patches/kernel-4.19_5.4.patch ]; then
             git apply ../patches/kernel-4.19_5.4.patch || patch -p1 < ../patches/kernel-4.19_5.4.patch || true
+          else
+            echo "❌ Erreur : Le patch global est introuvable dans le dossier patches/ !"
+            exit 1
           fi
 
-          echo "🔧 Correction des chemins d'inclusion dans fs/open.c..."
-          if [ -f fs/open.c ]; then
-            sed -i 's|../kernelSU/ksu.h|../drivers/kernelsu/ksu.h|g' fs/open.c || true
-          fi
+          echo "🔧 Correction des chemins d'en-tête pour pointer vers drivers/kernelsu..."
+          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../kernelSU/|../drivers/kernelsu/|g' {} + || true
+          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|"ksu.h"|"drivers/kernelsu/ksu.h"|g' {} + || true
 
           echo "🔧 Correction de fsnotify_ops pour le noyau 4.19 dans pkg_observer.c..."
           if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
             sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
           fi
-          
+
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
@@ -229,14 +79,6 @@ jobs:
           if [ -f drivers/kernelsu/Kbuild ]; then
             sed -i 's/CONFIG_KSU_SUSFS=y/# CONFIG_KSU_SUSFS is not set/g' drivers/kernelsu/Kbuild || true
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
-          fi
-
-          echo "🛡️ Destruction définitive des vérifications de hooks bloquantes..."
-          rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk
-          touch drivers/kernelsu/kernel/tools/inline_hook_check.mk
-          if [ -d KernelSU/kernel/tools ]; then
-            rm -f KernelSU/kernel/tools/inline_hook_check.mk
-            touch KernelSU/kernel/tools/inline_hook_check.mk
           fi
 
           echo "🚀 Lancement de la compilation du noyau..."
@@ -260,8 +102,8 @@ jobs:
           
           mkdir -p output_artifacts
           if [ -f new-boot.img ]; then
-            cp new-boot.img output_artifacts/new-boot.img
-            echo "✅ new-boot.img généré avec succès !"
+            cp new-boot.img output_artifacts/boot.img
+            echo "✅ boot.img généré et renommé avec succès !"
           else
             echo "❌ Erreur lors du repackage du boot.img"
             exit 1
