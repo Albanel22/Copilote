@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration Structurelle SusFS & KernelSU
+      - name: 📂 Intégration ReSukiSU
         run: |
           set -e
           
@@ -56,84 +56,14 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU || true
 
-          echo "📥 Téléchargement de KernelSU v0.9.5..."
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          cd drivers/kernelsu && git checkout v0.9.5 && rm -rf .git && cd ../..
+          echo "📥 Téléchargement de ReSukiSU..."
+          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
+          cd drivers/kernelsu && rm -rf .git && cd ../..
 
           # Liaison native de KernelSU au build-system
           if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
           if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
 
-          echo "Création du miroir structurel attendu par le patch SusFS..."
-          mkdir -p kernelSU
-          cp drivers/kernelsu/kernel/ksu.h kernelSU/ksu.h
-          
-          # Injection des stubs de sécurité
-          {
-            echo -e "\n/* --- Stubs de sécurité SusFS --- */"
-            echo "#define ksu_handle_faccessat(...) do {} while(0)"
-            echo "#define ksu_handle_stat(...) do {} while(0)"
-            echo "#define ksu_handle_vfs_read(...) do {} while(0)"
-            echo "#define ksu_handle_setattr(...) do {} while(0)"
-            echo "#define ksu_handle_sys_read(...) do {} while(0)"
-          } >> kernelSU/ksu.h
-
-          echo "📥 Téléchargement et application de SusFS..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu
-          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*4.19*.patch" | head -n 1)
-          # Application du patch d'origine
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec décalages"
-
-          # 🔧 RÉPARATION MANUELLE DES REJETS (Spécifique Motorola Kernel 4.19)
-          echo "🛠️ Réparation manuelle des fichiers rejetés par SusFS..."
-          
-          # 1. Correction chirurgicale de fs/open.c (Hunk #3) si absent
-          if ! grep -q "susfs_open" fs/open.c; then
-            # On injecte le hook SusFS juste avant les vérifications de sécurité habituelles
-            sed -i '/error = do_top_lookup/i \	error = susfs_open(dfd, filename, flags, mode);\n\tif (error < 0) return error;' fs/open.c || true
-          fi
-
-          # 2. Correction chirurgicale de fs/proc/task_mmu.c (Hunk #1)
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
-          
-          # Application du patch d'origine
-          patch -p1 < "$PATCH_FILE" || echo "⚠️ Patch appliqué avec décalages"
-
-          # Application du patch SusFS spécifique à KernelSU
-          if [ -d susfs4ksu/kernel_patches/KernelSU ]; then
-            KSU_PATCH=$(find susfs4ksu/kernel_patches/KernelSU/ -name "10_enable_susfs_for_ksu.patch" | head -n 1)
-            if [ -f "$KSU_PATCH" ]; then
-              cd drivers/kernelsu && patch -p1 < "../../$KSU_PATCH" || echo "⚠️ Patch KSU appliqué" && cd ../..
-            fi
-          fi
-
-          echo "📦 Copie des fichiers d'infrastructure SusFS..."
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          if ! grep -q "susfs.o" fs/Makefile; then echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile; fi
-          
-          # Correctif définitif : Neutralisation complète de l'appel à path_umount dans susfs.c
-          sed -i '/int susfs_try_umount/,/}/ { /path_umount/ { s/.*/\treturn -EINVAL;/ } }' fs/susfs.c || true
-          
-          rm -rf susfs4ksu
-
-          echo "🛠️ Alignement des types de données SusFS (Kernel 4.19)..."
-          sed -i '1i #include <linux/fs.h>\n#include <linux/types.h>\n#include <linux/sched.h>\n#include <linux/stat.h>' include/linux/susfs.h
-          sed -i 's/vm_flags_t/unsigned long/g' include/linux/susfs.h fs/susfs.c || true
-          
-          if ! grep -q "SUSFS_MAX_LEN_PATHNAME" include/linux/susfs.h; then
-            sed -i '/#define _LINUX_SUSFS_H/a #ifndef SUSFS_MAX_LEN_PATHNAME\n#define SUSFS_MAX_LEN_PATHNAME 512\n#endif' include/linux/susfs.h
-          fi
-
-          # Correction de la structure mmap_sem propre à LineageOS & inclusion SusFS
-          sed -i 's/mmap_sem/mmap_lock/g' fs/proc/base.c fs/proc/task_mmu.c || true
-          if ! grep -q "linux/susfs.h" fs/proc/task_mmu.c; then
-            sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          fi
-
-          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -152,14 +82,9 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration
+          # Forçage des drapeaux de configuration (sans SusFS)
           {
             echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
