@@ -31,7 +31,7 @@ jobs:
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
           wget -O boot.img ${{ env.BOOT_IMG_URL }}
 
-      - name: 📂 Intégration de ReSukiSU & Application Propre des Hooks
+      - name: 📂 Intégration de ton dossier kernelSU local & Application des Hooks
         run: |
           set -e
           cd ${{ env.KERNEL_PATH }}
@@ -39,9 +39,10 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires..."
           rm -rf drivers/kernelsu kernelSU || true
 
-          echo "📥 Téléchargement de ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-          cd drivers/kernelsu && rm -rf .git && cd ../..
+          echo "📁 Copie de ton dossier kernelSU personnel vers drivers/kernelsu..."
+          mkdir -p drivers
+          cp -r ../kernelSU drivers/kernelsu
+          rm -rf drivers/kernelsu/.git || true
 
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
@@ -62,15 +63,12 @@ jobs:
           echo "🔧 Correction de pkg_observer.c pour le noyau 4.19..."
           if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
             sed -i 's/\.handle_inode_event = ksu_handle_inode_event,/\.handle_event = (void *)ksu_handle_inode_event,/g' drivers/kernelsu/manager/pkg_observer.c || true
+            sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
           fi
+
           echo "🔧 Correction des chemins d'en-tête pour pointer vers drivers/kernelsu..."
           find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../kernelSU/|../drivers/kernelsu/|g' {} + || true
           find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|"ksu.h"|"drivers/kernelsu/ksu.h"|g' {} + || true
-
-          echo "🔧 Correction de fsnotify_ops pour le noyau 4.19 dans pkg_observer.c..."
-          if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
-            sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
-          fi
 
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
@@ -79,7 +77,7 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU
           scripts/config --file out/.config --disable CONFIG_KSU_SUSFS || true
           
-          echo "🛡️ Configuration de ReSukiSU pour un noyau Non-GKI..."
+          echo "🛡️ Configuration pour un noyau Non-GKI..."
           if [ -f drivers/kernelsu/Kbuild ]; then
             sed -i 's/CONFIG_KSU_SUSFS=y/# CONFIG_KSU_SUSFS is not set/g' drivers/kernelsu/Kbuild || true
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
