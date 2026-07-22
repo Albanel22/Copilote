@@ -203,15 +203,12 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           
-          echo "🩹 Application des patches personnalisés..."
-          for patch_file in ../patches/open.patch ../patches/read_write.patch ../patches/selinux.patch ../patches/stat.patch; do
-            if [ -f "$patch_file" ]; then
-              echo "Application de $(basename "$patch_file")..."
-              git apply "$patch_file" || patch -p1 < "$patch_file" || true
-            else
-              echo "⚠️ Avertissement : $patch_file introuvable."
-            fi
-          done
+          echo "🩹 Application du patch global KernelSU (kernel-4.19_5.4.patch)..."
+          if [ -f ../patches/kernel-4.19_5.4.patch ]; then
+            git apply ../patches/kernel-4.19_5.4.patch || patch -p1 < ../patches/kernel-4.19_5.4.patch || true
+          else
+            echo "⚠️ Avertissement : Le patch global est introuvable."
+          fi
 
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
