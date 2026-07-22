@@ -48,6 +48,20 @@ jobs:
           find drivers/kernelsu/kernel/ -type f -name "*.h" -exec sed -i 's|#include "../uapi/|#include "uapi/|g' {} + || true
           find drivers/kernelsu/kernel/ -type f -name "*.h" -exec sed -i 's|#include <uapi/|#include "uapi/|g' {} + || true
 
+          echo "🔧 Génération d'un Kbuild explicite pour compiler les sources de KernelSU..."
+          cat << 'EOF' > drivers/kernelsu/kernel/Kbuild
+          obj-y += core.o
+          obj-y += cred.o
+          obj-y += epath.o
+          obj-y += fs.o
+          obj-y += hooks.o
+          obj-y += ksu.o
+          obj-y += manager.o
+          obj-y += net.o
+          obj-y += supercall.o
+          obj-y += uid_cache.o
+          EOF
+
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
           mkdir -p drivers/kernelsu/kernel/tools
@@ -93,7 +107,7 @@ jobs:
             sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild || true
           fi
 
-          echo "🚀 Lancement de la compilation du noyau..."
+          echo "🚀 Lancement de la compilation du noyau en direct..."
           make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ KCFLAGS="-Wno-error" HOSTCFLAGS="-Wno-error" --output-sync=none V=1
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
@@ -119,9 +133,7 @@ jobs:
           else
             echo "❌ Erreur lors du repackage du boot.img"
             exit 1
-          fi 
-
-          
+          fi
           
       - name: 📤 Upload du new-boot.img Prêt à Flasher
         uses: actions/upload-artifact@v4
