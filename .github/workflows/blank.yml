@@ -40,9 +40,10 @@ jobs:
           rm -rf drivers/kernelsu kernelSU || true
 
           echo "📁 Copie de ton dossier kernelSU personnel vers drivers/kernelsu..."
-          mkdir -p drivers
-          cp -r ../kernelSU drivers/kernelsu
-          rm -rf drivers/kernelsu/.git || true
+          mkdir -p drivers/kernelsu/kernel
+          cp -r ../kernelSU/* drivers/kernelsu/kernel/
+          rm -rf drivers/kernelsu/kernel/.git || true
+
 
           echo "🔧 Réorganisation automatique de la structure Kconfig..."
           if [ -f drivers/kernelsu/Kconfig ] && [ ! -f drivers/kernelsu/kernel/Kconfig ]; then
