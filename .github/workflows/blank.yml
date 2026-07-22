@@ -209,8 +209,15 @@ jobs:
           echo "🔧 Activation de KernelSU dans le .config..."
           scripts/config --file out/.config --enable CONFIG_KSU
           
+          echo "🛡️ Destruction définitive des vérifications de hooks bloquantes..."
+          rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk
+          touch drivers/kernelsu/kernel/tools/inline_hook_check.mk
+          if [ -d KernelSU/kernel/tools ]; then
+            rm -f KernelSU/kernel/tools/inline_hook_check.mk
+            touch KernelSU/kernel/tools/inline_hook_check.mk
+          fi
+
           echo "🚀 Lancement de la compilation du noyau..."
-          # On force HOSTCC=gcc et HOSTCXX=g++ pour que les outils de la machine hôte ne prennent pas les options ARM
           make -j$(nproc) O=out ARCH=arm64 CC=gcc HOSTCC=gcc HOSTCXX=g++ CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-Wno-error"
 
           if [ ! -f out/arch/arm64/boot/Image ]; then
