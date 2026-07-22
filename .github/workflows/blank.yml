@@ -48,6 +48,9 @@ jobs:
           find drivers/kernelsu/kernel/ -type f -name "*.h" -exec sed -i 's|#include "../uapi/|#include "uapi/|g' {} + || true
           find drivers/kernelsu/kernel/ -type f -name "*.h" -exec sed -i 's|#include <uapi/|#include "uapi/|g' {} + || true
 
+          echo "🔧 Correction de l'inclusion d'app_profile.h dans supercall.h..."
+          sed -i 's|#include "uapi/app_profile.h"|#include "app_profile.h"|g' drivers/kernelsu/kernel/uapi/supercall.h || true
+
           echo "🔧 Génération d'un Kbuild explicite pour compiler les sources de KernelSU..."
           cat << 'EOF' > drivers/kernelsu/kernel/Kbuild
           obj-y += core.o
