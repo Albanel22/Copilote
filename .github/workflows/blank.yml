@@ -1,4 +1,4 @@
-Aname: Kernel CI — build & package
+name: Kernel CI — build & package
 
 on:
   push:
