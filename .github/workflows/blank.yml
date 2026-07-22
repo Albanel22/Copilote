@@ -53,12 +53,16 @@ jobs:
 
           echo "🩹 Application du patch global KernelSU (kernel-4.19_5.4.patch)..."
           if [ -f ../patches/kernel-4.19_5.4.patch ]; then
-            git apply ../patches/kernel-4.19_5.4.patch || patch -p1 < ../patches/kernel-4.19_5.4.patch || true
+            patch -p1 --fuzz=3 < ../patches/kernel-4.19_5.4.patch || true
           else
             echo "❌ Erreur : Le patch global est introuvable dans le dossier patches/ !"
             exit 1
           fi
 
+          echo "🔧 Correction de pkg_observer.c pour le noyau 4.19..."
+          if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
+            sed -i 's/\.handle_inode_event = ksu_handle_inode_event,/\.handle_event = (void *)ksu_handle_inode_event,/g' drivers/kernelsu/manager/pkg_observer.c || true
+          fi
           echo "🔧 Correction des chemins d'en-tête pour pointer vers drivers/kernelsu..."
           find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../kernelSU/|../drivers/kernelsu/|g' {} + || true
           find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|"ksu.h"|"drivers/kernelsu/ksu.h"|g' {} + || true
