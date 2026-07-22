@@ -69,10 +69,11 @@ jobs:
             sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
           fi
 
-          echo "🔧 Correction des chemins d'en-tête pour pointer vers drivers/kernelsu..."
-          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../kernelSU/|../drivers/kernelsu/|g' {} + || true
-          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|"ksu.h"|"drivers/kernelsu/ksu.h"|g' {} + || true
-
+          echo "🔧 Correction des chemins d'en-tête pour pointer vers drivers/kernelsu/kernel..."
+          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../kernelSU/|../drivers/kernelsu/kernel/|g' {} + || true
+          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|"ksu.h"|"drivers/kernelsu/kernel/ksu.h"|g' {} + || true
+          find fs/ drivers/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|../drivers/kernelsu/|../drivers/kernelsu/kernel/|g' {} + || true
+          
           echo "⚙️ Configuration du defconfig..."
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
