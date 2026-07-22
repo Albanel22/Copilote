@@ -1,4 +1,4 @@
-name: 🚀 Build Kernel with ReSukiSU Only
+des: 🚀 Build Kernel with ReSukiSU Only
 
 on:
   workflow_dispatch:
@@ -23,9 +23,7 @@ jobs:
 
       - name: ⚙️ Setup Environment & Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget unzip
-
+          sudo apt-get uupdate          sudo apt-get install -y bc bison ca-certificates curl flex gcc-aarch64-linux-gnu git libssl-dev libelf-dev python3 python3-pip rsync zlib1g-dev wget uunzip
       - name: 📥 Download Kernel Source & Official Boot.img
         run: |
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
@@ -44,11 +42,8 @@ jobs:
           cp -r ../kernelSU/* drivers/kernelsu/kernel/
           rm -rf drivers/kernelsu/kernel/.git || true
           
-          echo "🔧 Correction des chemins d'inclusion internes de KernelSU..."
-          find drivers/kernelsu/kernel/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|#include "uapi/|#include "../uapi/|g' {} + || true
-
-          echo "🔧 Correction spécifique pour supercall.h dans ksu.h..."
-          sed -i 's|#include "../uapi/supercall.h"|#include "uapi/supercall.h"|g' drivers/kernelsu/kernel/ksu.h || true
+          echo "🔧 Correction globale des chemins d'en-tête uapi dans ksu.h..."
+          sed -i 's|#include "../uapi/|#include "uapi/|g' drivers/kernelsu/kernel/ksu.h || true
 
           # NEUTRALISATION TOTALE DES VÉRIFICATIONS DE HOOKS QUI BLOQUENT
           rm -f drivers/kernelsu/kernel/tools/inline_hook_check.mk || true
@@ -70,6 +65,11 @@ jobs:
           if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
             sed -i 's/\.handle_inode_event = ksu_handle_inode_event,/\.handle_event = (void *)ksu_handle_inode_event,/g' drivers/kernelsu/manager/pkg_observer.c || true
             sed -i 's/\.handle_inode_event/\.handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
+          fi
+
+          echo "🔧 Correction de la double déclaration 'static' dans le pilote d'affichage Motorola..."
+          if [ -f techpack/display/msm/dsi/dsi_display_mot_ext.c ]; then
+            sed -i 's/static static/static/g' techpack/display/msm/dsi/dsi_display_mot_ext.c || true
           fi
 
           echo "🔧 Correction propre des chemins d'en-tête pour pointer vers drivers/kernelsu/kernel..."
@@ -98,6 +98,26 @@ jobs:
             exit 1
           fi
 
+          echo "📦 Repackage automatique avec magiskboot..."
+          cd ..
+          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          unzip Magisk-v27.0.apk lib/armeabi-v7a/libmagiskboot.so
+          mv lib/armeabi-v7a/libmagiskboot.so magiskboot
+          chmod +x magiskboot
+
+          ./magiskboot unpack boot.img
+          cp ${{ env.KERNEL_PATH }}/out/arch/arm64/boot/Image kernel
+          ./magiskboot repack boot.img
+          
+          mkdir -p output_artifacts
+          if [ -f new-boot.img ]; then
+            cp new-boot.img output_artifacts/boot.img
+            echo "✅ boot.img généré et renommé avec succès !"
+          else
+            echo "❌ Erreur lors du repackage du boot.img"
+            exit 1
+          fi
+      
           echo "📦 Repackage automatique avec magiskboot..."
           cd ..
           curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
