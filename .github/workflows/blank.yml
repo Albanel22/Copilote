@@ -80,13 +80,17 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration ReSukiSU (Manual Hook activé)
+          # Forçage des drapeaux de configuration ReSukiSU (Mode Kprobe / Dynamique)
           {
             echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_MANUAL_HOOK=y"
+            # On désactive le hook manuel pour laisser ReSukiSU utiliser les Kprobes
+            # echo "CONFIG_KSU_MANUAL_HOOK is not set" # (ou on commente la ligne manuelle)
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_HAVE_KPROBES_ON_FTRACE=y"
+            echo "CONFIG_KPROBE_EVENTS=y"
+            echo "CONFIG_DYNAMIC_FTRACE=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
