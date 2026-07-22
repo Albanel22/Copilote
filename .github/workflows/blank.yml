@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU
+      - name: 📂 Intégration ReSukiSU via setup.sh
         run: |
           set -e
           
@@ -54,15 +54,10 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
 
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU || true
+          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
 
-          echo "📥 Téléchargement de ReSukiSU..."
-          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
-          cd drivers/kernelsu && rm -rf .git && cd ../..
-
-          # Liaison native de KernelSU au build-system
-          if ! grep -q "kernelsu" drivers/Kconfig; then echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig; fi
-          if ! grep -q "kernelsu" drivers/Makefile; then echo "obj-y += kernelsu/kernel/" >> drivers/Makefile; fi
+          echo "📥 Exécution du script d'installation ReSukiSU..."
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -82,7 +77,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration (sans SusFS)
+          # Forçage des drapeaux de configuration (Sans SusFS)
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KPROBES=y"
