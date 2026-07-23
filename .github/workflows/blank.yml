@@ -71,11 +71,12 @@ jobs:
           cp $GITHUB_WORKSPACE/setuid_hook.c drivers/kernelsu/hook/setuid_hook.c
           echo "✅ Fichier setuid_hook.c remplacé avec succès !"
       
-      - name: 💉 Application des patches manuels du noyau 4.19 (Désactivé pour test)
+      - name: 💉 Désactivation temporaire des hooks d'appels système (Test 2)
         run: |
           cd ${{ env.KERNEL_PATH }}
-          # git apply --whitespace=nowarn --reject $GITHUB_WORKSPACE/kernelsu_manual_hooks.patch || true
-          echo "⚠️ Patch manuel désactivé pour le build de test (Isolation du suspect 1) !"
+          # Retire ou commente la commande qui applique le patch fs/stat.c ou les appels système
+          # git checkout fs/stat.c || true
+          echo "⚠️ Hooks d'appels système désactivés pour isoler le build 596 !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
