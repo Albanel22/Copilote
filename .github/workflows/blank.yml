@@ -9,6 +9,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
 
 jobs:
   build:
@@ -21,12 +22,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
-
+      - name: Download Stock Boot Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📥 Téléchargement du boot.img d'origine..."
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -40,29 +45,14 @@ jobs:
           
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-
           cd ${{ env.KERNEL_PATH }}
-
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
-
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-
-          # On commente le blocage des TP hooks dans Kbuild
-          sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild
           
-          # Injection de ton pkg_observer.c corrigé pour le noyau 4.19
-          cp $GITHUB_WORKSPACE/pkg_observer.c drivers/kernelsu/manager/pkg_observer.c
-          echo "✅ Fichier pkg_observer.c remplacé avec succès !"
-          
-          # Injection de ton setuid_hook.c corrigé avec le stub
-          cp $GITHUB_WORKSPACE/setuid_hook.c drivers/kernelsu/hook/setuid_hook.c
-          echo "✅ Fichier setuid_hook.c remplacé avec succès !"
-      
       - name: 💉 Activation des hooks d'appels système (Root actif)
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -101,15 +91,13 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration ReSukiSU
+          # Forçage des drapeaux de configuration ReSukiSU (Manual Hook activé)
           {
             echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_MANUAL_HOOK=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_HAVE_KPROBES_ON_FTRACE=y"
-            echo "CONFIG_KPROBE_EVENTS=y"
-            echo "CONFIG_DYNAMIC_FTRACE=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
@@ -129,10 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p repack
-          
-          # On décompresse le fichier stock local boot.zip de la racine
-          unzip -o boot.zip
-          cp boot.img repack/boot.img
+          cp boot-stock.img repack/boot.img
           
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
@@ -142,14 +127,13 @@ jobs:
           
           cd repack
           ./magiskboot unpack boot.img
-          cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
-
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
