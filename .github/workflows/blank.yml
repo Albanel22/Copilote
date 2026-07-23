@@ -63,12 +63,25 @@ jobs:
           cp $GITHUB_WORKSPACE/setuid_hook.c drivers/kernelsu/hook/setuid_hook.c
           echo "✅ Fichier setuid_hook.c remplacé avec succès !"
       
-      - name: 💉 Désactivation temporaire des hooks d'appels système (Test 2)
+      - name: 💉 Activation des hooks d'appels système (Root actif)
         run: |
           cd ${{ env.KERNEL_PATH }}
-          # Retire ou commente la commande qui applique le patch fs/stat.c ou les appels système
-          # git checkout fs/stat.c || true
-          echo "⚠️ Hooks d'appels système désactivés pour isoler le build !"
+          
+          # Si tu utilises un patch spécifique pour les appels système (ex: stat, faccessat, etc.)
+          # Assure-toi qu'il est bien appliqué ici. Par exemple :
+          if [ -f "$GITHUB_WORKSPACE/sys_hook.patch" ]; then
+              git apply "$GITHUB_WORKSPACE/sys_hook.patch"
+          elif [ -f "$GITHUB_WORKSPACE/fs_stat_patch.patch" ]; then
+              git apply "$GITHUB_WORKSPACE/fs_stat_patch.patch"
+          fi
+          
+          # Si tu modifies directement fs/stat.c via un fichier externe ou un script :
+          if [ -f "$GITHUB_WORKSPACE/stat.c" ]; then
+              cp "$GITHUB_WORKSPACE/stat.c" fs/stat.c
+              echo "✅ Hook fs/stat.c injecté avec succès pour le root !"
+          fi
+          
+          echo "🔥 Hooks d'appels système activés pour restaurer les privilèges root !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
