@@ -27,6 +27,11 @@
 #include "compat/kernel_compat.h"
 #include "feature/kernel_umount.h"
 #include "feature/sucompat.h"
+// Stub pour le noyau 4.19 placé tout en haut
+void ksu_set_current_proc_unprivillege(void)
+{
+    // Rien à faire ici pour le moment
+}
 
 static inline void ksu_set_file_immutable(const char *path_name, bool immutable)
 {
