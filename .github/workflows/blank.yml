@@ -60,103 +60,101 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-      - name: 💉 Injection propre des hooks via Python
+      - name: 💉 Injection complète (Déclarations + Appels) via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
-          echo "⚙️ Lancement du script d'injection des hooks..."
+          echo "⚙️ Réinitialisation et injection propre des hooks..."
+
+          # Restauration propre des fichiers modifiés
+          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c || true
 
           python3 - << 'EOF'
           import os
 
-          def insert_after(path, target, addition):
+          def inject_hook(path, target_func_header, declaration, call_body):
               if not os.path.exists(path):
                   print(f"❌ Fichier introuvable : {path}")
-                  return False
-              with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                  content = f.read()
-              if addition in content:
-                  print(f"⚠️ Déjà injecté dans {path}")
-                  return True
-              if target in content:
-                  content = content.replace(target, target + "\n" + addition, 1)
-                  with open(path, 'w', encoding='utf-8') as f:
-                      f.write(content)
-                  print(f"✅ Injecté avec succès dans {path}")
-                  return True
-              else:
-                  print(f"❌ Cible introuvable dans {path} : {target[:40]}...")
-                  return False
-
-          def replace_str(path, old, new):
-              if not os.path.exists(path):
                   return
               with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                   content = f.read()
-              if old in content:
-                  content = content.replace(old, new)
-                  with open(path, 'w', encoding='utf-8') as f:
-                      f.write(content)
-                  print(f"✅ Remplacé dans {path}")
+              
+              if call_body in content:
+                  print(f"⚠️ Déjà injecté dans {path}")
+                  return
+
+              if target_func_header in content:
+                  # 1. Insérer la déclaration extern juste avant l'en-tête de la fonction
+                  content = content.replace(target_func_header, declaration + "\n" + target_func_header, 1)
+                  
+                  # 2. Trouver l'accolade ouvrante de la fonction pour y insérer l'appel
+                  idx = content.find(target_func_header)
+                  brace_idx = content.find('{', idx)
+                  if brace_idx != -1:
+                      insertion = "\n" + call_body + "\n"
+                      content = content[:brace_idx + 1] + insertion + content[brace_idx + 1:]
+                      with open(path, 'w', encoding='utf-8') as f:
+                          f.write(content)
+                      print(f"✅ Injecté avec succès (déclaration + appel) dans {path}")
+                      return
+              print(f"❌ Cible introuvable dans {path} : {target_func_header[:30]}...")
 
           # 1. drivers/input/input.c
-          insert_after(
+          inject_hook(
               "drivers/input/input.c",
-              "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)\n{",
+              "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_input_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
           )
 
           # 2. fs/exec.c
-          insert_after(
+          inject_hook(
               "fs/exec.c",
-              "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{",
+              "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif"
           )
 
           # 3. fs/open.c
-          insert_after(
+          inject_hook(
               "fs/open.c",
-              "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)\n{",
+              "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
           )
 
           # 4. fs/read_write.c
-          insert_after(
+          inject_hook(
               "fs/read_write.c",
-              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
+              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_init_rc_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif"
           )
 
           # 5. fs/stat.c
-          insert_after(
+          inject_hook(
               "fs/stat.c",
-              "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)\n{",
+              "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_stat(int *dfd, struct filename **filename_ptr, int *flags);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif"
           )
 
           # 6. kernel/reboot.c
-          insert_after(
+          inject_hook(
               "kernel/reboot.c",
-              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)\n{",
+              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif"
           )
 
           # 7. kernel/sys.c
-          insert_after(
+          inject_hook(
               "kernel/sys.c",
-              "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)\n{",
+              "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif"
           )
 
-          # 8. Exports SELinux symbols
-          replace_str("security/selinux/hooks.c", "static struct security_operations selinux_ops =", "struct security_operations selinux_ops =")
-          replace_str("security/selinux/selinuxfs.c", "static DEFINE_MUTEX(sel_mutex);", "DEFINE_MUTEX(sel_mutex);")
-          replace_str("security/selinux/selinuxfs.c", "static const struct file_operations sel_handle_status_ops =", "const struct file_operations sel_handle_status_ops =")
-          replace_str("security/selinux/selinuxfs.c", "static ssize_t (*write_op[])", "ssize_t (*write_op[])")
-          replace_str("security/selinux/ss/services.c", "static DEFINE_RWLOCK(policy_rwlock);", "DEFINE_RWLOCK(policy_rwlock);")
-          replace_str("security/selinux/ss/services.c", "static struct page *selinux_status_page;", "struct page *selinux_status_page;")
-          replace_str("security/selinux/ss/services.c", "static DEFINE_MUTEX(selinux_status_lock);", "DEFINE_MUTEX(selinux_status_lock);")
-
-          print("✨ Tous les hooks et symboles SELinux ont été injectés avec succès !")
+          print("✨ Tous les hooks et leurs déclarations extern ont été injectés avec succès !")
           EOF
              
       - name: Multi-stage Kernel Compilation
