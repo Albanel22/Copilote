@@ -9,7 +9,6 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260705/boot.img'
 
 jobs:
   build:
@@ -22,13 +21,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
-
-      - name: Download Stock Boot Image
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "📥 Téléchargement du boot.img d'origine..."
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
 
       - name: Clone Motorola Kernel Source
         run: |
@@ -76,7 +68,7 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
           # Retire ou commente la commande qui applique le patch fs/stat.c ou les appels système
           # git checkout fs/stat.c || true
-          echo "⚠️ Hooks d'appels système désactivés pour isoler le build 596 !"
+          echo "⚠️ Hooks d'appels système désactivés pour isoler le build !"
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -125,18 +117,19 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           
-          # On décompresse le fichier stock local
-          unzip boot.zip
+          # On décompresse le fichier stock local boot.zip de la racine
+          unzip -o boot.zip
           cp boot.img repack/boot.img
           
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
+          rm -rf Magisk-v27.0.apk lib/
           
           cd repack
           ./magiskboot unpack boot.img
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           
