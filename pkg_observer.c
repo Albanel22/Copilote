@@ -36,7 +36,7 @@ static int ksu_handle_inode_event(struct fsnotify_mark *mark, u32 mask, struct i
 }
 
 static const struct fsnotify_ops ksu_ops = {
-    .handle_event = ksu_handle_inode_event,
+    .handle_event = (int (*)(struct fsnotify_group *, struct inode *, u32, const void *, int, const unsigned char *, u32, struct fsnotify_iter_info *))ksu_handle_inode_event,
 };
 
 static int add_mark_on_inode(struct inode *inode, u32 mask, struct fsnotify_mark **out)
