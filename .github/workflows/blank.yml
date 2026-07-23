@@ -60,14 +60,14 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-          # ---> NOUVEAU : On commente le blocage des TP hooks dans Kbuild <---
+          # On commente le blocage des TP hooks dans Kbuild
           sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild
           
-          # ---> NOUVEAU : Injection de ton pkg_observer.c corrigé pour le noyau 4.19 <---
+          # Injection de ton pkg_observer.c corrigé pour le noyau 4.19
           cp $GITHUB_WORKSPACE/pkg_observer.c drivers/kernelsu/manager/pkg_observer.c
           echo "✅ Fichier pkg_observer.c remplacé avec succès !"
           
-          # ---> AJOUT : Injection de ton setuid_hook.c corrigé avec le stub <---
+          # Injection de ton setuid_hook.c corrigé avec le stub
           cp $GITHUB_WORKSPACE/setuid_hook.c drivers/kernelsu/hook/setuid_hook.c
           echo "✅ Fichier setuid_hook.c remplacé avec succès !"
       
@@ -95,11 +95,9 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration ReSukiSU (Mode Kprobe / Dynamique)
+          # Forçage des drapeaux de configuration ReSukiSU
           {
             echo "CONFIG_KSU=y"
-            # On désactive le hook manuel pour laisser ReSukiSU utiliser les Kprobes
-            # echo "CONFIG_KSU_MANUAL_HOOK is not set" # (ou on commente la ligne manuelle)
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
