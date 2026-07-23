@@ -60,18 +60,107 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-      - name: 💉 Application du patch de hooks manuels (kernelsu_manual_hooks.patch)
+      - name: 💉 Injection directe des hooks manuels et symboles SELinux
         run: |
           cd ${{ env.KERNEL_PATH }}
-          if [ -f "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch" ]; then
-              echo "⚙️ Application du patch kernelsu_manual_hooks.patch..."
-              git apply "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch"
-              echo "✅ Patch appliqué avec succès !"
-          else
-              echo "❌ Erreur : Fichier kernelsu_manual_hooks.patch introuvable à la racine du dépôt !"
-              exit 1
-          fi
+          echo "⚙️ Injection manuelle des hooks dans les sources du noyau..."
 
+          # 1. drivers/input/input.c
+          sed -i '/void input_event/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          extern bool ksu_input_hook __read_mostly;\
+          extern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\
+          #endif\n' drivers/input/input.c
+
+          sed -i '/void input_event(struct input_dev \*dev,/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    if (unlikely(ksu_input_hook))\
+          \        ksu_handle_input_handle_event(&type, &code, &value);\
+          #endif\n' drivers/input/input.c
+
+          # 2. fs/exec.c
+          sed -i '/int do_execve(/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          __attribute__((hot))\
+          extern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\
+          #endif\n' fs/exec.c
+
+          sed -i '/int do_execve(/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    ksu_handle_execve(&filename, &__argv, &__envp);\
+          #endif' fs/exec.c
+
+          # 3. fs/open.c
+          sed -i '/SYSCALL_DEFINE3(faccessat/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          __attribute__((hot))\
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\
+          #endif\n' fs/open.c
+
+          sed -i '/SYSCALL_DEFINE3(faccessat/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    ksu_handle_faccessat(&dfd, &filename, &mode, NULL);\
+          #endif' fs/open.c
+
+          # 4. fs/read_write.c
+          sed -i '/SYSCALL_DEFINE3(read/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          extern bool ksu_init_rc_hook __read_mostly;\
+          extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\
+          #endif\n' fs/read_write.c
+
+          sed -i '/SYSCALL_DEFINE3(read/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    if (unlikely(ksu_init_rc_hook))\
+          \        ksu_handle_sys_read(fd, &buf, &count);\
+          #endif' fs/read_write.c
+
+          # 5. fs/stat.c
+          sed -i '/SYSCALL_DEFINE4(newfstatat/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          __attribute__((hot))\
+          extern int ksu_handle_stat(int *dfd, struct filename **filename_ptr, int *flags);\
+          #endif\n' fs/stat.c
+
+          sed -i '/SYSCALL_DEFINE4(newfstatat/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    struct filename *name = getname(filename);\
+          \    ksu_handle_stat(&dfd, &name, &flag);\
+          #endif' fs/stat.c
+
+          # 6. kernel/reboot.c
+          sed -i '/SYSCALL_DEFINE4(reboot/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\
+          #endif\n' kernel/reboot.c
+
+          sed -i '/SYSCALL_DEFINE4(reboot/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\
+          #endif' kernel/reboot.c
+
+          # 7. kernel/sys.c
+          sed -i '/long __sys_setresuid(/i \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\
+          #endif\n' kernel/sys.c
+
+          sed -i '/long __sys_setresuid(/a \
+          #ifdef CONFIG_KSU_MANUAL_HOOK\
+          \    (void)ksu_handle_setresuid(ruid, euid, suid);\
+          #endif' kernel/sys.c
+
+          # 8. Exports SELinux symbols
+          sed -i 's/static struct security_operations selinux_ops/struct security_operations selinux_ops/g' security/selinux/hooks.c
+          sed -i 's/static DEFINE_MUTEX(sel_mutex);/DEFINE_MUTEX(sel_mutex);/g' security/selinux/selinuxfs.c
+          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/g' security/selinux/selinuxfs.c
+          sed -i 's/static ssize_t (\*write_op\[\])/ssize_t (\*write_op\[\])/g' security/selinux/selinuxfs.c
+          sed -i 's/static DEFINE_RWLOCK(policy_rwlock);/DEFINE_RWLOCK(policy_rwlock);/g' security/selinux/ss/services.c
+          sed -i 's/static struct page \*selinux_status_page;/struct page \*selinux_status_page;/g' security/selinux/ss/services.c
+          sed -i 's/static DEFINE_MUTEX(selinux_status_lock);/DEFINE_MUTEX(selinux_status_lock);/g' security/selinux/ss/services.c
+
+          echo "✅ Tous les hooks manuels et symboles SELinux ont été injectés avec succès !"
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
