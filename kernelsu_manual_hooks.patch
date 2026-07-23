@@ -5,16 +5,16 @@ Subject: [PATCH] ksu: unify manual hooks and export necessary SELinux symbols fo
 
 Signed-off-by: Personal Collaborator <ai@collaborator>
 ---
- drivers/input/input.c               | 11 +++++++++++
- fs/exec.c                           | 12 ++++++++++++
- fs/open.c                           | 10 ++++++++++
- fs/read_write.c                     | 10 ++++++++++
- fs/stat.c                           | 10 ++++++++++
- kernel/reboot.c                     |  8 ++++++++
- kernel/sys.c                        | 10 ++++++++++
- security/selinux/hooks.c            |  2 +-
- security/selinux/selinuxfs.c        |  6 +++---
- security/selinux/ss/services.c      |  6 +++---
+ drivers/input/input.c              | 11 +++++++++++
+ fs/exec.c                          | 12 ++++++++++++
+ fs/open.c                          | 10 ++++++++++
+ fs/read_write.c                    | 10 ++++++++++
+ fs/stat.c                          | 10 ++++++++++
+ kernel/reboot.c                    |  8 ++++++++
+ kernel/sys.c                       | 10 ++++++++++
+ security/selinux/hooks.c           |  2 +-
+ security/selinux/selinuxfs.c       |  6 +++---
+ security/selinux/ss/services.c     |  6 +++---
  10 files changed, 78 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/input/input.c b/drivers/input/input.c
