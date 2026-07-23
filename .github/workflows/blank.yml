@@ -1,8 +1,6 @@
 name: Kernel CI — build & package
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 env:
