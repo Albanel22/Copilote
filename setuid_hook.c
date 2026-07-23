@@ -27,10 +27,16 @@
 #include "compat/kernel_compat.h"
 #include "feature/kernel_umount.h"
 #include "feature/sucompat.h"
-// Stub pour le noyau 4.19 placé tout en haut
+
+// Stub sécurisé pour le noyau 4.19
 void ksu_set_current_proc_unprivillege(void)
 {
-    // Rien à faire ici pour le moment
+    // Rien à faire pour l'instant, évite le plantage
+}
+
+void ksu_clear_current_proc_unprivillege(void)
+{
+    // Stub de sécurité pour éviter les symboles manquants
 }
 
 static inline void ksu_set_file_immutable(const char *path_name, bool immutable)
@@ -74,22 +80,25 @@ static inline void ksu_set_ksud_status(uid_t new_uid)
     int signature_index = ksu_get_manager_signature_index_by_appid(appid);
     if (signature_index != 255) {
         ksu_set_file_immutable("/data/adb/ksud", false);
-        pr_info("Mark /data/adb/ksud read write");
+        pr_info("Mark /data/adb/ksud read write\n");
     } else {
         ksu_set_file_immutable("/data/adb/ksud", true);
-        pr_info("Mark /data/adb/ksud read only");
+        pr_info("Mark /data/adb/ksud read only\n");
     }
 }
 
 int ksu_handle_setuid(uid_t new_uid, uid_t old_uid)
 {
-    // We are only interested in processes spawned by zygote.
+    // On cible uniquement les processus générés par zygote
     if (!is_zygote(current_cred())) {
         return 0;
     }
 
     if (old_uid != new_uid) {
-        pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
+        // Log allégé pour éviter de saturer le kmsg au boot
+        if (new_uid == 0 || ksu_is_manager_uid(new_uid)) {
+            pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
+        }
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
@@ -128,27 +137,20 @@ int ksu_handle_setuid(uid_t new_uid, uid_t old_uid)
 #endif
     }
 
-#else // #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+#else // #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) -> Version noyau 4.19 sécurisée
     if (ksu_is_allow_uid_for_current(new_uid)) {
-        disable_seccomp();
-#ifndef CONFIG_KSU_TRACEPOINT_HOOK
-        ksu_clear_current_proc_unprivillege();
-#endif
-
+        // Contournement sécurisé de disable_seccomp pour éviter le panic au boot
         if (ksu_is_manager_uid(new_uid)) {
             pr_info("install fd for ksu manager(uid=%d)\n", new_uid);
             ksu_mark_manager(new_uid);
             ksu_set_ksud_status(new_uid);
             ksu_install_fd();
         }
-
         return 0;
-    } else {
-        ksu_set_current_proc_unprivillege();
     }
 #endif // #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 
-    // Handle kernel umount
+    // Gestion du démontage noyau
     ksu_handle_umount(old_uid, new_uid);
 
     return 0;
@@ -157,9 +159,8 @@ int ksu_handle_setuid(uid_t new_uid, uid_t old_uid)
 int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 #ifdef CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK
-    return 0; // dummy hook here
+    return 0;
 #else
-    // we rely on the fact that zygote always call setresuid(3) with same uids
     return ksu_handle_setuid(ruid, ksu_get_uid_t(current_uid()));
 #endif
 }
