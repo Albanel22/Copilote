@@ -60,12 +60,12 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-      - name: 💉 Application du patch de hooks manuels (Dépôt)
+      - name: 💉 Application du patch via la commande patch
         run: |
           cd ${{ env.KERNEL_PATH }}
           if [ -f "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch" ]; then
-              echo "⚙️ Application de kernelsu_manual_hooks.patch avec tolérance d'alignement..."
-              git apply --fuzz=3 "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch"
+              echo "⚙️ Application de kernelsu_manual_hooks.patch..."
+              patch -p1 --forward < "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch"
               echo "✅ Patch appliqué avec succès !"
           else
               echo "❌ Erreur : Fichier kernelsu_manual_hooks.patch introuvable à la racine du dépôt !"
