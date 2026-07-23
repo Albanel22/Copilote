@@ -22,16 +22,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
+
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -45,34 +48,30 @@ jobs:
           
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+
           cd ${{ env.KERNEL_PATH }}
+
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-          
-      - name: 💉 Activation des hooks d'appels système (Root actif)
+
+      - name: 💉 Application du patch de hooks manuels (kernelsu_manual_hooks.patch)
         run: |
           cd ${{ env.KERNEL_PATH }}
-          
-          # Si tu utilises un patch spécifique pour les appels système (ex: stat, faccessat, etc.)
-          # Assure-toi qu'il est bien appliqué ici. Par exemple :
-          if [ -f "$GITHUB_WORKSPACE/sys_hook.patch" ]; then
-              git apply "$GITHUB_WORKSPACE/sys_hook.patch"
-          elif [ -f "$GITHUB_WORKSPACE/fs_stat_patch.patch" ]; then
-              git apply "$GITHUB_WORKSPACE/fs_stat_patch.patch"
+          if [ -f "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch" ]; then
+              echo "⚙️ Application du patch kernelsu_manual_hooks.patch..."
+              git apply "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch"
+              echo "✅ Patch appliqué avec succès !"
+          else
+              echo "❌ Erreur : Fichier kernelsu_manual_hooks.patch introuvable à la racine du dépôt !"
+              exit 1
           fi
-          
-          # Si tu modifies directement fs/stat.c via un fichier externe ou un script :
-          if [ -f "$GITHUB_WORKSPACE/stat.c" ]; then
-              cp "$GITHUB_WORKSPACE/stat.c" fs/stat.c
-              echo "✅ Hook fs/stat.c injecté avec succès pour le root !"
-          fi
-          
-          echo "🔥 Hooks d'appels système activés pour restaurer les privilèges root !"
-          
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -110,7 +109,7 @@ jobs:
           
           echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-          
+
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -134,6 +133,7 @@ jobs:
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
