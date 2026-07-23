@@ -64,9 +64,11 @@ jobs:
 
           # ---> NOUVEAU : On commente le blocage des TP hooks dans Kbuild <---
           sed -i '/TP hooks are incompatible/s/^/#/' drivers/kernelsu/Kbuild
+          
           # ---> NOUVEAU : Injection de ton pkg_observer.c corrigé pour le noyau 4.19 <---
           cp $GITHUB_WORKSPACE/pkg_observer.c drivers/kernelsu/manager/pkg_observer.c
           echo "✅ Fichier pkg_observer.c remplacé avec succès !"
+          
           # ---> AJOUT : Injection de ton setuid_hook.c corrigé avec le stub <---
           cp $GITHUB_WORKSPACE/setuid_hook.c drivers/kernelsu/hook/setuid_hook.c
           echo "✅ Fichier setuid_hook.c remplacé avec succès !"
