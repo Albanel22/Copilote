@@ -174,8 +174,3 @@ void __exit ksu_setuid_hook_exit(void)
     pr_info("ksu_setuid_hook_exit\n");
     ksu_kernel_umount_exit();
 }
-// Stub de compatibilité pour le noyau 4.19
-void ksu_set_current_proc_unprivillege(void)
-{
-    // Rien à faire, évite l'erreur de symbole non défini à l'édition de liens
-}
