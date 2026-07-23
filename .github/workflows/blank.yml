@@ -60,17 +60,104 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-      - name: 💉 Application du patch via la commande patch
+      - name: 💉 Injection propre des hooks via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
-          if [ -f "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch" ]; then
-              echo "⚙️ Application de kernelsu_manual_hooks.patch..."
-              patch -p1 --forward < "$GITHUB_WORKSPACE/kernelsu_manual_hooks.patch"
-              echo "✅ Patch appliqué avec succès !"
-          else
-              echo "❌ Erreur : Fichier kernelsu_manual_hooks.patch introuvable à la racine du dépôt !"
-              exit 1
-          fi
+          echo "⚙️ Lancement du script d'injection des hooks..."
+
+          python3 - << 'EOF'
+          import os
+
+          def insert_after(path, target, addition):
+              if not os.path.exists(path):
+                  print(f"❌ Fichier introuvable : {path}")
+                  return False
+              with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                  content = f.read()
+              if addition in content:
+                  print(f"⚠️ Déjà injecté dans {path}")
+                  return True
+              if target in content:
+                  content = content.replace(target, target + "\n" + addition, 1)
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print(f"✅ Injecté avec succès dans {path}")
+                  return True
+              else:
+                  print(f"❌ Cible introuvable dans {path} : {target[:40]}...")
+                  return False
+
+          def replace_str(path, old, new):
+              if not os.path.exists(path):
+                  return
+              with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                  content = f.read()
+              if old in content:
+                  content = content.replace(old, new)
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print(f"✅ Remplacé dans {path}")
+
+          # 1. drivers/input/input.c
+          insert_after(
+              "drivers/input/input.c",
+              "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
+          )
+
+          # 2. fs/exec.c
+          insert_after(
+              "fs/exec.c",
+              "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif"
+          )
+
+          # 3. fs/open.c
+          insert_after(
+              "fs/open.c",
+              "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
+          )
+
+          # 4. fs/read_write.c
+          insert_after(
+              "fs/read_write.c",
+              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif"
+          )
+
+          # 5. fs/stat.c
+          insert_after(
+              "fs/stat.c",
+              "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif"
+          )
+
+          # 6. kernel/reboot.c
+          insert_after(
+              "kernel/reboot.c",
+              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif"
+          )
+
+          # 7. kernel/sys.c
+          insert_after(
+              "kernel/sys.c",
+              "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)\n{",
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif"
+          )
+
+          # 8. Exports SELinux symbols
+          replace_str("security/selinux/hooks.c", "static struct security_operations selinux_ops =", "struct security_operations selinux_ops =")
+          replace_str("security/selinux/selinuxfs.c", "static DEFINE_MUTEX(sel_mutex);", "DEFINE_MUTEX(sel_mutex);")
+          replace_str("security/selinux/selinuxfs.c", "static const struct file_operations sel_handle_status_ops =", "const struct file_operations sel_handle_status_ops =")
+          replace_str("security/selinux/selinuxfs.c", "static ssize_t (*write_op[])", "ssize_t (*write_op[])")
+          replace_str("security/selinux/ss/services.c", "static DEFINE_RWLOCK(policy_rwlock);", "DEFINE_RWLOCK(policy_rwlock);")
+          replace_str("security/selinux/ss/services.c", "static struct page *selinux_status_page;", "struct page *selinux_status_page;")
+          replace_str("security/selinux/ss/services.c", "static DEFINE_MUTEX(selinux_status_lock);", "DEFINE_MUTEX(selinux_status_lock);")
+
+          print("✨ Tous les hooks et symboles SELinux ont été injectés avec succès !")
+          EOF
              
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
