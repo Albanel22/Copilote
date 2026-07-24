@@ -211,12 +211,15 @@ jobs:
           # 3. Copier ton Image de noyau compilé dans AnyKernel3
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
           
-          # 4. Inclure ton boot d'origine comme référence si nécessaire
+          # 4. Inclure ton boot d'origine comme référence
           cp boot-stock.img anykernel/boot.img
           
-          # 5. Corriger les chemins pour forcer l'utilisation de bootdevice et ignorer le check
+          # 5. Forcer les options d'AnyKernel3 pour ton Motorola
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
-          sed -i 's/block=.*/block=\/dev\/block\/bootdevice\/by-name\/boot/g' anykernel/anykernel.sh
+          sed -i 's/do.modules=1/do.modules=0/g' anykernel/anykernel.sh
+          
+          # Injecter le bon chemin de partition directement pour éviter qu'il cherche l'OMAP
+          echo 'block=/dev/block/bootdevice/by-name/boot;' >> anykernel/anykernel.sh
           
           # 6. Créer le ZIP final flashable via Recovery
           cd anykernel
