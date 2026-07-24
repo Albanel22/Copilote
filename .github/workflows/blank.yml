@@ -204,7 +204,7 @@ jobs:
           # 1. Création du dossier de sortie final
           mkdir -p final_output
           
-          # 2. Cloner AnyKernel3 (l'utilitaire standard pour flasher les noyaux via recovery)
+          # 2. Cloner AnyKernel3
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           rm -rf anykernel/.git
           
@@ -214,10 +214,11 @@ jobs:
           # 4. Inclure ton boot d'origine comme référence si nécessaire
           cp boot-stock.img anykernel/boot.img
           
-          # 5. Désactiver la vérification de l'appareil pour éviter l'erreur "device not supported"
+          # 5. Corriger les chemins pour forcer l'utilisation de bootdevice et ignorer le check
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
+          sed -i 's/block=.*/block=\/dev\/block\/bootdevice\/by-name\/boot/g' anykernel/anykernel.sh
           
-          # 6. Créer le ZIP final flashable via Recovery (TWRP / OrangeFox)
+          # 6. Créer le ZIP final flashable via Recovery
           cd anykernel
           zip -r9 ../final_output/Kernel-AnyKernel3-Motorola.zip *
           
