@@ -219,23 +219,26 @@ jobs:
           if [ -f ramdisk.cpio ]; then
               ./magiskboot cpio ramdisk.cpio patch
               
-              # Récupération directe du binaire ksud depuis les sources ou compilation si présent, sinon téléchargement d'une source sûre ReSukiSU
-              if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ]; then
-                  cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ./ksud
+              # Récupération automatique et sécurisée du binaire ksud pour l'injection
+              echo "⬇️ Recherche ou récupération du binaire ksud..."
+              KSUD_SRC=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }} -name "ksud" -type f | head -n 1)
+              
+              if [ -n "$KSUD_SRC" ]; then
+                  cp "$KSUD_SRC" ./ksud
+                  echo "✅ ksud trouvé dans les sources du kernel"
               else
-                  # Fallback : téléchargement direct du binaire ksud adapté à ReSukiSU
+                  # Fallback direct si non trouvé dans les sources compilées
                   curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o ./ksud || true
               fi
               
-              if [ -f ./ksud ]; then
+              if [ -f ./ksud ] && [ -s ./ksud ]; then
                   chmod +x ./ksud
-                  # Injection forcée du binaire ksud dans sbin du ramdisk
                   ./magiskboot cpio ramdisk.cpio "add 0755 sbin/ksud ./ksud"
                   echo "✅ ksud injecté avec succès dans sbin/"
               else
-                  echo "❌ Erreur critique : ksud introuvable pour l'injection."
+                  echo "❌ Erreur : Impossible d'obtenir un binaire ksud valide pour le ramdisk."
                   exit 1
-              }
+              fi
               
               rm -f ramdisk.cpio.orig
           fi
@@ -247,7 +250,7 @@ jobs:
           cd ${{ github.workspace }}
           mkdir -p final_output
           cp repack/new-boot.img final_output/boot.img
-
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
