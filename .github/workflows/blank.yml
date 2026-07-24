@@ -211,16 +211,31 @@ jobs:
           
           cd repack
           ./magiskboot unpack boot.img
+          
+          # 1. Remplacement du noyau
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
+          # 2. Gestion et injection du ramdisk ReSukiSU
+          if [ -f ramdisk.cpio ]; then
+              ./magiskboot cpio ramdisk.cpio unpack
+              
+              # Récupération du binaire ksud généré dans les sources du kernel ou intégration
+            # (Le script setup.sh de ReSukiSU place généralement ksud dans le kernel source ou les outputs)
+            if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ]; then
+                cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ./ksud
+                chmod +x ./ksud
+                # Insertion dans le cpio selon l'arborescence requise
+                ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud ksud"
+            fi
+            
+            ./magiskboot cpio ramdisk.cpio patch
+            rm -f ramdisk.cpio.orig
+          fi
+
+           # 3. Réassemblage final
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
-
-      - name: Upload Finished Packaged Assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-motorola_final
-          path: final_output/boot.img
