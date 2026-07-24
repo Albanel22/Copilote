@@ -212,30 +212,31 @@ jobs:
           cd repack
           ./magiskboot unpack boot.img
           
-          # 1. Remplacement du noyau
+          # 1. Remplacement du noyau par ton Image compilée
           cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           
-          # 2. Gestion et injection du ramdisk ReSukiSU
+          # 2. Gestion propre du ramdisk et application des patchs cpio
           if [ -f ramdisk.cpio ]; then
-              ./magiskboot cpio ramdisk.cpio unpack
-              
-              # Récupération du binaire ksud généré dans les sources du kernel ou intégration
-            # (Le script setup.sh de ReSukiSU place généralement ksud dans le kernel source ou les outputs)
+              # Si tu veux inspecter ou extraire des fichiers à la racine (optionnel) :
+            # ./magiskboot cpio ramdisk.cpio extract
+            
+            # Application des patchs natifs du ramdisk
+            ./magiskboot cpio ramdisk.cpio patch
+            
+            # Si le binaire ksud doit être ajouté explicitement dans le cpio :
             if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ]; then
-                cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ./ksud
-                chmod +x ./ksud
-                # Insertion dans le cpio selon l'arborescence requise
-                ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud ksud"
+                ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud ${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud"
             fi
             
-            ./magiskboot cpio ramdisk.cpio patch
             rm -f ramdisk.cpio.orig
           fi
 
-           # 3. Réassemblage final
+            # 3. Réassemblage final de l'image de boot
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
           
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
+
+          
