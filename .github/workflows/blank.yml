@@ -214,7 +214,10 @@ jobs:
           # 4. Inclure ton boot d'origine comme référence si nécessaire
           cp boot-stock.img anykernel/boot.img
           
-          # 5. Créer le ZIP final flashable via Recovery (TWRP / OrangeFox)
+          # 5. Désactiver la vérification de l'appareil pour éviter l'erreur "device not supported"
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
+          
+          # 6. Créer le ZIP final flashable via Recovery (TWRP / OrangeFox)
           cd anykernel
           zip -r9 ../final_output/Kernel-AnyKernel3-Motorola.zip *
           
