@@ -234,4 +234,10 @@ jobs:
           mkdir -p final_output
           cp repack/new-boot.img final_output/boot.img
 
+      - name: Upload Finished Packaged Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-motorola_final
+          path: final_output/boot.img
+
           
