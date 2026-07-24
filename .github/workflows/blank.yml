@@ -217,19 +217,25 @@ jobs:
           
           # 2. Gestion du ramdisk et application des patchs cpio
           if [ -f ramdisk.cpio ]; then
-              # Le patch ReSukiSU/KernelSU s'applique ici
               ./magiskboot cpio ramdisk.cpio patch
               
-              # Si on veut s'assurer que ksud est présent, cherchons-le dans le dossier source
-              KSUD_PATH=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }} -name "ksud" -type f | head -n 1)
-              
-              if [ -n "$KSUD_PATH" ]; then
-                  echo "✅ Binaire ksud trouvé à : $KSUD_PATH"
-                  # Syntaxe correcte pour magiskboot cpio add : un seul argument global ou arguments séparés selon la version
-                  ./magiskboot cpio ramdisk.cpio "add 0755 sbin/ksud $KSUD_PATH"
+              # Récupération directe du binaire ksud depuis les sources ou compilation si présent, sinon téléchargement d'une source sûre ReSukiSU
+              if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ]; then
+                  cp "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ./ksud
               else
-                  echo "ℹ️ Aucun binaire ksud externe trouvé, le patch cpio natif a géré l'intégration."
+                  # Fallback : téléchargement direct du binaire ksud adapté à ReSukiSU
+                  curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o ./ksud || true
               fi
+              
+              if [ -f ./ksud ]; then
+                  chmod +x ./ksud
+                  # Injection forcée du binaire ksud dans sbin du ramdisk
+                  ./magiskboot cpio ramdisk.cpio "add 0755 sbin/ksud ./ksud"
+                  echo "✅ ksud injecté avec succès dans sbin/"
+              else
+                  echo "❌ Erreur critique : ksud introuvable pour l'injection."
+                  exit 1
+              }
               
               rm -f ramdisk.cpio.orig
           fi
