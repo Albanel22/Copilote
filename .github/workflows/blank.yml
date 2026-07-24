@@ -218,18 +218,6 @@ jobs:
           # 2. Gestion du ramdisk et application des patchs cpio
           if [ -f ramdisk.cpio ]; then
               ./magiskboot cpio ramdisk.cpio patch
-              
-              # Injection directe et garantie du ksud que tu as placé à la racine du dépôt
-              if [ -f "${{ github.workspace }}/ksud" ]; then
-                  cp "${{ github.workspace }}/ksud" ./ksud
-                  chmod +x ./ksud
-                  ./magiskboot cpio ramdisk.cpio "add 0755 sbin/ksud ./ksud"
-                  echo "✅ ksud injecté avec succès dans sbin/ depuis la racine du dépôt !"
-              else
-                  echo "❌ Erreur : Le fichier ksud est introuvable à la racine du workspace."
-                  exit 1
-              fi
-              
               rm -f ramdisk.cpio.orig
           fi
 
