@@ -219,8 +219,23 @@ jobs:
           if [ -f ramdisk.cpio ]; then
               ./magiskboot cpio ramdisk.cpio patch
               
-              if [ -f "${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud" ]; then
-                  ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud ${{ github.workspace }}/${{ env.KERNEL_PATH }}/drivers/kernelsu/ksud"
+              # Recherche exhaustive du binaire ksud dans l'arborescence du kernel ou téléchargement de secours
+              KSUD_PATH=$(find ${{ github.workspace }}/${{ env.KERNEL_PATH }} -name "ksud" -type f | head -n 1)
+              
+              if [ -n "$KSUD_PATH" ]; then
+                  echo "✅ Binaire ksud trouvé à : $KSUD_PATH"
+                  ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud $KSUD_PATH"
+              else
+                  echo "⚠️ ksud non trouvé dans les sources, téléchargement direct du binaire ReSukiSU..."
+                  curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o ksud_bin || true
+                  if [ -f ksud_bin ]; then
+                      chmod +x ksud_bin
+                      ./magiskboot cpio ramdisk.cpio "add 0 0 0755 sbin/ksud ksud_bin"
+                      echo "✅ ksud ajouté via téléchargement de secours"
+                  else
+                      echo "❌ Erreur critique : impossible de trouver ou télécharger ksud !"
+                      exit 1
+                  fi
               fi
               
               rm -f ramdisk.cpio.orig
@@ -233,7 +248,7 @@ jobs:
           cd ${{ github.workspace }}
           mkdir -p final_output
           cp repack/new-boot.img final_output/boot.img
-
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
