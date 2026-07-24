@@ -195,44 +195,35 @@ jobs:
           echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
 
-      - name: Repack & Finalize
+      - name: Package with AnyKernel3 & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p repack
-          cp boot-stock.img repack/boot.img
           
-          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
-          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
-          mv lib/x86_64/libmagiskboot.so repack/magiskboot
-          chmod +x repack/magiskboot
-          rm -rf Magisk-v27.0.apk lib/
-          
-          cd repack
-          ./magiskboot unpack boot.img
-          
-          # 1. Remplacement du noyau par ton Image compilée
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
-          
-          # 2. Gestion du ramdisk et application des patchs cpio
-          if [ -f ramdisk.cpio ]; then
-              ./magiskboot cpio ramdisk.cpio patch
-              rm -f ramdisk.cpio.orig
-          fi
-
-          # 3. Réassemblage final de l'image de boot
-          ./magiskboot repack boot.img new-boot.img
-          
-          # 4. Export propre vers le dossier final du workspace
-          cd ${{ github.workspace }}
+          # 1. Création du dossier de sortie final
           mkdir -p final_output
-          cp repack/new-boot.img final_output/boot.img
           
+          # 2. Cloner AnyKernel3 (l'utilitaire standard pour flasher les noyaux via recovery)
+          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
+          rm -rf anykernel/.git
+          
+          # 3. Copier ton Image de noyau compilé dans AnyKernel3
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
+          
+          # 4. Inclure ton boot d'origine comme référence si nécessaire
+          cp boot-stock.img anykernel/boot.img
+          
+          # 5. Créer le ZIP final flashable via Recovery (TWRP / OrangeFox)
+          cd anykernel
+          zip -r9 ../final_output/Kernel-AnyKernel3-Motorola.zip *
+          
+          echo "✅ Package AnyKernel3 généré avec succès dans final_output/ !"
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola_final
-          path: final_output/boot.img
-
+          path: final_output/Kernel-AnyKernel3-Motorola.zip
           
+   
