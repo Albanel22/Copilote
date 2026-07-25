@@ -43,30 +43,15 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU-Next & SUSFS
+      - name: Integrate KernelSU-Next (Sans SUSFS)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration officielle de KernelSU-Next..."
-          # Utilisation du script de setup natif de KernelSU-Next (recommandé)
+          echo "📥 Intégration de KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           
-          # Ajout de l'entrée Kconfig si elle n'y est pas déjà
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
-          
-          echo "📥 Intégration de SUSFS pour KernelSU-Next..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-      - name: Debug and Print Patch Failures
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "--- CONTENU DE fs/open.c.rej ---"
-          [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
-          sed -n '370,400p' fs/open.c || true
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -89,12 +74,10 @@ jobs:
           echo "📂 Génération de la config de base..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
-          echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
+          # 3. Injection forcée KSU / KPROBES dans le .config (Sans SUSFS)
+          echo "🔧 Injection forcée des flags KSU/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
