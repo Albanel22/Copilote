@@ -58,12 +58,17 @@ jobs:
         run: |
           FILE="drivers/kernelsu/infra/file_wrapper.c"
           if [ -f "$FILE" ]; then
-            echo "Applying compatibility patch to $FILE for Linux 4.19..."
-            sed -i 's/return orig->f_op->iopoll(kiocb, spin);/return -EINVAL;/g' "$FILE"
-            sed -i 's/p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;/p->ops.iopoll = NULL;/g' "$FILE"
-            sed -i 's/if (remap_flags & REMAP_FILE_DEDUP)/if (0)/g' "$FILE"
-            sed -i 's/return orig->f_op->remap_file_range/return -EOPNOTSUPP/g' "$FILE"
-            sed -i 's/p->ops.remap_file_range =/p->ops.remap_file_range = NULL;\/\//g' "$FILE"
+            echo "Applying refined compatibility patch to $FILE for Linux 4.19..."
+            
+            # 1. Remplacer les appels de fonctions remap_file_range par un simple return -EOPNOTSUPP;
+            sed -i 's/return orig->f_op->remap_file_range(file_in, pos_in, orig, pos_out, len,.*);/return -EOPNOTSUPP;/g' "$FILE"
+            sed -i 's/return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out,.*);/return -EOPNOTSUPP;/g' "$FILE"
+            
+            # 2. Supprimer ou commenter l'affectation de p->ops.iopoll
+            sed -i '/p->ops.iopoll =/d' "$FILE"
+            
+            # 3. Supprimer ou commenter l'affectation de p->ops.remap_file_range
+            sed -i '/p->ops.remap_file_range =/d' "$FILE"
           fi
 
       - name: Multi-stage Kernel Compilation
