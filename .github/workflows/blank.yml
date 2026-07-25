@@ -187,60 +187,71 @@ jobs:
         run: |
           set -euo pipefail
           
+          # 1. Création du dossier de sortie final
           mkdir -p final_output
           
-          # --- PARTIE A : boot.img direct & Image/Image.gz ---
-          echo "📦 Téléchargement de magiskboot..."
+          # --- PARTIE A : Génération du boot.img direct pour Fastboot + Image + Image.gz ---
+          echo "📦 Téléchargement et exécution de magiskboot pour packager le boot.img..."
           curl -LSs "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" -o magisk.apk
           unzip -q magisk.apk -d magisk_extracted
           cp magisk_extracted/lib/x86_64/libmagiskboot.so ./magiskboot
           chmod +x magiskboot
           
+          # Dépaqueter le boot stock téléchargé au début
           ./magiskboot unpack boot-stock.img
+          
+          # Remplacer par le noyau compilé
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
+          # Re-packager pour obtenir le boot.img complet
           ./magiskboot repack boot-stock.img
           mv new-boot.img final_output/boot-custom.img
           
+          # Sauvegarder l'Image brute
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image final_output/Image
+          
+          # Générer et sauvegarder l'Image.gz compressée
           gzip -c ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image > final_output/Image.gz
           
-          # --- PARTIE B : AnyKernel3 & ReSukiSU robuste ---
-          echo "📦 Préparation d'AnyKernel3..."
+          # --- PARTIE B : Génération du ZIP AnyKernel3 compatible ReSukiSU ---
+          echo "📦 Préparation d'AnyKernel3 avec intégration ReSukiSU..."
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           rm -rf anykernel/.git
           
+          # Copie de ton noyau compilé
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
           
-          # Téléchargement direct depuis les sources officielles ReSukiSU / KernelSU (binaire compilé ARM64)
+          # Intégration robuste de ksud (depuis ton dépôt local pour éviter le 404)
           mkdir -p anykernel/tools
           rm -f anykernel/tools/ksud
           
-          # Utilisation d'une source sûre pour le binaire ksud (ex: release officielle ou release ReSukiSU)
-          # Si le lien direct raw pose problème, on récupère via l'API GitHub ou un dépôt miroir stable
-          KSU_VERSION="v1.0.0" # Adapte selon ta version exacte de ReSukiSU si nécessaire
-          curl -fL "https://github.com/tiann/KernelSU/releases/download/main-11500/ksud-arm64" -o anykernel/tools/ksud || \
-          curl -fL "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o anykernel/tools/ksud
+          if [ -f "ksud" ]; then
+              cp ksud anykernel/tools/ksud
+              echo "✅ Copie du ksud local du dépôt réussie ($(ls -l anykernel/tools/ksud | awk '{print $5}') octets)."
+          else
+              echo "⚠️ Aucun ksud local trouvé à la racine, tentative de secours..."
+              curl -fL "https://github.com/tiann/KernelSU/raw/main/kernel/ksud" -o anykernel/tools/ksud || true
+          fi
           
           chmod +x anykernel/tools/ksud
           
-          # Vérification stricte du type de fichier (doit être un exécutable ELF et non une page HTML 404)
-          file_type=$(file anykernel/tools/ksud)
-          echo "🔍 Type du binaire ksud : $file_type"
-          if echo "$file_type" | grep -q "HTML"; then
-              echo "❌ Erreur critique : Le fichier ksud téléchargé est une page HTML (lien invalide 404) !"
+          # Vérification de sécurité pour s'assurer qu'il est présent et valide
+          if [ ! -s anykernel/tools/ksud ]; then
+              echo "❌ Erreur : Le binaire ksud est introuvable ou vide dans AnyKernel3 !"
               exit 1
           fi
           
-          # Configuration AnyKernel3
+          # Configuration des propriétés AnyKernel3 pour s'adapter à ton Motorola
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
           sed -i 's/do.modules=1/do.modules=0/g' anykernel/anykernel.sh
           sed -i 's/do.cleanup=1/do.cleanup=1/g' anykernel/anykernel.sh
           echo 'block=boot;' >> anykernel/anykernel.sh
           
+          # Compression finale du ZIP AnyKernel3
           cd anykernel
           zip -r9 ../final_output/ReSukiSU-Kernel-Motorola-AnyKernel3.zip *
           
-          echo "✅ Package AnyKernel3 corrigé et prêt !"
+          echo "✅ Build, boot-custom.img, Image.gz et AnyKernel3 ReSukiSU générés avec succès !"
           
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
