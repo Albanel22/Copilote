@@ -56,11 +56,14 @@ jobs:
       - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📋 Copie de ton fichier file_wrapper.c personnalisé..."
-          if [ -f "../file_wrapper.c" ]; then
-            cp ../file_wrapper.c drivers/kernelsu/infra/file_wrapper.c
+          echo "📋 Récupération de file_wrapper.c..."
+          # Télécharge directement ton fichier depuis ta branche main sur GitHub
+          curl -LSs "https://raw.githubusercontent.com/Albanel22/Copilote/main/file_wrapper.c" -o drivers/kernelsu/infra/file_wrapper.c
+          
+          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
+            echo "✅ file_wrapper.c en place avec succès !"
           else
-            echo "❌ Fichier file_wrapper.c non trouvé à la racine du dépôt !"
+            echo "❌ Erreur : impossible de récupérer file_wrapper.c !"
             exit 1
           fi
 
