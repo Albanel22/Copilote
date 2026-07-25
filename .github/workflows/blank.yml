@@ -53,18 +53,15 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
-      - name: Patch KernelSU-Next file_wrapper for Linux 4.19
+      - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          FILE="drivers/kernelsu/infra/file_wrapper.c"
-          if [ -f "$FILE" ]; then
-            echo "Neutralizing $FILE for Linux 4.19 compatibility..."
-            cat << 'EOF' > "$FILE"
-            /* Neutralized for Linux 4.19 */
-            #include <linux/fs.h>
-            #include <linux/file.h>
-            /* Stub file_wrapper to satisfy build */
-          EOF
+          echo "📋 Copie de ton fichier file_wrapper.c personnalisé..."
+          if [ -f "../file_wrapper.c" ]; then
+            cp ../file_wrapper.c drivers/kernelsu/infra/file_wrapper.c
+          else
+            echo "❌ Fichier file_wrapper.c non trouvé à la racine du dépôt !"
+            exit 1
           fi
 
       - name: Multi-stage Kernel Compilation
