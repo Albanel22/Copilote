@@ -46,7 +46,6 @@ jobs:
         run: |
           set -e
           
-          # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
 
           cd ${{ env.KERNEL_PATH }}
@@ -65,7 +64,6 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
 
-          # Restauration propre des fichiers modifiés
           git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c || true
 
           python3 - << 'EOF'
@@ -83,10 +81,7 @@ jobs:
                   return
 
               if target_func_header in content:
-                  # 1. Insérer la déclaration extern juste avant l'en-tête de la fonction
                   content = content.replace(target_func_header, declaration + "\n" + target_func_header, 1)
-                  
-                  # 2. Trouver l'accolade ouvrante de la fonction pour y insérer l'appel
                   idx = content.find(target_func_header)
                   brace_idx = content.find('{', idx)
                   if brace_idx != -1:
@@ -98,7 +93,6 @@ jobs:
                       return
               print(f"❌ Cible introuvable dans {path} : {target_func_header[:30]}...")
 
-          # 1. drivers/input/input.c
           inject_hook(
               "drivers/input/input.c",
               "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)",
@@ -106,7 +100,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
           )
 
-          # 2. fs/exec.c
           inject_hook(
               "fs/exec.c",
               "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)",
@@ -114,7 +107,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif"
           )
 
-          # 3. fs/open.c
           inject_hook(
               "fs/open.c",
               "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)",
@@ -122,7 +114,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
           )
 
-          # 4. fs/read_write.c
           inject_hook(
               "fs/read_write.c",
               "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)",
@@ -130,7 +121,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif"
           )
 
-          # 5. fs/stat.c
           inject_hook(
               "fs/stat.c",
               "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)",
@@ -138,7 +128,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif"
           )
 
-          # 6. kernel/reboot.c
           inject_hook(
               "kernel/reboot.c",
               "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)",
@@ -146,7 +135,6 @@ jobs:
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif"
           )
 
-          # 7. kernel/sys.c
           inject_hook(
               "kernel/sys.c",
               "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)",
@@ -175,7 +163,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration ReSukiSU (Manual Hook activé)
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -188,14 +175,13 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Fixs signatures modules & Dalle tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
           echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
 
-      - name: Package with AnyKernel3 & Finalize
+      - name: Package with AnyKernel3, Boot.img Direct & Image.gz
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -204,33 +190,46 @@ jobs:
           # 1. Création du dossier de sortie final
           mkdir -p final_output
           
-          # 2. Cloner AnyKernel3
+          # --- PARTIE A : Génération du boot.img direct pour Fastboot + Image + Image.gz ---
+          echo "📦 Téléchargement et exécution de magiskboot pour packager le boot.img..."
+          curl -LSs "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" -o magisk.apk
+          unzip -q magisk.apk -d magisk_extracted
+          cp magisk_extracted/lib/x86_64/libmagiskboot.so ./magiskboot
+          chmod +x magiskboot
+          
+          # Dépaqueter le boot stock téléchargé au début
+          ./magiskboot unpack boot-stock.img
+          
+          # Remplacer par le noyau compilé
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
+          # Re-packager pour obtenir le boot.img complet
+          ./magiskboot repack boot-stock.img
+          mv new-boot.img final_output/boot-custom.img
+          
+          # Sauvegarder l'Image brute
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image final_output/Image
+          
+          # Générer et sauvegarder l'Image.gz compressée
+          gzip -c ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image > final_output/Image.gz
+          
+          # --- PARTIE B : Génération du ZIP AnyKernel3 (de secours) ---
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           rm -rf anykernel/.git
-          
-          # 3. Copier ton Image de noyau compilé dans AnyKernel3
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
-          
-          # 4. Inclure ton boot d'origine comme référence
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
           cp boot-stock.img anykernel/boot.img
           
-          # 5. Forcer les options d'AnyKernel3 pour ton Motorola
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
           sed -i 's/do.modules=1/do.modules=0/g' anykernel/anykernel.sh
-          
-          # Injecter le bon chemin de partition directement pour éviter qu'il cherche l'OMAP
           echo 'block=/dev/block/bootdevice/by-name/boot;' >> anykernel/anykernel.sh
           
-          # 6. Créer le ZIP final flashable via Recovery
           cd anykernel
           zip -r9 ../final_output/Kernel-AnyKernel3-Motorola.zip *
           
-          echo "✅ Package AnyKernel3 généré avec succès dans final_output/ !"
+          echo "✅ Build, boot-custom.img, Image.gz et AnyKernel3 générés avec succès !"
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola_final
-          path: final_output/Kernel-AnyKernel3-Motorola.zip
-          
-   
+          path: final_output/*
