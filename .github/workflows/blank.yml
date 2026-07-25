@@ -79,11 +79,23 @@ jobs:
       - name: Purge Problematic Features for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🧹 Neutralisation des fichiers de fonctionnalités incompatibles avec le noyau 4.19..."
-          # On vide les fichiers au lieu de les supprimer pour que le Makefile les trouve sans planter
-          > drivers/kernelsu/feature/selinux_hide.c
-          > drivers/kernelsu/feature/kernel_umount.c
-          echo "✅ Neutralisation terminée !"     
+          echo "🧹 Neutralisation propre de selinux_hide et kernel_umount..."
+          
+          # Création de stubs vides pour selinux_hide.c
+          cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
+          int ksu_selinux_hide_init(void) { return 0; }
+          void ksu_selinux_hide_exit(void) {}
+          int selinux_hide_status_feature_set(void) { return 0; }
+          EOF
+
+          # Création de stubs vides pour kernel_umount.c
+          cat << 'EOF' > drivers/kernelsu/feature/kernel_umount.c
+          int ksu_kernel_umount_init(void) { return 0; }
+          void ksu_kernel_umount_exit(void) {}
+          int ksu_handle_umount(void) { return 0; }
+          EOF
+
+          echo "✅ Neutralisation avec stubs terminée !"     
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
