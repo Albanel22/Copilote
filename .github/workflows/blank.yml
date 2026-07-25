@@ -107,8 +107,11 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_MODULES=y"
             echo "CONFIG_MODULE_UNLOAD=y"
+            # Désactivation des options posant problème sur le noyau 4.19
+            echo "# CONFIG_KSU_FEATURE_SELINUX_HIDE is not set"
+            echo "# CONFIG_KSU_FEATURE_KERNEL_UMOUNT is not set"
           } >> ${{ env.BUILD_DIR }}/.config
-
+          
           # 4. Mise à jour des dépendances
           echo "⚡ Mise à jour de la configuration avec olddefconfig..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
