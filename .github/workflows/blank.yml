@@ -64,6 +64,15 @@ jobs:
             exit 1
           fi
 
+      - name: Apply KernelSU-Next Manual Hooks for Non-GKI
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "💉 Téléchargement et application des hooks manuels pour noyau 4.19..."
+          curl -LSs "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/syscall_hook_patches.sh" -o syscall_hook_patches.sh
+          chmod +x syscall_hook_patches.sh
+          ./syscall_hook_patches.sh
+          echo "✅ Hooks manuels appliqués avec succès !"
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -89,6 +98,7 @@ jobs:
           echo "🔧 Injection forcée des flags KSU/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_MANUAL_HOOK=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
