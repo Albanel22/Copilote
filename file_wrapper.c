@@ -90,10 +90,6 @@ static ssize_t ksu_wrapper_write_iter(struct kiocb *iocb, struct iov_iter *iovi)
     return orig->f_op->write_iter(iocb, iovi);
 }
 
-#if defined(CONFIG_BLOCK) && hasattr_iopoll
-// Neutralisé pour éviter les erreurs sur 4.19 si iopoll n'est pas géré de la même manière
-#endif
-
 static int ksu_wrapper_iterate_shared(struct file *fp, struct dir_context *dc)
 {
     struct ksu_file_wrapper *data = fp->private_data;
@@ -261,17 +257,6 @@ static ssize_t ksu_wrapper_copy_file_range(struct file *file_in, loff_t pos_in,
                                        flags);
 }
 
-static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
-                                           struct file *file_out,
-                                           loff_t pos_out, loff_t len,
-                                           unsigned int remap_flags)
-{
-    struct ksu_file_wrapper *data = file_in->private_data;
-    struct file *orig = data->orig;
-    return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out,
-                                        len, remap_flags);
-}
-
 static int ksu_wrapper_fadvise(struct file *fp, loff_t off1, loff_t off2,
                                int flags)
 {
@@ -337,8 +322,6 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
     p->ops.copy_file_range =
         fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
-    p->ops.remap_file_range =
-        fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
     p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;
 
     return p;
