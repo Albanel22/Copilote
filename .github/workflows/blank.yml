@@ -213,20 +213,31 @@ jobs:
           # Générer et sauvegarder l'Image.gz compressée
           gzip -c ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image > final_output/Image.gz
           
-          # --- PARTIE B : Génération du ZIP AnyKernel3 (de secours) ---
+          # --- PARTIE B : Génération du ZIP AnyKernel3 compatible ReSukiSU ---
+          echo "📦 Préparation d'AnyKernel3 avec intégration ReSukiSU..."
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           rm -rf anykernel/.git
-          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
-          cp boot-stock.img anykernel/boot.img
           
+          # Copie de ton noyau compilé
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
+          
+          # Récupération automatique du binaire ksud depuis le dépôt officiel ReSukiSU
+          # C'est ce binaire qui permet à l'appli ReSukiSU Manager de gérer le root et les modules à chaud !
+          mkdir -p anykernel/tools
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o anykernel/tools/ksud || true
+          chmod +x anykernel/tools/ksud || true
+          
+          # Configuration des propriétés AnyKernel3 pour s'adapter à ton Motorola
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
           sed -i 's/do.modules=1/do.modules=0/g' anykernel/anykernel.sh
+          sed -i 's/do.cleanup=1/do.cleanup=1/g' anykernel/anykernel.sh
           echo 'block=/dev/block/bootdevice/by-name/boot;' >> anykernel/anykernel.sh
           
+          # Compression finale du ZIP AnyKernel3
           cd anykernel
-          zip -r9 ../final_output/Kernel-AnyKernel3-Motorola.zip *
+          zip -r9 ../final_output/ReSukiSU-Kernel-Motorola-AnyKernel3.zip *
           
-          echo "✅ Build, boot-custom.img, Image.gz et AnyKernel3 générés avec succès !"
+          echo "✅ Build, boot-custom.img, Image.gz et AnyKernel3 ReSukiSU générés avec succès !"
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
