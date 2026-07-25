@@ -76,6 +76,14 @@ jobs:
           ./syscall_hook_patches.sh
           echo "✅ Hooks manuels appliqués avec succès !"
 
+      - name: Purge Problematic Features for Linux 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🧹 Suppression des fichiers de fonctionnalités incompatibles avec le noyau 4.19..."
+          rm -f drivers/kernelsu/feature/selinux_hide.c
+          rm -f drivers/kernelsu/feature/kernel_umount.c
+          echo "✅ Nettoyage terminé !"    
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
