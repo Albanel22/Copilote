@@ -46,11 +46,11 @@ jobs:
       - name: Integrate KernelSU-Next & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration de KernelSU-Next..."
-          # Clonage de KernelSU-Next dans drivers/kernelsu
-          git clone https://github.com/rifsxd/KernelSU-Next.git drivers/kernelsu
+          echo "📥 Intégration officielle de KernelSU-Next..."
+          # Utilisation du script de setup natif de KernelSU-Next (recommandé)
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           
-          # Ajout de l'entrée dans init/Kconfig si absente
+          # Ajout de l'entrée Kconfig si elle n'y est pas déjà
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
@@ -60,7 +60,7 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-
+          
       - name: Debug and Print Patch Failures
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
