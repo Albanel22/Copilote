@@ -102,6 +102,8 @@ jobs:
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_MODULES=y"
+            echo "CONFIG_MODULE_UNLOAD=y"
           } >> ${{ env.BUILD_DIR }}/.config
 
           # 4. Mise à jour des dépendances
