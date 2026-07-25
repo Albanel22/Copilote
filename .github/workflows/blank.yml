@@ -221,24 +221,31 @@ jobs:
           # Copie de ton noyau compilé
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/Image
           
-          # Récupération automatique du binaire ksud depuis le dépôt officiel ReSukiSU
-          # C'est ce binaire qui permet à l'appli ReSukiSU Manager de gérer le root et les modules à chaud !
+          # Téléchargement robuste et vérifié du binaire ksud pour AnyKernel3
           mkdir -p anykernel/tools
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o anykernel/tools/ksud || true
-          chmod +x anykernel/tools/ksud || true
+          rm -f anykernel/tools/ksud
+          curl -fL "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/ksud" -o anykernel/tools/ksud
+          chmod +x anykernel/tools/ksud
+          
+          # Vérification de sécurité pour s'assurer qu'il n'est pas vide
+          if [ ! -s anykernel/tools/ksud ]; then
+              echo "❌ Erreur : Le binaire ksud téléchargé est vide !"
+              exit 1
+          else
+              echo "✅ Binaire ksud validé ($(ls -l anykernel/tools/ksud | awk '{print $5}') octets)."
+          fi
           
           # Configuration des propriétés AnyKernel3 pour s'adapter à ton Motorola
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
           sed -i 's/do.modules=1/do.modules=0/g' anykernel/anykernel.sh
           sed -i 's/do.cleanup=1/do.cleanup=1/g' anykernel/anykernel.sh
-          echo 'block=/dev/block/bootdevice/by-name/boot;' >> anykernel/anykernel.sh
+          echo 'block=boot;' >> anykernel/anykernel.sh
           
           # Compression finale du ZIP AnyKernel3
           cd anykernel
           zip -r9 ../final_output/ReSukiSU-Kernel-Motorola-AnyKernel3.zip *
           
           echo "✅ Build, boot-custom.img, Image.gz et AnyKernel3 ReSukiSU générés avec succès !"
-
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
