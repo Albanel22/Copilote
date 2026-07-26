@@ -75,6 +75,22 @@ jobs:
           ./syscall_hook_patches.sh
           echo "✅ Hooks manuels appliqués avec succès !"
 
+      - name: Purge selinux_hide et kernel_umount pour Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🧹 Neutralisation des modules posant problème au linker..."
+          
+          # Vider le contenu de selinux_hide.c et kernel_umount.c pour éviter les symboles non résolus
+          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
+            echo "/* Vide pour Linux 4.19 */" > drivers/kernelsu/feature/selinux_hide.c
+          fi
+          
+          if [ -f "drivers/kernelsu/feature/kernel_umount.c" ]; then
+            echo "/* Vide pour Linux 4.19 */" > drivers/kernelsu/feature/kernel_umount.c
+          fi
+          
+          echo "✅ Fichiers neutralisés avec succès !"    
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
