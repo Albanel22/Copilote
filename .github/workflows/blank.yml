@@ -46,7 +46,15 @@ jobs:
         run: |
           echo "📥 Intégration de KernelSU-Next en mode legacy..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          
+          echo "🩹 Neutralisation des fonctions dans les fichiers sources pour le noyau 4.19..."
+          # On vide les fichiers source pour que le linker trouve les symboles sans faire planter le 4.19
+          echo "/* stub */" > drivers/kernelsu/feature/selinux_hide.c
+          echo "/* stub */" > drivers/kernelsu/feature/kernel_umount.c
 
+          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+          fi
       - name: Patch KernelSU-Next Source for 4.19 Compatibility
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
