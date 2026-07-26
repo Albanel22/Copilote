@@ -47,16 +47,12 @@ jobs:
           echo "📥 Intégration de KernelSU-Next en mode legacy..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
           
-          echo "🔧 Correction automatique du Kbuild pour le noyau 4.19..."
+      - name: Fix Kbuild for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔧 Ajustement précis du Kbuild pour le noyau 4.19..."
           sed -i '/feature\/selinux_hide.o/d' drivers/kernelsu/Kbuild
           sed -i '/feature\/kernel_umount.o/d' drivers/kernelsu/Kbuild
-          sed -i '/selinux\/selinux.o/d' drivers/kernelsu/Kbuild
-          sed -i '/selinux\/rules.o/d' drivers/kernelsu/Kbuild
-          sed -i '/selinux\/sepolicy.o/d' drivers/kernelsu/Kbuild
-
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-          fi
 
       - name: Apply KernelSU-Next Manual Hooks for Non-GKI
         working-directory: ${{ env.KERNEL_PATH }}
