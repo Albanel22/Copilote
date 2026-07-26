@@ -46,17 +46,11 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # --- CORRECTIF : Forcer la version et l'UAPI pour le Manager 32525 ---
-          echo "🔧 Modification de la version KernelSU pour le Manager 32525..."
-          # On cherche le fichier qui définit la version de l'API (généralement ksu.h ou similar) et on force les valeurs
-          KSU_VERSION_FILE=$(find drivers/kernelsu -name "ksu.h" -o -name "kernelsu.h" | head -n 1)
-          if [ -f "$KSU_VERSION_FILE" ]; then
-            echo "📄 Fichier de version trouvé : $KSU_VERSION_FILE"
-            # On force la macro de version à 32525 et l'UAPI à 2
-            sed -i 's/#define KSU_VERSION.*/#define KSU_VERSION 32525/g' "$KSU_VERSION_FILE" || true
-            sed -i 's/#define KSU_UAPI_VERSION.*/#define KSU_UAPI_VERSION 2/g' "$KSU_VERSION_FILE" || true
-          fi
-          # -------------------------------------------------------------------
+          # --- CORRECTIF : Forcer la version à 32525 et l'UAPI à 2 ---
+          echo "🔧 Forçage de la version et de l'UAPI pour le Manager 32525..."
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/#define KSU_VERSION.*/#define KSU_VERSION 32525/g' {} +
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/#define KSU_UAPI_VERSION.*/#define KSU_UAPI_VERSION 2/g' {} +
+          # -----------------------------------------------------------
 
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
