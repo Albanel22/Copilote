@@ -52,12 +52,11 @@ jobs:
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
-          
+
       - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "📋 Récupération de file_wrapper.c..."
-          # Télécharge directement ton fichier depuis ta branche main sur GitHub
           curl -LSs "https://raw.githubusercontent.com/Albanel22/Copilote/main/file_wrapper.c" -o drivers/kernelsu/infra/file_wrapper.c
           
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
@@ -81,21 +80,18 @@ jobs:
         run: |
           echo "🧹 Neutralisation propre de selinux_hide et kernel_umount..."
           
-          # Création de stubs vides pour selinux_hide.c
           cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
           int ksu_selinux_hide_init(void) { return 0; }
           void ksu_selinux_hide_exit(void) {}
           int selinux_hide_status_feature_set(void) { return 0; }
           EOF
 
-          # Création de stubs vides pour kernel_umount.c
           cat << 'EOF' > drivers/kernelsu/feature/kernel_umount.c
           int ksu_kernel_umount_init(void) { return 0; }
           void ksu_kernel_umount_exit(void) {}
           int ksu_handle_umount(void) { return 0; }
           EOF
-
-          echo "✅ Neutralisation avec stubs terminée !"     
+          echo "✅ Neutralisation avec stubs terminée !"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -141,14 +137,13 @@ jobs:
           grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
           grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré ! Arrêt."; exit 1; }
 
-          # 6. Correctifs signatures & Tactile (provenant de ton build 266 fonctionnel)
+          # 6. Correctifs signatures & Dalle tactile Motorola (Exactement comme dans le build 576)
           echo "🔓 Force-pass des signatures..."
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
-          # Fixs signatures modules & Dalle tactile Motorola
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          echo "💉 Injection du patch tactile Motorola..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
-          
+
           # 7. Compilation finale
           echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
@@ -160,15 +155,19 @@ jobs:
           set -euo pipefail
           mkdir -p repack
           cp boot-stock.img repack/boot.img
+          
           wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
           unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
           mv lib/x86_64/libmagiskboot.so repack/magiskboot
           chmod +x repack/magiskboot
+          rm -rf Magisk-v27.0.apk lib/
+          
           cd repack
           ./magiskboot unpack boot.img
-          cp /home/runner/work/Copilote/Copilote/kernel_src/out/arch/arm64/boot/Image kernel
+          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           ./magiskboot repack boot.img new-boot.img
           mv new-boot.img ../final_boot.img
+          
           cd ..
           mkdir -p final_output
           mv final_boot.img final_output/boot.img
