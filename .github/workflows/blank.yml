@@ -43,16 +43,16 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU-Next (Legacy pour Kernel 4.19)
+      - name: Integrate KernelSU-Next (Via branche next)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration de KernelSU-Next (branche legacy)..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
+          echo "📥 Intégration propre de KernelSU-Next..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
           
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
-
+          
       - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
