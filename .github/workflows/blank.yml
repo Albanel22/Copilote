@@ -53,6 +53,15 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
+      - name: Fix SECCOMP_ARCH_NATIVE_NR for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔧 Correction de SECCOMP_ARCH_NATIVE_NR dans seccomp_cache.c..."
+          if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
+            sed -i '1i#ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR __NR_syscalls\n#endif' drivers/kernelsu/infra/seccomp_cache.c
+            echo "✅ Correctif appliqué avec succès !"
+          fi    
+
       - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
