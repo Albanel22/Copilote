@@ -78,13 +78,13 @@ jobs:
       - name: Fix file_wrapper.c for Kernel 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🔧 Adaptation de file_wrapper.c pour le noyau 4.19..."
+          echo "🔧 Nettoyage de file_wrapper.c pour le noyau 4.19..."
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            sed -i 's/orig->f_op->iopoll/NULL/g' drivers/kernelsu/infra/file_wrapper.c
-            sed -i 's/REMAP_FILE_DEDUP/0/g' drivers/kernelsu/infra/file_wrapper.c
-            sed -i 's/orig->f_op->remap_file_range/NULL/g' drivers/kernelsu/infra/file_wrapper.c
-            sed -i 's/fp->f_op->remap_file_range/NULL/g' drivers/kernelsu/infra/file_wrapper.c
-            echo "✅ Patch file_wrapper.c appliqué avec succès !"
+            # Neutraliser les blocs iopoll et remap_file_range s'ils posent problème
+            sed -i '/iopoll/d' drivers/kernelsu/infra/file_wrapper.c
+            sed -i '/remap_file_range/d' drivers/kernelsu/infra/file_wrapper.c
+            sed -i '/REMAP_FILE_DEDUP/d' drivers/kernelsu/infra/file_wrapper.c
+            echo "✅ Nettoyage de file_wrapper.c effectué !"
           fi
 
       - name: Apply KernelSU-Next Manual Hooks for Non-GKI
