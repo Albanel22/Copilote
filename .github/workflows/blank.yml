@@ -22,12 +22,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu clang llvm lld device-tree-compiler zip unzip curl git
+      
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
+          
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
@@ -46,11 +48,10 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # --- CORRECTIF : Forcer la version à 32525 et l'UAPI à 2 ---
-          echo "🔧 Forçage de la version et de l'UAPI pour le Manager 32525..."
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/#define KSU_VERSION.*/#define KSU_VERSION 32525/g' {} +
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/#define KSU_UAPI_VERSION.*/#define KSU_UAPI_VERSION 2/g' {} +
-          # -----------------------------------------------------------
+          # --- CORRECTIF CIBLÉ UAPI V2 SANS RISQUE ---
+          # On cible uniquement la déclaration de version UAPI si elle existe dans les sources
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/static const __u32 KERNEL_SU_UAPI_VERSION = [0-9];/static const __u32 KERNEL_SU_UAPI_VERSION = 2;/g' {} +
+          # ------------------------------------------
 
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
