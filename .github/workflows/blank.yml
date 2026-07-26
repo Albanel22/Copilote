@@ -43,10 +43,10 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU-Next (Via branche next)
+      - name: Integrate KernelSU-Next (Legacy Mode)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration propre de KernelSU-Next..."
+          echo "📥 Intégration de KernelSU-Next en mode legacy..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
           
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
@@ -75,24 +75,6 @@ jobs:
           ./syscall_hook_patches.sh
           echo "✅ Hooks manuels appliqués avec succès !"
 
-      - name: Purge Problematic Features for Linux 4.19
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "🧹 Neutralisation propre de selinux_hide et kernel_umount..."
-          
-          cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
-          int ksu_selinux_hide_init(void) { return 0; }
-          void ksu_selinux_hide_exit(void) {}
-          int selinux_hide_status_feature_set(void) { return 0; }
-          EOF
-
-          cat << 'EOF' > drivers/kernelsu/feature/kernel_umount.c
-          int ksu_kernel_umount_init(void) { return 0; }
-          void ksu_kernel_umount_exit(void) {}
-          int ksu_handle_umount(void) { return 0; }
-          EOF
-          echo "✅ Neutralisation avec stubs terminée !"
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -114,7 +96,7 @@ jobs:
           echo "📂 Génération de la config de base..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
-          # 3. Injection forcée KSU/KPROBES dans le .config (Sans les features bloquantes)
+          # 3. Injection forcée KSU/KPROBES dans le .config
           echo "🔧 Injection forcée des flags KSU/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
@@ -124,8 +106,6 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_MODULES=y"
             echo "CONFIG_MODULE_UNLOAD=y"
-            echo "# CONFIG_KSU_FEATURE_SELINUX_HIDE is not set"
-            echo "# CONFIG_KSU_FEATURE_KERNEL_UMOUNT is not set"
           } >> ${{ env.BUILD_DIR }}/.config
 
           # 4. Mise à jour des dépendances
@@ -137,7 +117,7 @@ jobs:
           grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
           grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré ! Arrêt."; exit 1; }
 
-          # 6. Correctifs signatures & Dalle tactile Motorola (Exactement comme dans le build 576)
+          # 6. Correctifs signatures & Dalle tactile Motorola
           echo "🔓 Force-pass des signatures..."
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
