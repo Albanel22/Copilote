@@ -53,6 +53,21 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
+      - name: Fix uapi/linux/mount.h for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔧 Correction de l'en-tête mount.h pour le noyau 4.19..."
+          mkdir -p drivers/kernelsu/include/uapi/linux
+          # Soit on crée un lien, soit on pointe vers le mount.h du noyau
+          if [ -f "include/uapi/linux/mount.h" ]; then
+            ln -sf ../../../../../include/uapi/linux/mount.h drivers/kernelsu/include/uapi/linux/mount.h
+          elif [ -f "include/linux/mount.h" ]; then
+            echo '#include <linux/mount.h>' > drivers/kernelsu/include/uapi/linux/mount.h
+          fi
+          # On s'assure que le chemin d'inclusion est trouvé en ajoutant un -I
+          sed -i 's|#include <uapi/linux/mount.h>|#include "uapi/linux/mount.h"|g' drivers/kernelsu/infra/su_mount_ns.c || true
+          echo "✅ Correctif mount.h appliqué !"     
+
       - name: Fix SECCOMP_ARCH_NATIVE_NR for Kernel 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
