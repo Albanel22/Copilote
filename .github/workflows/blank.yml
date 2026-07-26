@@ -62,19 +62,6 @@ jobs:
             echo "✅ Correctif appliqué avec succès !"
           fi
 
-      - name: Use Custom file_wrapper.c for Linux 4.19
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📋 Récupération de file_wrapper.c..."
-          curl -LSs "https://raw.githubusercontent.com/Albanel22/Copilote/main/file_wrapper.c" -o drivers/kernelsu/infra/file_wrapper.c
-          
-          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            echo "✅ file_wrapper.c en place avec succès !"
-          else
-            echo "❌ Erreur : impossible de récupérer file_wrapper.c !"
-            exit 1
-          fi
-
       - name: Apply KernelSU-Next Manual Hooks for Non-GKI
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
