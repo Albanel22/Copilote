@@ -32,7 +32,7 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
           cd ${{ env.KERNEL_PATH }}
           git checkout fs/open.c || true
 
@@ -43,11 +43,11 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU-Next (Stable Mode)
+      - name: Integrate KernelSU-Next (v3.0.0 Mode)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Intégration de KernelSU-Next en mode stable..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
+          echo "📥 Intégration de KernelSU-Next v3.0.0..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v3.0.0
           
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
@@ -60,7 +60,7 @@ jobs:
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
             sed -i '1i#ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR __NR_syscalls\n#endif' drivers/kernelsu/infra/seccomp_cache.c
             echo "✅ Correctif appliqué avec succès !"
-          fi    
+          fi
 
       - name: Use Custom file_wrapper.c for Linux 4.19
         working-directory: ${{ env.KERNEL_PATH }}
