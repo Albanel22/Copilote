@@ -85,10 +85,10 @@ jobs:
           echo "🔧 Injection forcée des flags KSU/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_MANUAL_HOOK=y"
             echo "CONFIG_KPROBES=y"
             echo "CONFIG_HAVE_KPROBES=y"
             echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_KPROBE_EVENTS=y"
             echo "CONFIG_MODULES=y"
             echo "CONFIG_MODULE_UNLOAD=y"
           } >> ${{ env.BUILD_DIR }}/.config
