@@ -32,7 +32,7 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
           cd ${{ env.KERNEL_PATH }}
           git checkout fs/open.c || true
 
