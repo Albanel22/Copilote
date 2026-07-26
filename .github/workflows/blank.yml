@@ -46,6 +46,13 @@ jobs:
         run: |
           echo "📥 Intégration de KernelSU-Next en mode legacy..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+
+      - name: Patch KernelSU-Next Source for 4.19 Compatibility
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🩹 Neutralisation des fonctions selinux_hide et kernel_umount dans le code C..."
+          # On peut vider ou remplacer les fonctions dans les fichiers C si besoin, 
+          # ou plus simple : supprimer carrément les fichiers du dossier feature ET nettoyer les appels.    
           
       - name: Fix Kbuild for Kernel 4.19
         working-directory: ${{ env.KERNEL_PATH }}
