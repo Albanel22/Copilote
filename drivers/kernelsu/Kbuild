@@ -37,9 +37,9 @@ kernelsu-objs += policy/feature.o
 kernelsu-objs += runtime/boot_event.o
 kernelsu-objs += runtime/ksud_integration.o
 
-kernelsu-objs += selinux/selinux.o
-kernelsu-objs += selinux/rules.o
-kernelsu-objs += selinux/sepolicy.o
+#kernelsu-objs += selinux/selinux.o
+#kernelsu-objs += selinux/rules.o
+#kernelsu-objs += selinux/sepolicy.o
 
 kernelsu-objs += sulog/event.o
 kernelsu-objs += sulog/fd.o
@@ -50,7 +50,7 @@ kernelsu-objs += supercall/supercall.o
 
 kernelsu-objs += feature/adb_root.o
 
-kernelsu-objs += feature/selinux_hide.o
+#kernelsu-objs += feature/selinux_hide.o
 
 ifdef KBUILD_EXTMOD
 ifeq ($(CONFIG_KSU_DISABLE_MANAGER),y)
