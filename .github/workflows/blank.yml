@@ -118,7 +118,7 @@ jobs:
           echo "📂 Génération de la config de base..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
-          # 3. Injection forcée KSU / KPROBES dans le .config (Sans SUSFS)
+          # 3. Injection forcée KSU/KPROBES dans le .config (Sans les features bloquantes)
           echo "🔧 Injection forcée des flags KSU/KPROBES dans le fichier .config actif..."
           {
             echo "CONFIG_KSU=y"
@@ -128,11 +128,10 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_MODULES=y"
             echo "CONFIG_MODULE_UNLOAD=y"
-            # Désactivation des options posant problème sur le noyau 4.19
             echo "# CONFIG_KSU_FEATURE_SELINUX_HIDE is not set"
             echo "# CONFIG_KSU_FEATURE_KERNEL_UMOUNT is not set"
           } >> ${{ env.BUILD_DIR }}/.config
-          
+
           # 4. Mise à jour des dépendances
           echo "⚡ Mise à jour de la configuration avec olddefconfig..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
@@ -142,9 +141,10 @@ jobs:
           grep -q "CONFIG_KSU=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KSU non configuré ! Arrêt."; exit 1; }
           grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || { echo "❌ KPROBES non configuré ! Arrêt."; exit 1; }
 
-          # 6. Correctifs signatures & Tactile
+          # 6. Correctifs signatures & Tactile (provenant de ton build 266 fonctionnel)
           echo "🔓 Force-pass des signatures..."
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          
           echo "💉 Injection patch tactile..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
 
