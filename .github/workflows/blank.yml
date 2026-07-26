@@ -48,11 +48,13 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # --- FORCE LA VERSION DU PILOTE ET L'UAPI V2 ---
-          # On cherche où est définie la version du kernel et on la met à niveau
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/#define KERNEL_SU_VERSION.*/#define KERNEL_SU_VERSION 32525/g' {} +
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/static const __u32 KERNEL_SU_UAPI_VERSION.*/static const __u32 KERNEL_SU_UAPI_VERSION = 2;/g' {} +
-          # ---------------------------------------------
+          # --- SYNCHRONISATION DE LA VERSION KERNELSU AVEC LE MANAGER (32525) ---
+          # On force le noyau à répondre 32525 pour correspondre au versionCode du Manager
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} +
+          if [ -d "drivers/kernelsu" ]; then
+            echo "#define KERNEL_SU_VERSION 32525" >> drivers/kernelsu/ksu.h || true
+          fi
+          # ---------------------------------------------------------------------
 
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
