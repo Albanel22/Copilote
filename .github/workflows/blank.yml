@@ -58,13 +58,11 @@ jobs:
         run: |
           echo "🔧 Correction de l'en-tête mount.h pour le noyau 4.19..."
           mkdir -p drivers/kernelsu/include/uapi/linux
-          # Soit on crée un lien, soit on pointe vers le mount.h du noyau
           if [ -f "include/uapi/linux/mount.h" ]; then
             ln -sf ../../../../../include/uapi/linux/mount.h drivers/kernelsu/include/uapi/linux/mount.h
           elif [ -f "include/linux/mount.h" ]; then
             echo '#include <linux/mount.h>' > drivers/kernelsu/include/uapi/linux/mount.h
           fi
-          # On s'assure que le chemin d'inclusion est trouvé en ajoutant un -I
           sed -i 's|#include <uapi/linux/mount.h>|#include "uapi/linux/mount.h"|g' drivers/kernelsu/infra/su_mount_ns.c || true
           echo "✅ Correctif mount.h appliqué !"     
 
@@ -75,6 +73,18 @@ jobs:
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
             sed -i '1i#ifndef SECCOMP_ARCH_NATIVE_NR\n#define SECCOMP_ARCH_NATIVE_NR __NR_syscalls\n#endif' drivers/kernelsu/infra/seccomp_cache.c
             echo "✅ Correctif appliqué avec succès !"
+          fi
+
+      - name: Fix file_wrapper.c for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🔧 Adaptation de file_wrapper.c pour le noyau 4.19..."
+          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
+            sed -i 's/orig->f_op->iopoll/NULL/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/REMAP_FILE_DEDUP/0/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/orig->f_op->remap_file_range/NULL/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/fp->f_op->remap_file_range/NULL/g' drivers/kernelsu/infra/file_wrapper.c
+            echo "✅ Patch file_wrapper.c appliqué avec succès !"
           fi
 
       - name: Apply KernelSU-Next Manual Hooks for Non-GKI
