@@ -41,90 +41,44 @@ jobs:
           restore-keys: ${{ runner.os }}-ccache-
 
       - name: Integrate KernelSU & SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          # 1. On télécharge et installe KernelSU normalement
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-          fi
-          
-          # 2. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
-          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
+      working-directory: ${{ env.KERNEL_PATH }}
+      run: |
+        # 1. On télécharge et installe KernelSU normalement
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash
+        if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
+          echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+        fi
+        
+        # 2. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
+        sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
+        
+        # 3. Synchronisation de la version du Manager
+        find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
+        
+        # 4. Approche douce : Suppression des références dans les Makefiles pour éviter les symboles non résolus
+        sed -i '/file_wrapper\.o/d' drivers/kernelsu/infra/Makefile || true
+        sed -i '/seccomp_cache\.o/d' drivers/kernelsu/infra/Makefile || true
+        sed -i '/su_mount_ns\.o/d' drivers/kernelsu/infra/Makefile || true
+        sed -i '/pkg_observer\.o/d' drivers/kernelsu/manager/Makefile || true
+        sed -i '/allowlist\.o/d' drivers/kernelsu/policy/Makefile || true
+        sed -i '/app_profile\.o/d' drivers/kernelsu/policy/Makefile || true
+        sed -i '/rules\.o/d' drivers/kernelsu/selinux/Makefile || true
+        sed -i '/sepolicy\.o/d' drivers/kernelsu/selinux/Makefile || true
+        sed -i '/selinux\.o/d' drivers/kernelsu/selinux/Makefile || true
+        sed -i '/event\.o/d' drivers/kernelsu/sulog/Makefile || true
+        sed -i '/dispatch\.o/d' drivers/kernelsu/supercall/Makefile || true
+        sed -i '/supercall\.o/d' drivers/kernelsu/supercall/Makefile || true
+        sed -i '/selinux_hide\.o/d' drivers/kernelsu/feature/Makefile || true
 
-          # 3. Synchronisation de la version du Manager
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
-
-          # Neutralisation des fonctions incompatibles avec le noyau 4.19 dans file_wrapper.c
-          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            echo "" > drivers/kernelsu/infra/file_wrapper.c
-          fi
-
-          # Neutralisation de seccomp_cache.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
-            echo "" > drivers/kernelsu/infra/seccomp_cache.c
-          fi
-
-          # Neutralisation de su_mount_ns.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
-            echo "" > drivers/kernelsu/infra/su_mount_ns.c
-          fi
-
-          # Neutralisation de pkg_observer.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
-            echo "" > drivers/kernelsu/manager/pkg_observer.c
-          fi
-
-          # Neutralisation de allowlist.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
-            echo "" > drivers/kernelsu/policy/allowlist.c
-          fi
-
-          # Neutralisation de app_profile.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
-            echo "" > drivers/kernelsu/policy/app_profile.c
-          fi
-
-          # Neutralisation de selinux/rules.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/selinux/rules.c" ]; then
-            echo "" > drivers/kernelsu/selinux/rules.c
-          fi
-
-          # Neutralisation des fichiers SELinux incompatibles avec le noyau 4.19
-          if [ -f "drivers/kernelsu/selinux/rules.c" ]; then
-            echo "" > drivers/kernelsu/selinux/rules.c
-          fi
-          if [ -f "drivers/kernelsu/selinux/sepolicy.c" ]; then
-            echo "" > drivers/kernelsu/selinux/sepolicy.c
-          fi
-
-          # Neutralisation de sulog/event.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/sulog/event.c" ]; then
-            echo "" > drivers/kernelsu/sulog/event.c
-          fi
-
-          # Neutralisation de supercall/dispatch.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/supercall/dispatch.c" ]; then
-            echo "" > drivers/kernelsu/supercall/dispatch.c
-          fi
-
-          # Neutralisation de supercall/supercall.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            echo "" > drivers/kernelsu/supercall/supercall.c
-          fi
-
-          # Neutralisation de feature/selinux_hide.c incompatible avec le noyau 4.19
-          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
-            echo "" > drivers/kernelsu/feature/selinux_hide.c
-          fi
-
-          # 4. Intégration de SUSFS ensuite
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+        # 5. Intégration de SUSFS ensuite
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git
+        cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+        cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+        patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+            
           
       - name: Debug and Print Patch Failures
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "--- CONTENU DE fs/open.c.rej ---"
@@ -140,7 +94,6 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
           # 1. COPIE DU DEFCONFIG
