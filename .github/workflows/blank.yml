@@ -43,19 +43,23 @@ jobs:
       - name: Integrate KernelSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
+          # 1. On télécharge et installe KernelSU normalement
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # --- SYNCHRONISATION DE LA VERSION KERNELSU AVEC LE MANAGER (32525) ---
-          # On force le noyau à répondre 32525 pour correspondre au versionCode du Manager
+          # 2. Synchronisation de la version du Manager (32525)
           find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} +
           if [ -d "drivers/kernelsu" ]; then
             echo "#define KERNEL_SU_VERSION 32525" >> drivers/kernelsu/ksu.h || true
           fi
-          # ---------------------------------------------------------------------
 
+          # 3. LE BOUCLIER ANTI-ÉCRASEMENT : On force l'UAPI à 2 TOUT À LA FIN
+          # On modifie directement le fichier ksu.h fraîchement installé par le setup
+          sed -i 's/uint32_t get_kernel_uapi_version();/inline uint32_t get_kernel_uapi_version() { return 2; }/g' drivers/kernelsu/ksu.h || true
+
+          # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
