@@ -58,7 +58,6 @@ jobs:
 
           echo "📥 Clonage et intégration de SUSFS pour noyau 4.19..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 || true
-          # Note: Si le dépôt gki utilise une autre branche pour 4.19, adapte si besoin, ou copie les patchs directement :
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ || true
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/ || true
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
@@ -109,7 +108,7 @@ jobs:
               "fs/open.c",
               "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\t{ \n\t\tstruct filename* fname = getname_safe(filename);\n\t\tint status, error;\n\t\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\t\tputname_safe(fname);\n\t\tif (status) return error;\n\t}\n#endif"
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
           )
           inject_hook(
               "fs/read_write.c",
