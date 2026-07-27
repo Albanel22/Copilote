@@ -80,6 +80,11 @@ jobs:
             echo "" > drivers/kernelsu/policy/allowlist.c
           fi
 
+          # Neutralisation de app_profile.c incompatible avec le noyau 4.19
+          if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
+            echo "" > drivers/kernelsu/policy/app_profile.c
+          fi
+
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
