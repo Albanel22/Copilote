@@ -49,24 +49,25 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # 2. Recherche automatique du fichier contenant la fonction get_kernel_uapi_version et modification
-          TARGET_FILE=$(grep -rl "get_kernel_uapi_version" . | head -n 1)
-          echo "Fichier contenant get_kernel_uapi_version trouvé : $TARGET_FILE"
-          
-          if [ -f "$TARGET_FILE" ]; then
-            # Éradication de l'ancienne définition et réinjection propre de la version 2
-            sed -i '/get_kernel_uapi_version/,/}/d' "$TARGET_FILE" || true
-            echo "" >> "$TARGET_FILE"
-            echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> "$TARGET_FILE"
-          else
-            echo "Fonction get_kernel_uapi_version introuvable, ajout direct..."
-            echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> drivers/kernelsu/ksu.h
+          # 2. Correction ciblée dans le dossier du noyau (drivers/kernelsu)
+          if [ -d "drivers/kernelsu" ]; then
+            TARGET_FILE=$(grep -rl "get_kernel_uapi_version" drivers/kernelsu/ | head -n 1)
+            echo "Fichier noyau contenant get_kernel_uapi_version : $TARGET_FILE"
+            
+            if [ -f "$TARGET_FILE" ]; then
+              sed -i '/get_kernel_uapi_version/,/}/d' "$TARGET_FILE" || true
+              echo "" >> "$TARGET_FILE"
+              echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> "$TARGET_FILE"
+            fi
           fi
 
-          # 3. Synchronisation de la version du Manager si nécessaire
-          find . -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
+          # 3. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
+          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
 
-          # 4. Intégration de SUSFS ensuite
+          # 4. Synchronisation de la version du Manager
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
+
+          # 5. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
