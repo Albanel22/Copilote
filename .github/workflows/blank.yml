@@ -41,40 +41,40 @@ jobs:
           restore-keys: ${{ runner.os }}-ccache-
 
       - name: Integrate KernelSU & SUSFS
-      working-directory: ${{ env.KERNEL_PATH }}
-      run: |
-        # 1. On télécharge et installe KernelSU normalement
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash
-        if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          # 1. On télécharge et installe KernelSU normalement
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash
+          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
           echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-        fi
+          fi
         
-        # 2. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
-        sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
+          # 2. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
+          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
         
-        # 3. Synchronisation de la version du Manager
-        find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
+          # 3. Synchronisation de la version du Manager
+          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
         
-        # 4. Approche douce : Suppression des références dans les Makefiles pour éviter les symboles non résolus
-        sed -i '/file_wrapper\.o/d' drivers/kernelsu/infra/Makefile || true
-        sed -i '/seccomp_cache\.o/d' drivers/kernelsu/infra/Makefile || true
-        sed -i '/su_mount_ns\.o/d' drivers/kernelsu/infra/Makefile || true
-        sed -i '/pkg_observer\.o/d' drivers/kernelsu/manager/Makefile || true
-        sed -i '/allowlist\.o/d' drivers/kernelsu/policy/Makefile || true
-        sed -i '/app_profile\.o/d' drivers/kernelsu/policy/Makefile || true
-        sed -i '/rules\.o/d' drivers/kernelsu/selinux/Makefile || true
-        sed -i '/sepolicy\.o/d' drivers/kernelsu/selinux/Makefile || true
-        sed -i '/selinux\.o/d' drivers/kernelsu/selinux/Makefile || true
-        sed -i '/event\.o/d' drivers/kernelsu/sulog/Makefile || true
-        sed -i '/dispatch\.o/d' drivers/kernelsu/supercall/Makefile || true
-        sed -i '/supercall\.o/d' drivers/kernelsu/supercall/Makefile || true
-        sed -i '/selinux_hide\.o/d' drivers/kernelsu/feature/Makefile || true
+          # 4. Approche douce : Suppression des références dans les Makefiles pour éviter les symboles non résolus
+          sed -i '/file_wrapper\.o/d' drivers/kernelsu/infra/Makefile || true
+          sed -i '/seccomp_cache\.o/d' drivers/kernelsu/infra/Makefile || true
+          sed -i '/su_mount_ns\.o/d' drivers/kernelsu/infra/Makefile || true
+          sed -i '/pkg_observer\.o/d' drivers/kernelsu/manager/Makefile || true
+          sed -i '/allowlist\.o/d' drivers/kernelsu/policy/Makefile || true
+          sed -i '/app_profile\.o/d' drivers/kernelsu/policy/Makefile || true
+          sed -i '/rules\.o/d' drivers/kernelsu/selinux/Makefile || true
+          sed -i '/sepolicy\.o/d' drivers/kernelsu/selinux/Makefile || true
+          sed -i '/selinux\.o/d' drivers/kernelsu/selinux/Makefile || true
+          sed -i '/event\.o/d' drivers/kernelsu/sulog/Makefile || true
+          sed -i '/dispatch\.o/d' drivers/kernelsu/supercall/Makefile || true
+          sed -i '/supercall\.o/d' drivers/kernelsu/supercall/Makefile || true
+          sed -i '/selinux_hide\.o/d' drivers/kernelsu/feature/Makefile || true
 
-        # 5. Intégration de SUSFS ensuite
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git
-        cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-        cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-        patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          # 5. Intégration de SUSFS ensuite
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
             
           
       - name: Debug and Print Patch Failures
