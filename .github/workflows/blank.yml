@@ -84,10 +84,15 @@ jobs:
           echo "--- CONTENU DE fs/open.c.rej ---"
           [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
           sed -n '370,400p' fs/open.c || true
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -uo pipefail
+        
+          # Déclaration de la variable 32-bit pour éviter l'erreur de variable non liée
+          CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32:-arm-linux-gnueabi-}
+        
           ccache -C
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
@@ -107,12 +112,12 @@ jobs:
           # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
           echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
           {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
+          echo "CONFIG_KSU=y"
+          echo "CONFIG_KSU_SUSFS=y"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+          echo "CONFIG_KPROBES=y"
+          echo "CONFIG_HAVE_KPROBES=y"
+          echo "CONFIG_KRETPROBES=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           # 4. Mise à jour des dépendances
@@ -133,6 +138,7 @@ jobs:
           # 7. Compilation finale
           echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
