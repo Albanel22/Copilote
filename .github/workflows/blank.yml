@@ -39,24 +39,34 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU via setup.sh
+      - name: 📂 Intégration ReSukiSU & SUSFS
         run: |
           set -e
           
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           cd ${{ env.KERNEL_PATH }}
+          
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+          
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+          
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
+
+          echo "📥 Clonage et intégration de SUSFS pour noyau 4.19..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 || true
+          # Note: Si le dépôt gki utilise une autre branche pour 4.19, adapte si besoin, ou copie les patchs directement :
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ || true
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/ || true
+          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+
       - name: 💉 Injection complète (Déclarations + Appels) via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
-          # Restauration propre des fichiers modifiés
           git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c || true
           python3 - << 'EOF'
           import os
@@ -71,10 +81,7 @@ jobs:
                   print(f"⚠️ Déjà injecté dans {path}")
                   return
               if target_func_header in content:
-                  # 1. Insérer la déclaration extern juste avant l'en-tête de la fonction
                   content = content.replace(target_func_header, declaration + "\n" + target_func_header, 1)
-                  
-                  # 2. Trouver l'accolade ouvrante de la fonction pour y insérer l'appel
                   idx = content.find(target_func_header)
                   brace_idx = content.find('{', idx)
                   if brace_idx != -1:
@@ -82,61 +89,55 @@ jobs:
                       content = content[:brace_idx + 1] + insertion + content[brace_idx + 1:]
                       with open(path, 'w', encoding='utf-8') as f:
                           f.write(content)
-                      print(f"✅ Injecté avec succès (déclaration + appel) dans {path}")
+                      print(f"✅ Injecté avec succès dans {path}")
                       return
-              print(f"❌ Cible introuvable dans {path} : {target_func_header[:30]}...")
-          # 1. drivers/input/input.c
+              print(f"❌ Cible introuvable dans {path}")
+
           inject_hook(
               "drivers/input/input.c",
               "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_input_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
           )
-          # 2. fs/exec.c
           inject_hook(
               "fs/exec.c",
               "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif"
           )
-          # 3. fs/open.c
           inject_hook(
               "fs/open.c",
               "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
+              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\t{ \n\t\tstruct filename* fname = getname_safe(filename);\n\t\tint status, error;\n\t\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\t\tputname_safe(fname);\n\t\tif (status) return error;\n\t}\n#endif"
           )
-          # 4. fs/read_write.c
           inject_hook(
               "fs/read_write.c",
               "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_init_rc_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif"
           )
-          # 5. fs/stat.c
           inject_hook(
               "fs/stat.c",
               "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_stat(int *dfd, struct filename **filename_ptr, int *flags);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif"
           )
-          # 6. kernel/reboot.c
           inject_hook(
               "kernel/reboot.c",
               "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif"
           )
-          # 7. kernel/sys.c
           inject_hook(
               "kernel/sys.c",
               "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif",
               "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif"
           )
-          print("✨ Tous les hooks et leurs déclarations extern ont été injectés avec succès !")
+          print("✨ Hooks + SUSFS injectés avec succès !")
           EOF
-             
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -155,7 +156,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des drapeaux de configuration ReSukiSU (Manual Hook activé)
+          # Forçage des options de configuration pour ReSukiSU, OverlayFS et SUSFS complet
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -164,16 +165,20 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_AUTO_MOUNT_DEV_PTS=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Fixs signatures modules & Dalle tactile Motorola
+          # Fixs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
+          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
-          echo "🚀 Lancement de la compilation de l'Image..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
+          
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
