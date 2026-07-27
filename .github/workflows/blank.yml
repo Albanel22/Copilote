@@ -113,6 +113,11 @@ jobs:
             echo "" > drivers/kernelsu/supercall/supercall.c
           fi
 
+          # Neutralisation de feature/selinux_hide.c incompatible avec le noyau 4.19
+          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
+            echo "" > drivers/kernelsu/feature/selinux_hide.c
+          fi
+
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
