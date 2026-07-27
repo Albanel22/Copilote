@@ -65,15 +65,18 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 5. Injection propre du header KernelSU et du bloc SUSFS dans fs/open.c
+          # 5. Injection propre avec le chemin absolu du header ksu.h
           python3 -c '
+          import os
           path = "fs/open.c"
+          abs_ksu_h = os.path.abspath("drivers/kernelsu/include/ksu.h")
+          
           with open(path, "r") as f:
               content = f.read()
 
           include_target = "#include <linux/uaccess.h>"
-          ksu_include = "\n#include \"../drivers/kernelsu/include/ksu.h\""
-          if "ksu.h" not in content and include_target in content:
+          ksu_include = f"\n#include \"{abs_ksu_h}\""
+          if abs_ksu_h not in content and include_target in content:
               content = content.replace(include_target, include_target + ksu_include, 1)
 
           anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
@@ -84,9 +87,8 @@ jobs:
               
           with open(path, "w") as f:
               f.write(content)
-          print("Successfully patched fs/open.c with correct KSU header and SUSFS")
+          print("Successfully patched fs/open.c with absolute KSU header path")
           ' || true
-
           
       - name: Debug and Print Patch Failures
         working-directory: ${{ env.KERNEL_PATH }}
