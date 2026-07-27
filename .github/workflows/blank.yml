@@ -68,17 +68,19 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 6. Injection propre avec un simple #include <linux/ksu.h> standard dans fs/open.c
+          # Injection propre avec déclaration explicite de ksu_handle_faccessat et du bloc SUSFS dans fs/open.c
           python3 -c '
           path = "fs/open.c"
           with open(path, "r") as f:
               content = f.read()
 
+          # 1. Ajouter la déclaration externe pour éviter l erreur d implicit declaration
           include_target = "#include <linux/uaccess.h>"
-          ksu_include = "\n#include <linux/ksu.h>"
-          if "ksu.h" not in content and include_target in content:
-              content = content.replace(include_target, include_target + ksu_include, 1)
+          ksu_decl = "\n#ifdef CONFIG_KSU\nextern void ksu_handle_faccessat(int *dfd, const char __user **filenameflags, int *mode, int *flags);\n#endif"
+          if "ksu_handle_faccessat" not in content and include_target in content:
+              content = content.replace(include_target, include_target + ksu_decl, 1)
 
+          # 2. Insérer l appel et le bloc SUSFS
           anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
           injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif"
 
@@ -87,7 +89,7 @@ jobs:
               
           with open(path, "w") as f:
               f.write(content)
-          print("Successfully patched fs/open.c with global <linux/ksu.h> and SUSFS")
+          print("Successfully patched fs/open.c with explicit ksu_handle_faccessat declaration")
           ' || true
           
       - name: Debug and Print Patch Failures
