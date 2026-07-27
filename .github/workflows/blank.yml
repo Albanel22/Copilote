@@ -96,7 +96,12 @@ jobs:
           fi
           if [ -f "drivers/kernelsu/selinux/sepolicy.c" ]; then
             echo "" > drivers/kernelsu/selinux/sepolicy.c
-          fi 
+          fi
+
+          # Neutralisation de sulog/event.c incompatible avec le noyau 4.19
+          if [ -f "drivers/kernelsu/sulog/event.c" ]; then
+            echo "" > drivers/kernelsu/sulog/event.c
+          fi
 
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
