@@ -51,13 +51,11 @@ jobs:
           
           # 2. Synchronisation de la version du Manager (32525)
           find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} +
-          if [ -d "drivers/kernelsu" ]; then
-            echo "#define KERNEL_SU_VERSION 32525" >> drivers/kernelsu/ksu.h || true
-          fi
-
-          # 3. Modification propre de l'UAPI existante au lieu de la recréer
-          sed -i 's/return 0;/return 2;/g' drivers/kernelsu/ksu.h || true
-          sed -i 's/return 1;/return 2;/g' drivers/kernelsu/ksu.h || true
+          
+          # 3. Éradication propre de toute ancienne fonction uapi et réinjection forcée
+          sed -i '/get_kernel_uapi_version/,/}/d' drivers/kernelsu/ksu.h || true
+          echo "" >> drivers/kernelsu/ksu.h
+          echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> drivers/kernelsu/ksu.h
 
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
