@@ -39,7 +39,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS
+      - name: 📂 Intégration ReSukiSU & Headers de compatibilité
         run: |
           set -e
           
@@ -56,85 +56,102 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-          echo "📥 Clonage et intégration de SUSFS pour noyau 4.19..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 || true
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ || true
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/ || true
-          patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          echo "📥 Récupération des en-têtes nécessaires (susfs_def.h, etc.)..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 --depth=1 || true
+          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
+          fi
+          rm -rf susfs4ksu
 
-      - name: 💉 Injection complète (Déclarations + Appels) via Python
+      - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c || true
+          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
           python3 - << 'EOF'
           import os
-          def inject_hook(path, target_func_header, declaration, call_body):
+
+          def inject_code(path, target_str, code_to_insert, position="before"):
               if not os.path.exists(path):
                   print(f"❌ Fichier introuvable : {path}")
                   return
               with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                   content = f.read()
               
-              if call_body in content:
-                  print(f"⚠️ Déjà injecté dans {path}")
+              if code_to_insert in content:
+                  print(f"⚠️ Déjà présent dans {path}")
                   return
-              if target_func_header in content:
-                  content = content.replace(target_func_header, declaration + "\n" + target_func_header, 1)
-                  idx = content.find(target_func_header)
-                  brace_idx = content.find('{', idx)
-                  if brace_idx != -1:
-                      insertion = "\n" + call_body + "\n"
-                      content = content[:brace_idx + 1] + insertion + content[brace_idx + 1:]
-                      with open(path, 'w', encoding='utf-8') as f:
-                          f.write(content)
-                      print(f"✅ Injecté avec succès dans {path}")
-                      return
-              print(f"❌ Cible introuvable dans {path}")
+              
+              if target_str in content:
+                  if position == "before":
+                      content = content.replace(target_str, code_to_insert + "\n" + target_str, 1)
+                  elif position == "after":
+                      content = content.replace(target_str, target_str + "\n" + code_to_insert, 1)
+                  elif position == "inside_brace":
+                      idx = content.find(target_str)
+                      brace_idx = content.find('{', idx)
+                      if brace_idx != -1:
+                          content = content[:brace_idx + 1] + "\n" + code_to_insert + "\n" + content[brace_idx + 1:]
+                  
+                  with open(path, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print(f"✅ Injecté avec succès dans {path}")
+              else:
+                  print(f"❌ Cible introuvable dans {path}")
 
-          inject_hook(
-              "drivers/input/input.c",
-              "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_input_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif"
-          )
-          inject_hook(
-              "fs/exec.c",
-              "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif"
-          )
-          inject_hook(
-              "fs/open.c",
-              "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif"
-          )
-          inject_hook(
-              "fs/read_write.c",
-              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_init_rc_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif"
-          )
-          inject_hook(
-              "fs/stat.c",
-              "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_stat(int *dfd, struct filename **filename_ptr, int *flags);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif"
-          )
-          inject_hook(
-              "kernel/reboot.c",
-              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif"
-          )
-          inject_hook(
-              "kernel/sys.c",
-              "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif",
-              "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif"
-          )
-          print("✨ Hooks + SUSFS injectés avec succès !")
+          # 1. fs/stat.c
+          stat_declarations = """
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          __attribute__((hot)) 
+          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+          extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+          #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+          extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+          #endif
+          #endif
+          """
+          inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
+          inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
+          inject_code("fs/stat.c", "SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
+
+          # 2. fs/exec.c
+          exec_declarations = """
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          __attribute__((hot))
+          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
+          #endif
+          """
+          inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
+          inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
+          inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
+
+          # 3. fs/open.c
+          open_declarations = """
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          __attribute__((hot)) 
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
+          #endif
+          """
+          inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", open_declarations, "before")
+          inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
+
+          # 4. SELinux updates (retrait des statiques)
+          if os.path.exists("security/selinux/selinuxfs.c"):
+              with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
+                  sc = f.read()
+              sc = sc.replace("static ssize_t (*write_op[])", "ssize_t (*write_op[])")
+              sc = sc.replace("static const struct file_operations sel_handle_status_ops", "const struct file_operations sel_handle_status_ops")
+              with open("security/selinux/selinuxfs.c", "w", encoding="utf-8") as f:
+                  f.write(sc)
+
+          if os.path.exists("security/selinux/hooks.c"):
+              with open("security/selinux/hooks.c", "r", encoding="utf-8") as f:
+                  hc = f.read()
+              hc = hc.replace("static struct security_operations selinux_ops", "struct security_operations selinux_ops")
+              with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
+                  f.write(hc)
+
+          print("✨ Tous les hooks ReSukiSU ont été injectés avec succès !")
           EOF
 
       - name: Multi-stage Kernel Compilation
@@ -155,7 +172,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU, OverlayFS et SUSFS complet
+          # Forçage des options de configuration pour ReSukiSU
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -164,10 +181,6 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_AUTO_MOUNT_DEV_PTS=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
