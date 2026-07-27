@@ -85,6 +85,19 @@ jobs:
             echo "" > drivers/kernelsu/policy/app_profile.c
           fi
 
+          # Neutralisation de selinux/rules.c incompatible avec le noyau 4.19
+          if [ -f "drivers/kernelsu/selinux/rules.c" ]; then
+            echo "" > drivers/kernelsu/selinux/rules.c
+          fi
+
+          # Neutralisation des fichiers SELinux incompatibles avec le noyau 4.19
+          if [ -f "drivers/kernelsu/selinux/rules.c" ]; then
+            echo "" > drivers/kernelsu/selinux/rules.c
+          fi
+          if [ -f "drivers/kernelsu/selinux/sepolicy.c" ]; then
+            echo "" > drivers/kernelsu/selinux/sepolicy.c
+          fi 
+
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
