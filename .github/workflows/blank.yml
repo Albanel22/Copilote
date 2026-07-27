@@ -55,9 +55,12 @@ jobs:
             echo "#define KERNEL_SU_VERSION 32525" >> drivers/kernelsu/ksu.h || true
           fi
 
-          # 3. LE BOUCLIER ANTI-ÉCRASEMENT : On force l'UAPI à 2 TOUT À LA FIN
-          # On modifie directement le fichier ksu.h fraîchement installé par le setup
-          sed -i 's/uint32_t get_kernel_uapi_version();/inline uint32_t get_kernel_uapi_version() { return 2; }/g' drivers/kernelsu/ksu.h || true
+          # 3. LE BOUCLIER ANTI-ÉCRASEMENT ULTIME : Injection directe de l'UAPI à 2
+          echo "🛠️ Forçage direct de l'UAPI à 2 dans ksu.h..."
+          echo "" >> drivers/kernelsu/ksu.h
+          echo "/* Forçage UAPI pour le Manager */" >> drivers/kernelsu/ksu.h
+          echo "#undef get_kernel_uapi_version" >> drivers/kernelsu/ksu.h
+          echo "inline uint32_t get_kernel_uapi_version() { return 2; }" >> drivers/kernelsu/ksu.h
 
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
