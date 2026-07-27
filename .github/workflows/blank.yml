@@ -97,6 +97,7 @@ jobs:
                   print(f"✅ Injecté avec succès dans {path}")
               else:
                   print(f"❌ Cible introuvable dans {path}")
+
           # 1. fs/stat.c
           stat_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -111,6 +112,7 @@ jobs:
           inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
           inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
           inject_code("fs/stat.c", "SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
+
           # 2. fs/exec.c
           exec_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -121,6 +123,7 @@ jobs:
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
           inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
+
           # 3. fs/open.c
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -139,12 +142,12 @@ jobs:
               sc = sc.replace("static const struct file_operations sel_handle_status_ops", "const struct file_operations sel_handle_status_ops")
               with open("security/selinux/selinuxfs.c", "w", encoding="utf-8") as f:
                   f.write(sc)
+
           if os.path.exists("security/selinux/hooks.c"):
               with open("security/selinux/hooks.c", "r", encoding="utf-8") as f:
                   hc = f.read()
               hc = hc.replace("static struct security_operations selinux_ops", "struct security_operations selinux_ops")
               
-              # Injection propre de la fonction de contournement tout en bas du fichier hooks.c
               selinux_bypass_func = """
               #ifdef CONFIG_KSU
               __attribute__((hot))
@@ -178,15 +181,17 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU
+          # Forçage des options de configuration pour ReSukiSU (incluant KALLSYMS_ALL)
           {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_MANUAL_HOOK=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+              echo "CONFIG_KSU=y"
+              echo "CONFIG_KSU_MANUAL_HOOK=y"
+              echo "CONFIG_KPROBES=y"
+              echo "CONFIG_HAVE_KPROBES=y"
+              echo "CONFIG_KRETPROBES=y"
+              echo "CONFIG_OVERLAY_FS=y"
+              echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+              echo "CONFIG_KALLSYMS=y"
+              echo "CONFIG_KALLSYMS_ALL=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
