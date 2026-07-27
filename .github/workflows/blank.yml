@@ -70,6 +70,11 @@ jobs:
             echo "" > drivers/kernelsu/infra/su_mount_ns.c
           fi
 
+          # Neutralisation de pkg_observer.c incompatible avec le noyau 4.19
+          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
+            echo "" > drivers/kernelsu/manager/pkg_observer.c
+          fi
+
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
