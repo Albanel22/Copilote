@@ -1,6 +1,5 @@
 name: Kernel CI — build & package
 on:
-  
   workflow_dispatch:
 
 env:
@@ -33,6 +32,7 @@ jobs:
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -48,6 +48,9 @@ jobs:
           if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
           echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
+
+          # Suppression définitive de file_wrapper.c incompatible avec le noyau 4.19
+          rm -f drivers/kernelsu/infra/file_wrapper.c || true
         
           # 2. Suppression de la macro MODULE_IMPORT_NS incompatible avec le noyau 4.19
           sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c || true
@@ -56,7 +59,6 @@ jobs:
           find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
         
           # 4. Approche douce : Suppression des références dans les Makefiles pour éviter les symboles non résolus
-          sed -i '/file_wrapper\.o/d' drivers/kernelsu/infra/Makefile || true
           sed -i '/seccomp_cache\.o/d' drivers/kernelsu/infra/Makefile || true
           sed -i '/su_mount_ns\.o/d' drivers/kernelsu/infra/Makefile || true
           sed -i '/pkg_observer\.o/d' drivers/kernelsu/manager/Makefile || true
@@ -75,10 +77,26 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-            
+
+          # Injection propre du bloc SUSFS dans do_faccessat sans souci d'indentation YAML
+          python3 -c '
+          path = "fs/open.c"
+          with open(path, "r") as f:
+              content = f.read()
+
+          anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
+          injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif"
+
+          if "susfs_sus_path_by_filename" not in content and anchor in content:
+              content = content.replace(anchor, anchor + injection, 1)
+              with open(path, "w") as f:
+                  f.write(content)
+              print("Successfully injected SUSFS into do_faccessat")
+          else:
+              print("SUSFS already present or anchor not found")
+          ' || true
           
       - name: Debug and Print Patch Failures
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "--- CONTENU DE fs/open.c.rej ---"
