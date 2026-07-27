@@ -115,9 +115,9 @@ jobs:
           echo "📂 Préparation du defconfig..."
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # 2. Génération de la config de base
+          # 2. Génération de la config de base (avec espaces corrigés)
           echo "📂 Génération de la config de base..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
           # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
           echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
