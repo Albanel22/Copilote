@@ -49,13 +49,22 @@ jobs:
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
           
-          # 2. Synchronisation de la version du Manager (32525)
-          find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} +
+          # 2. Recherche automatique du fichier contenant la fonction get_kernel_uapi_version et modification
+          TARGET_FILE=$(grep -rl "get_kernel_uapi_version" . | head -n 1)
+          echo "Fichier contenant get_kernel_uapi_version trouvé : $TARGET_FILE"
           
-          # 3. Éradication propre de toute ancienne fonction uapi et réinjection forcée
-          sed -i '/get_kernel_uapi_version/,/}/d' drivers/kernelsu/ksu.h || true
-          echo "" >> drivers/kernelsu/ksu.h
-          echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> drivers/kernelsu/ksu.h
+          if [ -f "$TARGET_FILE" ]; then
+            # Éradication de l'ancienne définition et réinjection propre de la version 2
+            sed -i '/get_kernel_uapi_version/,/}/d' "$TARGET_FILE" || true
+            echo "" >> "$TARGET_FILE"
+            echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> "$TARGET_FILE"
+          else
+            echo "Fonction get_kernel_uapi_version introuvable, ajout direct..."
+            echo "static inline uint32_t get_kernel_uapi_version(void) { return 2; }" >> drivers/kernelsu/ksu.h
+          fi
+
+          # 3. Synchronisation de la version du Manager si nécessaire
+          find . -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
 
           # 4. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
