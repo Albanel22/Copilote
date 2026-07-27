@@ -59,24 +59,24 @@ jobs:
           # 3. Synchronisation de la version du Manager
           find drivers/kernelsu -type f \( -name "*.h" -o -name "*.c" \) -exec sed -i 's/11872/32525/g' {} + || true
 
-          # 4. Intégration de SUSFS ensuite
+          # 4. Copie du header KSU dans include/linux/ pour qu'il soit globalement accessible
+          cp drivers/kernelsu/include/ksu.h include/linux/ || true
+
+          # 5. Intégration de SUSFS ensuite
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 5. Injection propre avec le chemin absolu du header ksu.h
+          # 6. Injection propre avec un simple #include <linux/ksu.h> standard dans fs/open.c
           python3 -c '
-          import os
           path = "fs/open.c"
-          abs_ksu_h = os.path.abspath("drivers/kernelsu/include/ksu.h")
-          
           with open(path, "r") as f:
               content = f.read()
 
           include_target = "#include <linux/uaccess.h>"
-          ksu_include = f"\n#include \"{abs_ksu_h}\""
-          if abs_ksu_h not in content and include_target in content:
+          ksu_include = "\n#include <linux/ksu.h>"
+          if "ksu.h" not in content and include_target in content:
               content = content.replace(include_target, include_target + ksu_include, 1)
 
           anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
@@ -87,7 +87,7 @@ jobs:
               
           with open(path, "w") as f:
               f.write(content)
-          print("Successfully patched fs/open.c with absolute KSU header path")
+          print("Successfully patched fs/open.c with global <linux/ksu.h> and SUSFS")
           ' || true
           
       - name: Debug and Print Patch Failures
