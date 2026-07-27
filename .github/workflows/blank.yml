@@ -131,7 +131,7 @@ jobs:
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", open_declarations, "before")
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
           
-          # 4. SELinux updates & Bypass des refus AVC pour les modules
+          # 4. SELinux updates & Bypass propre en fin de fichier
           if os.path.exists("security/selinux/selinuxfs.c"):
               with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
                   sc = f.read()
@@ -144,18 +144,16 @@ jobs:
                   hc = f.read()
               hc = hc.replace("static struct security_operations selinux_ops", "struct security_operations selinux_ops")
               
-              # Ajout d'un correctif dans les hooks SELinux pour autoriser les opérations root de ksu sans déclencher d'AVC denied bloquant
-              selinux_bypass = """
+              # Injection propre de la fonction de contournement tout en bas du fichier hooks.c
+              selinux_bypass_func = """
               #ifdef CONFIG_KSU
-              // Assouplissement ciblé pour éviter les blocages de modules / adb
-              if (unlikely(ksu_is_unsupported_enforcing_bypass())) {
+              __attribute__((hot))
+              int ksu_selinux_enforce_bypass(void) {
                   return 0;
               }
               #endif
               """
-              # On injecte la vérification au début de selinux_file_permission ou file_permission si présent
-              if "selinux_file_permission" in hc:
-                  hc = hc.replace("selinux_file_permission(struct file *file, int mask)", "selinux_file_permission(struct file *file, int mask)\n{\n\treturn 0; // Bypass ciblé KSU storage")
+              hc = hc + "\n" + selinux_bypass_func
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
