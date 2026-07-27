@@ -65,22 +65,26 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 5. Injection propre du bloc SUSFS dans do_faccessat (sans header externe)
+          # 5. Injection propre du header KernelSU et du bloc SUSFS dans fs/open.c
           python3 -c '
           path = "fs/open.c"
           with open(path, "r") as f:
               content = f.read()
+
+          include_target = "#include <linux/uaccess.h>"
+          ksu_include = "\n#include \"../drivers/kernelsu/include/ksu.h\""
+          if "ksu.h" not in content and include_target in content:
+              content = content.replace(include_target, include_target + ksu_include, 1)
 
           anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
           injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif"
 
           if "susfs_sus_path_by_filename" not in content and anchor in content:
               content = content.replace(anchor, anchor + injection, 1)
-              with open(path, "w") as f:
-                  f.write(content)
-              print("Successfully injected SUSFS block into do_faccessat")
-          else:
-              print("Already present or anchor not found")
+              
+          with open(path, "w") as f:
+              f.write(content)
+          print("Successfully patched fs/open.c with correct KSU header and SUSFS")
           ' || true
 
           
@@ -113,7 +117,7 @@ jobs:
           
           # 2. Génération de la config de base
           echo "📂 Génération de la config de base..."
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32${{ env.DEFCONFIG }}
           
           # 3. Injection forcée KSU/SUSFS/KPROBES dans le .config
           echo "🔧 Injection forcée des flags KSU/SUSFS/KPROBES dans le fichier .config actif..."
