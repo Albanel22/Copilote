@@ -206,7 +206,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
 
-      - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
+      - name: Repack & Finalize (AnyKernel3 + Copie du ksud compilé)
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -216,21 +216,21 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -f AnyKernel3/anykernel.sh
           
-          echo "📥 Extraction élargie du binaire ksud depuis les sources..."
+          echo "📥 Copie du binaire ksud fraîchement compilé..."
           mkdir -p AnyKernel3/patch/system/bin
           
-          KSUD_FOUND=$(find ${{ env.KERNEL_PATH }} -name "ksud" -type f -print -quit)
+          # Le binaire compilé par cargo ndk se trouve dans ce chemin exact :
+          KSUD_COMPILED="${{ env.KERNEL_PATH }}/userspace/ksud/target/aarch64-linux-android/release/ksud"
           
-          if [ -n "$KSUD_FOUND" ]; then
-            echo "✅ Binaire ksud trouvé ici : $KSUD_FOUND"
-            cp -f "$KSUD_FOUND" AnyKernel3/patch/system/bin/ksud
+          if [ -f "$KSUD_COMPILED" ]; then
+            cp -f "$KSUD_COMPILED" AnyKernel3/patch/system/bin/ksud
+            echo "✅ Binaire ksud récupéré avec succès depuis la compilation !"
           else
-            echo "❌ Erreur : Impossible de trouver le binaire ksud dans les sources !"
+            echo "❌ Erreur : Le binaire ksud compilé est introuvable à l'emplacement attendu."
             exit 1
           fi
           
           chmod +x AnyKernel3/patch/system/bin/ksud
-          echo "✅ Binaire ksud intégré avec succès !"
 
           echo "✍️ Création du script anykernel.sh nettoyé..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
