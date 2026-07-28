@@ -124,18 +124,16 @@ jobs:
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
           inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
 
-          # 3. fs/open.c (CORRIGÉ : Ajout du hook do_sys_open indispensable aux modules)
+          # 3. fs/open.c (Conforme à la doc officielle de ReSukiSU)
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot)) 
           extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
-          extern int ksu_handle_open(int *dfd, const char __user **filename_user, int *flags, umode_t *mode);
           #endif
           """
-          inject_code("fs/open.c", "long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)", open_declarations, "before")
-          inject_code("fs/open.c", "long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_open(&dfd, &filename, &flags, &mode);\n#endif", "inside_brace")
+          inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
-          
+
           # 4. SELinux updates & Bypass propre en fin de fichier
           if os.path.exists("security/selinux/selinuxfs.c"):
               with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
@@ -162,9 +160,9 @@ jobs:
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
-          print("✨ Tous les hooks ReSukiSU (incluant open) et correctifs SELinux ont été mis à jour !")
+          print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
           EOF
-
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
