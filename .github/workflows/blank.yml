@@ -22,16 +22,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
+
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -205,31 +208,77 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
           
-      - name: Repack & Finalize
+      - name: Repack & Finalize (AnyKernel3 Packaging)
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p repack
-          cp boot-stock.img repack/boot.img
           
-          wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk-v27.0.apk
-          unzip -q Magisk-v27.0.apk lib/x86_64/libmagiskboot.so
-          mv lib/x86_64/libmagiskboot.so repack/magiskboot
-          chmod +x repack/magiskboot
-          rm -rf Magisk-v27.0.apk lib/
+          echo "📥 Récupération d'AnyKernel3..."
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          rm -f AnyKernel3/anykernel.sh
           
-          cd repack
-          ./magiskboot unpack boot.img
-          cp ${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
-          ./magiskboot repack boot.img new-boot.img
-          mv new-boot.img ../final_boot.img
+          echo "✍️ Création du script anykernel.sh personnalisé pour kiev (Android 16)..."
+          cat << 'EOF' > AnyKernel3/anykernel.sh
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          ### AnyKernel setup
+          # global properties
+          properties() { '
+          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=1
+          device.name1=kiev
+          device.name2=XT2113-2
+          device.name3=kiev_retde
+          device.name4=kiev_t
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          # import functions/variables and setup patching
+          . tools/ak3-core.sh;
+
+          # Remplacement du noyau brut
+          split_boot;
+          flash_boot;
+          EOF
           
-          cd ..
+          # Sécurité supplémentaire pour préserver le format de fichier Unix requis
+          sed -i 's/\r$//' AnyKernel3/anykernel.sh
+          
+          echo "📦 Injection de l'image du noyau brut (Image) et des DTB..."
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
+          
+          if [ -f ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/dtb ]; then
+            cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/dtb AnyKernel3/dtb
+          fi
+
+          echo "🗜️ Création de l'archive flashable finale..."
           mkdir -p final_output
-          mv final_boot.img final_output/boot.img
+          cd AnyKernel3
+          zip -r9 ../final_output/AnyKernel3_Risukisu_kiev.zip * -x .git* README.md
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola_final
-          path: final_output/boot.img
+          name: kernel-motorola_anykernel3
+          path: final_output/AnyKernel3_Risukisu_kiev.zip
