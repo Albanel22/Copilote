@@ -216,10 +216,24 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -f AnyKernel3/anykernel.sh
           
-          echo "📥 Téléchargement de ton binaire ksud personnalisé..."
+          # ==========================================
+          # 📥 ICI : On remplace le vieux curl par le nouveau bloc local
+          # ==========================================
+          echo "📥 Extraction du binaire ksud depuis les sources..."
           mkdir -p AnyKernel3/patch/system/bin
-          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
+          
+          if [ -f "${{ env.KERNEL_PATH }}/userspace/ksud" ]; then
+            cp -f "${{ env.KERNEL_PATH }}/userspace/ksud" AnyKernel3/patch/system/bin/ksud
+          elif [ -f "${{ env.KERNEL_PATH }}/kernelSU/tools/ksud" ]; then
+            cp -f "${{ env.KERNEL_PATH }}/kernelSU/tools/ksud" AnyKernel3/patch/system/bin/ksud
+          else
+            echo "⚠️ Recherche alternative du binaire ksud..."
+            find ${{ env.KERNEL_PATH }} -name "ksud" -type f -exec cp -f {} AnyKernel3/patch/system/bin/ksud \;
+          fi
+          
           chmod +x AnyKernel3/patch/system/bin/ksud
+          echo "✅ Binaire ksud intégré avec succès sans erreur 404 !"
+          # ==========================================
 
           echo "✍️ Création du script anykernel.sh nettoyé..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
