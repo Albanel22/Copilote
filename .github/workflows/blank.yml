@@ -208,7 +208,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
           
-      - name: Repack & Finalize (AnyKernel3 + ksud + OverlayFS Setup)
+      - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -218,16 +218,13 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -f AnyKernel3/anykernel.sh
           
-          echo "📥 Récupération du binaire ksud officiel (arm64)..."
-          mkdir -p ksud_bin
-          curl -fLo ksud_bin/ksud https://github.com/tiann/KernelSU/releases/download/v0.9.5/ksud-aarch64-unknown-linux-musl
-          chmod +x ksud_bin/ksud
-          
-          # Copie de ksud pour l'archive
+          echo "📥 Téléchargement de ton binaire ksud personnalisé..."
           mkdir -p AnyKernel3/patch/system/bin
-          cp ksud_bin/ksud AnyKernel3/patch/system/bin/ksud
+          # Téléchargement via le lien raw associé à ton dépôt
+          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
+          chmod +x AnyKernel3/patch/system/bin/ksud
 
-          echo "✍️ Création du script anykernel.sh avec support complet ksud & OverlayFS..."
+          echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
           ### AnyKernel3 Ramdisk Mod Script
           ## osm0sis @ xda-developers
@@ -273,14 +270,13 @@ jobs:
           if [ -f patch/system/bin/ksud ]; then
             ui_print "⚙️ Configuration de l'environnement OverlayFS via ksud..."
             chmod 755 patch/system/bin/ksud
-            # Utilise le binaire pour patcher le ramdisk extrait en direct avant le réempaquetage
             ./patch/system/bin/ksud kernel setup-script
           fi
 
           # Flash de l'image modifiée
           flash_boot;
 
-          # Sécurité : Copie persistante de secours pour l'espace utilisateur
+          # Copie persistante pour s'assurer que le userspace l'exécute au reboot
           if [ -f patch/system/bin/ksud ]; then
             mkdir -p /data/adb/ksu/bin
             cp -f patch/system/bin/ksud /data/adb/ksu/bin/ksud
