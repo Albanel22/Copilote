@@ -181,7 +181,7 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU (incluant KALLSYMS_ALL)
+          # Forçage des options de configuration pour ReSukiSU & SELinux
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -192,6 +192,9 @@ jobs:
               echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
               echo "CONFIG_KALLSYMS=y"
               echo "CONFIG_KALLSYMS_ALL=y"
+              echo "CONFIG_SECURITY_SELINUX=y"
+              echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
+              echo "CONFIG_SECURITY_SELINUX_DISABLE=y"
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
