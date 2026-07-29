@@ -42,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & Headers de compatibilité
+      - name: 📂 Intégration ReSukiSU & SUSFS
         run: |
           set -e
           
@@ -59,12 +59,13 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-          echo "📥 Récupération des en-têtes nécessaires (susfs_def.h, etc.) pour Linux 4.19..."
+          echo "📥 Récupération des patchs et en-têtes de SUSFS pour Linux 4.19..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 --depth=1 || true
 
-
-          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+          if [ -d "susfs4ksu/kernel_patches" ]; then
+              echo "💉 Application des patchs SUSFS dans le noyau..."
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
+              cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
           fi
           rm -rf susfs4ksu
 
@@ -186,10 +187,16 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU & SELinux
+          # Forçage des options de configuration pour ReSukiSU, SUSFS & SELinux
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
+              echo "CONFIG_KSU_SUSFS=y"
+              echo "CONFIG_KSU_SUSFS_HAS_CALLBACK=y"
+              echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+              echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+              echo "CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y"
+              echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
               echo "CONFIG_KPROBES=y"
               echo "CONFIG_HAVE_KPROBES=y"
               echo "CONFIG_KRETPROBES=y"
