@@ -264,16 +264,18 @@ jobs:
           fi
           
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            # Neutralisation propre sans toucher aux champs p->ops inexistants sous 4.19
             sed -i 's/return orig->f_op->iopoll(kiocb, spin);/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
             sed -i 's/if (remap_flags & REMAP_FILE_DEDUP)/if (0)/g' drivers/kernelsu/infra/file_wrapper.c
             sed -i 's/return orig->f_op->remap_file_range(.*/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
-            # On commente les lignes qui assignent iopoll et remap_file_range sur p->ops pour éviter l'erreur de struct
             sed -i '/p->ops.iopoll =/s/^/\/\//' drivers/kernelsu/infra/file_wrapper.c
             sed -i '/p->ops.remap_file_range =/s/^/\/\//' drivers/kernelsu/infra/file_wrapper.c
-            echo "[+] SUCCESS: Correctifs file_wrapper.c appliqués (champs iopoll/remap neutralisés)."
-          else
-            echo "[-] MISSING: drivers/kernelsu/infra/file_wrapper.c introuvable."
+            echo "[+] SUCCESS: Correctifs file_wrapper.c appliqués."
+          fi
+
+          # Contournement de seccomp_cache incompatible avec le 4.19
+          if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
+            echo "/* Dummy seccomp_cache for Linux 4.19 */" > drivers/kernelsu/infra/seccomp_cache.c
+            echo "[+] SUCCESS: seccomp_cache.c neutralisé pour le noyau 4.19."
           fi
 
           # Fixs modules & Tactile Motorola
@@ -285,7 +287,8 @@ jobs:
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
           echo "=================================================="
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-      
+
+          
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
