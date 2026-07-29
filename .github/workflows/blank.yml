@@ -42,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & Headers de compatibilité
+      - name: 📂 Intégration ReSukiSU & Compatibilité 4.19
         run: |
           set -e
           
@@ -53,8 +53,11 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Exécution du script d'installation ReSukiSU en mode manuel (sans SUSFS forcé)..."
+          echo "📥 Exécution du script d'installation ReSukiSU en mode manuel..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s manual
+          
+          echo "🩹 Application du correctif pour noyau 4.19 (MODULE_IMPORT_NS)..."
+          find drivers/kernelsu -type f -name "*.c" -exec sed -i 's/MODULE_IMPORT_NS/\/\//g' {} +
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
