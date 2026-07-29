@@ -42,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & Compatibilité 4.19
+      - name: 📂 Intégration ReSukiSU & Correction 4.19 (init.c)
         run: |
           set -e
           
@@ -56,8 +56,22 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU en mode manuel..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s manual
           
-          echo "🩹 Suppression radicale et définitive de MODULE_IMPORT_NS pour le noyau 4.19..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/MODULE_IMPORT_NS/d' {} +
+          echo "🩹 Suppression chirurgicale de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
+          python3 -c '
+          init_path = "drivers/kernelsu/core/init.c"
+          if __import__("os").path.exists(init_path):
+              with open(init_path, "r", encoding="utf-8") as f:
+                  lines = f.readlines()
+              with open(init_path, "w", encoding="utf-8") as f:
+                  for line in lines:
+                      if "MODULE_IMPORT_NS" in line:
+                          f.write("// " + line)
+                      else:
+                          f.write(line)
+              print("✅ MODULE_IMPORT_NS neutralisé avec succès dans init.c")
+          else:
+              print("⚠️ init.c introuvable !")
+          '
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
