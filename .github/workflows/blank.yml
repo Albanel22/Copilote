@@ -56,8 +56,8 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU en mode manuel..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s manual
           
-          echo "🩹 Application élargie du correctif 4.19 (Neutralisation de MODULE_IMPORT_NS)..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/MODULE_IMPORT_NS/s/^/\/\//g' {} +
+          echo "🩹 Suppression radicale et définitive de MODULE_IMPORT_NS pour le noyau 4.19..."
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/MODULE_IMPORT_NS/d' {} +
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
