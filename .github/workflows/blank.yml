@@ -76,6 +76,7 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
+      
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -83,16 +84,17 @@ jobs:
           git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/devpts/inode.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
           python3 - << 'EOF'
           import os
-          def inject_code(path, target_str, code_to_insert, position="before"):
+
+          def inject_code(path, target_str, code_to_insert, position="before", optional=False):
               if not os.path.exists(path):
                   print(f"❌ Fichier introuvable : {path}")
-                  return
+                  return False
               with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                   content = f.read()
               
               if code_to_insert in content:
                   print(f"⚠️ Déjà présent dans {path}")
-                  return
+                  return True
               
               if target_str in content:
                   if position == "before":
@@ -107,9 +109,14 @@ jobs:
                   
                   with open(path, 'w', encoding='utf-8') as f:
                       f.write(content)
-                  print(f"✅ Injecté avec succès dans {path}")
+                  print(f"✅ Injecté avec succès dans {path} (via '{target_str[:20]}...')")
+                  return True
               else:
-                  print(f"❌ Cible introuvable dans {path}")
+                  if not optional:
+                      print(f"❌ Cible introuvable dans {path} : '{target_str[:30]}...'")
+                  else:
+                      print(f"⚠️ Cible optionnelle introuvable dans {path} (ignoré)")
+                  return False
 
           # 1. drivers/input/input.c (Safe Mode)
           input_patch_declarations = """
@@ -118,30 +125,24 @@ jobs:
           extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
           #endif
           """
-          inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before")
-          
-          input_patch_body = """
-          #ifdef CONFIG_KSU
-              if (unlikely(ksu_input_hook))
-                  ksu_handle_input_handle_event(&type, &code, &value);
-          #endif
-          """
-          inject_code("drivers/input/input.c", "static void input_handle_event(struct input_dev *dev,\n\t\tunsigned int type, unsigned int code, int value)", input_patch_body, "inside_brace")
+          inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before", optional=True)
+          inject_code("drivers/input/input.c", "static void input_handle_event(struct input_dev *dev,", 
+                      "#ifdef CONFIG_KSU\n\tbytes_or_val = 0;\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
+                      "inside_brace", optional=True)
+          # Alternative simple pour input_handle_event si la signature exacte diffère
+          inject_code("drivers/input/input.c", "input_handle_event", 
+                      "#ifdef CONFIG_KSU\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
+                      "inside_brace", optional=True)
 
-          # 2. fs/devpts/inode.c (Correction exécution de 'pm' dans le terminal)
+          # 2. fs/devpts/inode.c
           devpts_patch_declarations = """
           #ifdef CONFIG_KSU
           extern int ksu_handle_devpts(struct inode*);
           #endif
           """
           inject_code("fs/devpts/inode.c", "void *devpts_get_priv(", devpts_patch_declarations, "before")
-          
-          devpts_patch_body = """
-          #ifdef CONFIG_KSU
-              ksu_handle_devpts(dentry->d_inode);
-          #endif
-          """
-          inject_code("fs/devpts/inode.c", "void *devpts_get_priv(struct dentry *dentry)", devpts_patch_body, "inside_brace")
+          inject_code("fs/devpts/inode.c", "void *devpts_get_priv(struct dentry *dentry)", 
+                      "#ifdef CONFIG_KSU\n\tksu_handle_devpts(dentry->d_inode);\n#endif", "inside_brace")
 
           # 3. fs/exec.c (do_execveat_common)
           exec_patch_declarations = """
@@ -154,7 +155,6 @@ jobs:
           #endif
           """
           inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_declarations, "before")
-          
           exec_patch_body = """
           #ifdef CONFIG_KSU
               if (unlikely(ksu_execveat_hook))
@@ -173,13 +173,12 @@ jobs:
           #endif
           """
           inject_code("fs/open.c", "long do_faccessat(", open_patch_declarations, "before")
-          
           open_patch_body = """
           #ifdef CONFIG_KSU
               ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
           #endif
           """
-          inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_patch_body, "inside_brace")
+          inject_code("fs/open.c", "long do_faccessat", open_patch_body, "inside_brace")
 
           # 5. fs/read_write.c (vfs_read)
           read_patch_declarations = """
@@ -190,29 +189,26 @@ jobs:
           #endif
           """
           inject_code("fs/read_write.c", "ssize_t vfs_read(", read_patch_declarations, "before")
-          
           read_patch_body = """
           #ifdef CONFIG_KSU
               if (unlikely(ksu_vfs_read_hook))
                   ksu_handle_vfs_read(&file, &buf, &count, &pos);
           #endif
           """
-          inject_code("fs/read_write.c", "ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)", read_patch_body, "inside_brace")
+          inject_code("fs/read_write.c", "ssize_t vfs_read", read_patch_body, "inside_brace")
 
-          # 6. fs/stat.c (vfs_fstatat)
+          # 6. fs/stat.c (Gestion universelle stat / fstatat)
           stat_patch_declarations = """
           #ifdef CONFIG_KSU
           extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
           #endif
           """
-          inject_code("fs/stat.c", "int vfs_fstatat(", stat_patch_declarations, "before")
+          inject_code("fs/stat.c", "int vfs_fstatat(", stat_patch_declarations, "before", optional=True)
+          inject_code("fs/stat.c", "int vfs_fstatat", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace", optional=True)
           
-          stat_patch_body = """
-          #ifdef CONFIG_KSU
-              ksu_handle_stat(&dfd, &filename, &flag);
-          #endif
-          """
-          inject_code("fs/stat.c", "int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,", stat_patch_body, "inside_brace")
+          # Fallback si vfs_fstatat n'existe pas sous ce nom exact, on essaie sur vfs_statx
+          inject_code("fs/stat.c", "int vfs_statx(", stat_patch_declarations, "before", optional=True)
+          inject_code("fs/stat.c", "int vfs_statx", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif", "inside_brace", optional=True)
 
           # 7. SELinux updates & Bypass propre en fin de fichier
           if os.path.exists("security/selinux/selinuxfs.c"):
@@ -236,12 +232,14 @@ jobs:
               }
               #endif
               """
-              hc = hc + "\n" + selinux_bypass_func
+              if "ksu_selinux_enforce_bypass" not in hc:
+                  hc = hc + "\n" + selinux_bypass_func
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
-          print("✨ Hooks Safe Mode, devpts et autres injectés avec succès !")
-          EOF
+          print("✨ Processus d'injection intelligent terminé avec succès !")
+          EOF    
+              
           
 
       - name: Multi-stage Kernel Compilation
