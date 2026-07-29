@@ -177,6 +177,22 @@ jobs:
             sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
           fi
 
+      - name: Fix File Wrapper Incompatibilities for Linux 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
+            echo "🔧 Neutralisation des wrappers iopoll et remap_file_range incompatibles avec le noyau 4.19..."
+            
+            # Neutralisation de la fonction iopoll
+            sed -i 's/return orig->f_op->iopoll(kiocb, spin);/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/p->ops.iopoll = .*/p->ops.iopoll = NULL;/g' drivers/kernelsu/infra/file_wrapper.c
+            
+            # Neutralisation de remap_file_range et REMAP_FILE_DEDUP
+            sed -i 's/if (remap_flags & REMAP_FILE_DEDUP)/if (0)/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/return orig->f_op->remap_file_range(.*/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/p->ops.remap_file_range = .*/p->ops.remap_file_range = NULL;/g' drivers/kernelsu/infra/file_wrapper.c
+          fi    
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
