@@ -192,7 +192,6 @@ jobs:
               with open(fw_path, 'r', encoding='utf-8', errors='ignore') as f:
                   fw_content = f.read()
               
-              # Neutralisation propre des fonctions posant problème en 4.19
               fw_content = fw_content.replace(
                   "return orig->f_op->iopoll(kiocb, spin);", 
                   "return -EOPNOTSUPP;"
@@ -248,9 +247,27 @@ jobs:
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
 
+          # 8. Correction de seccomp_cache.c pour le noyau 4.19 (SECCOMP_ARCH_NATIVE_NR manquant)
+          seccomp_path = "drivers/kernelsu/infra/seccomp_cache.c"
+          if os.path.exists(seccomp_path):
+              with open(seccomp_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  sc_content = f.read()
+              
+              fallback_define = """
+              #ifndef SECCOMP_ARCH_NATIVE_NR
+              #define SECCOMP_ARCH_NATIVE_NR __NR_syscalls
+              #endif
+              """
+              if "SECCOMP_ARCH_NATIVE_NR" in sc_content and "#ifndef SECCOMP_ARCH_NATIVE_NR" not in sc_content:
+                  sc_content = fallback_define + "\n" + sc_content
+              
+              with open(seccomp_path, 'w', encoding='utf-8') as f:
+                  f.write(sc_content)
+              print("✅ seccomp_cache.c patché pour définir SECCOMP_ARCH_NATIVE_NR")
+
           print("✨ Processus d'injection intelligent terminé avec succès !")
           PYTHON_EOF
-
+          
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
