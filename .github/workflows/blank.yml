@@ -264,6 +264,22 @@ jobs:
               with open(seccomp_path, 'w', encoding='utf-8') as f:
                   f.write(sc_content)
               print("✅ seccomp_cache.c patché avec les macros de secours 4.19")
+
+              # 9. Correction de su_mount_ns.c pour le noyau 4.19 (uapi/linux/mount.h manquant)
+          mount_ns_path = "drivers/kernelsu/infra/su_mount_ns.c"
+          if os.path.exists(mount_ns_path):
+              with open(mount_ns_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  mn_content = f.read()
+              
+              # Remplacement de l'inclusion problématique par un header standard ou suppression
+              mn_content = mn_content.replace(
+                  "#include <uapi/linux/mount.h>",
+                  "#include <linux/mount.h>"
+              )
+              
+              with open(mount_ns_path, 'w', encoding='utf-8') as f:
+                  f.write(mn_content)
+              print("✅ su_mount_ns.c corrigé pour l'inclusion des en-têtes de montage")
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
