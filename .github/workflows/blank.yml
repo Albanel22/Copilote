@@ -272,10 +272,15 @@ jobs:
             echo "[+] SUCCESS: Correctifs file_wrapper.c appliqués."
           fi
 
-          # Contournement de seccomp_cache incompatible avec le 4.19
+          # Neutralisation des modules trop récents pour le 4.19
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
             echo "/* Dummy seccomp_cache for Linux 4.19 */" > drivers/kernelsu/infra/seccomp_cache.c
-            echo "[+] SUCCESS: seccomp_cache.c neutralisé pour le noyau 4.19."
+            echo "[+] SUCCESS: seccomp_cache.c neutralisé."
+          fi
+
+          if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
+            echo "/* Dummy su_mount_ns for Linux 4.19 */" > drivers/kernelsu/infra/su_mount_ns.c
+            echo "[+] SUCCESS: su_mount_ns.c neutralisé."
           fi
 
           # Fixs modules & Tactile Motorola
@@ -286,8 +291,7 @@ jobs:
           echo "=================================================="
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
           echo "=================================================="
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none   
           
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
