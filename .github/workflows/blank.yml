@@ -53,18 +53,11 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Exécution du script d'installation ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+          echo "📥 Exécution du script d'installation ReSukiSU en mode manuel (sans SUSFS forcé)..."
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s manual
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-
-          echo "📥 Récupération des en-têtes nécessaires (susfs_def.h, etc.)..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 --depth=1 || true
-          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
-              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
-          fi
-          rm -rf susfs4ksu
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
@@ -127,7 +120,7 @@ jobs:
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
           inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
 
-          # 3. fs/open.c (Conforme à la doc officielle de ReSukiSU)
+          # 3. fs/open.c
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot)) 
@@ -165,7 +158,7 @@ jobs:
                   f.write(hc)
           print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
           EOF
-          
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -207,7 +200,7 @@ jobs:
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-          
+
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -220,7 +213,6 @@ jobs:
           
           echo "📥 Téléchargement de ton binaire ksud personnalisé..."
           mkdir -p AnyKernel3/patch/system/bin
-          # Téléchargement via le lien raw associé à ton dépôt
           curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
 
@@ -230,7 +222,6 @@ jobs:
           ## osm0sis @ xda-developers
 
           ### AnyKernel setup
-          # global properties
           properties() { '
           kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
           do.devicecheck=1
@@ -248,35 +239,28 @@ jobs:
           supported.vendorpatchlevels=
           '; } # end properties
 
-          ### AnyKernel install
           boot_attributes() {
           set_perm_recursive 0 0 755 644 $RAMDISK/*;
           set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
-          } # end attributes
+          }
 
-          # boot shell variables
           BLOCK=/dev/block/by-name/boot;
           IS_SLOT_DEVICE=1;
           RAMDISK_COMPRESSION=auto;
           PATCH_VBMETA_FLAG=auto;
 
-          # import functions/variables and setup patching
           . tools/ak3-core.sh;
 
-          # Remplacement du noyau brut et extraction du ramdisk
           split_boot;
 
-          # Initialisation des hooks d'espace utilisateur pour KernelSU/OverlayFS
           if [ -f patch/system/bin/ksud ]; then
             ui_print "⚙️ Configuration de l'environnement OverlayFS via ksud..."
             chmod 755 patch/system/bin/ksud
             ./patch/system/bin/ksud kernel setup-script
           fi
 
-          # Flash de l'image modifiée
           flash_boot;
 
-          # Copie persistante pour s'assurer que le userspace l'exécute au reboot
           if [ -f patch/system/bin/ksud ]; then
             mkdir -p /data/adb/ksu/bin
             cp -f patch/system/bin/ksud /data/adb/ksu/bin/ksud
