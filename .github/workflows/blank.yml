@@ -247,33 +247,23 @@ jobs:
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
 
-          # 8. Remplacement de seccomp_cache.c par une version compatible noyau 4.19
+          # 8. Ajout des définitions de secours pour le cache seccomp sur noyau 4.19
           seccomp_path = "drivers/kernelsu/infra/seccomp_cache.c"
           if os.path.exists(seccomp_path):
-              seccomp_stub = """
-              #include <linux/version.h>
-              #include <linux/fs.h>
-              #include <linux/sched/task.h>
-              #include "klog.h"
-              #include "infra/seccomp_cache.h"
-
-              struct seccomp_filter {
-                  int dummy;
-              };
-
-              void ksu_seccomp_clear_cache(struct seccomp_filter *filter, int nr)
-              {
-                  // Stub pour noyau 4.19
-              }
-
-              void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr)
-              {
-                  // Stub pour noyau 4.19
-              }
+              with open(seccomp_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  sc_content = f.read()
+              
+              fallback_macros = """
+              #ifndef SECCOMP_ARCH_NATIVE_NR
+              #define SECCOMP_ARCH_NATIVE_NR __NR_syscalls
+              #endif
               """
+              if "#ifndef SECCOMP_ARCH_NATIVE_NR" not in sc_content:
+                  sc_content = fallback_macros + "\n" + sc_content
+              
               with open(seccomp_path, 'w', encoding='utf-8') as f:
-                  f.write(seccomp_stub)
-              print("✅ seccomp_cache.c remplacé par un stub compatible 4.19")
+                  f.write(sc_content)
+              print("✅ seccomp_cache.c patché avec les macros de secours 4.19")
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
