@@ -247,26 +247,33 @@ jobs:
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
 
-          # 8. Correction de seccomp_cache.c pour le noyau 4.19 (SECCOMP_ARCH_NATIVE_NR manquant)
+          # 8. Remplacement de seccomp_cache.c par une version compatible noyau 4.19
           seccomp_path = "drivers/kernelsu/infra/seccomp_cache.c"
           if os.path.exists(seccomp_path):
-              with open(seccomp_path, 'r', encoding='utf-8', errors='ignore') as f:
-                  sc_content = f.read()
-              
-              fallback_define = """
-              #ifndef SECCOMP_ARCH_NATIVE_NR
-              #define SECCOMP_ARCH_NATIVE_NR __NR_syscalls
-              #endif
-              """
-              if "SECCOMP_ARCH_NATIVE_NR" in sc_content and "#ifndef SECCOMP_ARCH_NATIVE_NR" not in sc_content:
-                  sc_content = fallback_define + "\n" + sc_content
-              
-              with open(seccomp_path, 'w', encoding='utf-8') as f:
-                  f.write(sc_content)
-              print("✅ seccomp_cache.c patché pour définir SECCOMP_ARCH_NATIVE_NR")
+              seccomp_stub = """
+              #include <linux/version.h>
+              #include <linux/fs.h>
+              #include <linux/sched/task.h>
+              #include "klog.h"
+              #include "infra/seccomp_cache.h"
 
-          print("✨ Processus d'injection intelligent terminé avec succès !")
-          PYTHON_EOF
+              struct seccomp_filter {
+                  int dummy;
+              };
+
+              void ksu_seccomp_clear_cache(struct seccomp_filter *filter, int nr)
+              {
+                  // Stub pour noyau 4.19
+              }
+
+              void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr)
+              {
+                  // Stub pour noyau 4.19
+              }
+              """
+              with open(seccomp_path, 'w', encoding='utf-8') as f:
+                  f.write(seccomp_stub)
+              print("✅ seccomp_cache.c remplacé par un stub compatible 4.19")
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
