@@ -206,12 +206,25 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
+          echo "=================================================="
+          echo "🔍 ÉTAPE DE VÉRIFICATION & CONFIGURATION KERNEL"
+          echo "=================================================="
+
+          # 1. Vérification du defconfig
+          if [ -f "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" ]; then
+            echo "[+] SUCCESS: Defconfig source trouvé (${{ env.DEFCONFIG }})"
+          else
+            echo "[-] ERROR: Defconfig source introuvable dans arch/arm64/configs/vendor/"
+            exit 1
+          fi
+
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU, SUSFS & SELinux
+          # 2. Injection et vérification des options ReSukiSU/SUSFS
+          echo "[*] Injection des options de configuration..."
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -234,13 +247,45 @@ jobs:
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+
+          # 3. Vérification de la présence des dossiers clés
+          if [ -d "drivers/kernelsu" ]; then
+            echo "[+] SUCCESS: Dossier drivers/kernelsu détecté."
+          else
+            echo "[-] ERROR: Le dossier drivers/kernelsu est manquant !"
+            exit 1
+          fi
+
+          # 4. Application des correctifs 4.19 avec logs ciblés
+          echo "[*] Application des patchs de compatibilité Linux 4.19..."
+          if [ -f "drivers/kernelsu/core/init.c" ]; then
+            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
+            echo "[+] SUCCESS: Correction MODULE_IMPORT_NS appliquée."
+          fi
           
+          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
+            # Neutralisation propre sans toucher aux champs p->ops inexistants sous 4.19
+            sed -i 's/return orig->f_op->iopoll(kiocb, spin);/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/if (remap_flags & REMAP_FILE_DEDUP)/if (0)/g' drivers/kernelsu/infra/file_wrapper.c
+            sed -i 's/return orig->f_op->remap_file_range(.*/return -EINVAL;/g' drivers/kernelsu/infra/file_wrapper.c
+            # On commente les lignes qui assignent iopoll et remap_file_range sur p->ops pour éviter l'erreur de struct
+            sed -i '/p->ops.iopoll =/s/^/\/\//' drivers/kernelsu/infra/file_wrapper.c
+            sed -i '/p->ops.remap_file_range =/s/^/\/\//' drivers/kernelsu/infra/file_wrapper.c
+            echo "[+] SUCCESS: Correctifs file_wrapper.c appliqués (champs iopoll/remap neutralisés)."
+          else
+            echo "[-] MISSING: drivers/kernelsu/infra/file_wrapper.c introuvable."
+          fi
+
           # Fixs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-          
+          echo "[+] SUCCESS: Patch Tactile Motorola injecté."
+
+          echo "=================================================="
+          echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
+          echo "=================================================="
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-          
+      
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
