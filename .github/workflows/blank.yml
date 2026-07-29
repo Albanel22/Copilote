@@ -82,7 +82,7 @@ jobs:
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
           git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/devpts/inode.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
-          python3 - << 'EOF'
+          python3 - << 'PYTHON_EOF'
           import os
 
           def inject_code(path, target_str, code_to_insert, position="before", optional=False):
@@ -126,10 +126,6 @@ jobs:
           #endif
           """
           inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before", optional=True)
-          inject_code("drivers/input/input.c", "static void input_handle_event(struct input_dev *dev,", 
-                      "#ifdef CONFIG_KSU\n\tbytes_or_val = 0;\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
-                      "inside_brace", optional=True)
-          # Alternative simple pour input_handle_event si la signature exacte diffère
           inject_code("drivers/input/input.c", "input_handle_event", 
                       "#ifdef CONFIG_KSU\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
                       "inside_brace", optional=True)
@@ -206,7 +202,6 @@ jobs:
           inject_code("fs/stat.c", "int vfs_fstatat(", stat_patch_declarations, "before", optional=True)
           inject_code("fs/stat.c", "int vfs_fstatat", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace", optional=True)
           
-          # Fallback si vfs_fstatat n'existe pas sous ce nom exact, on essaie sur vfs_statx
           inject_code("fs/stat.c", "int vfs_statx(", stat_patch_declarations, "before", optional=True)
           inject_code("fs/stat.c", "int vfs_statx", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif", "inside_brace", optional=True)
 
@@ -238,8 +233,7 @@ jobs:
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
           print("✨ Processus d'injection intelligent terminé avec succès !")
-          EOF    
-              
+          PYTHON_EOF
           
 
       - name: Multi-stage Kernel Compilation
