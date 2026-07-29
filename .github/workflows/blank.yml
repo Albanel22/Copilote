@@ -116,9 +116,16 @@ jobs:
                   return False
 
           # 1. drivers/input/input.c (Safe Mode)
-          inject_code("drivers/input/input.c", "input_handle_event", 
+          input_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern bool ksu_input_hook __read_mostly;
+          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
+          #endif
+          """
+          inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before", optional=False)
+          inject_code("drivers/input/input.c", "static void input_handle_event(", 
                       "#ifdef CONFIG_KSU\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
-                      "inside_brace", optional=True)
+                      "inside_brace", optional=False)
 
           # 2. fs/devpts/inode.c
           devpts_patch_declarations = """
