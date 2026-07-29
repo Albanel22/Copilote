@@ -168,6 +168,77 @@ jobs:
           print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
           EOF
 
+      - name: 🔍 Téléchargement et Analyse Préalable de ksud
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📥 Téléchargement temporaire de ksud pour extraction de version..."
+          mkdir -p temp_ksud
+          curl -fLo temp_ksud/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud || {
+            echo "❌ Erreur : Impossible de télécharger le binaire ksud !"
+            exit 1
+          }
+          chmod +x temp_ksud/ksud
+          
+          KSU_VER=$(strings temp_ksud/ksud | grep -oE '[0-9]{5}' | head -n 1)
+          if [ -z "$KSU_VER" ]; then
+            KSU_VER=35008 # Valeur de secours par sécurité
+          fi
+          
+          # Sauvegarde dans un fichier texte pour éviter les soucis de portée d'environnement YAML
+          echo "$KSU_VER" > .ksu_version
+          echo "🔢 Version de ksud détectée et sauvegardée : $KSU_VER"
+          rm -rf temp_ksud
+
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -uo pipefail
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
+          ccache -M ${{ env.CCACHE_SIZE }}
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
+
+          # Récupération de la version de ksud depuis le fichier stocké à la racine du workspace
+          KSU_VER=$(cat ../.ksu_version)
+          echo "📦 Utilisation de KSUD_VERSION=$KSU_VER pour la compilation"
+
+          mkdir -p ${{ env.BUILD_DIR }}
+
+          # 1. Génération initiale du defconfig dans le dossier out
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+
+          # 2. Injection des options indispensables pour ReSukiSU et SELinux
+          {
+              echo "CONFIG_KSU=y"
+              echo "CONFIG_KSU_MANUAL_HOOK=y"
+              echo "CONFIG_KPROBES=y"
+              echo "CONFIG_HAVE_KPROBES=y"
+              echo "CONFIG_KRETPROBES=y"
+              echo "CONFIG_OVERLAY_FS=y"
+              echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+              echo "CONFIG_KALLSYMS=y"
+              echo "CONFIG_KALLSYMS_ALL=y"
+              echo "CONFIG_SECURITY_SELINUX=y"
+              echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
+              echo "CONFIG_SECURITY_SELINUX_DISABLE=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+
+          # 3. Synchronisation propre de la configuration
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          
+          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
+
+          # 🚀 LANCEMENT DE LA COMPILATION FINALE AVEC LA VERSION DÉTECTÉE
+          echo "🔨 Lancement de la compilation avec KSUD_VERSION=$KSU_VER"
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=$KSU_VER KSU_VERSION=$KSU_VER -j$(nproc) Image --output-sync=none
+
       - name: Repack & Finalize (AnyKernel3 + ksud depuis le dépôt Copilote)
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -187,15 +258,6 @@ jobs:
           
           chmod +x AnyKernel3/patch/system/bin/ksud
           echo "✅ Binaire ksud intégré avec succès !"
-
-          # 🔍 EXTRACTION AUTOMATIQUE DE LA VERSION DU KSUD DE TON DÉPÔT
-          echo "🔍 Analyse et extraction automatique de la version de ksud..."
-          KSU_VER=$(strings AnyKernel3/patch/system/bin/ksud | grep -oE '[0-9]{5}' | head -n 1)
-          if [ -z "$KSU_VER" ]; then
-            KSU_VER=35008 # Valeur de secours par sécurité
-          fi
-          echo "DETECTED_KSU_VERSION=$KSU_VER" >> $GITHUB_ENV
-          echo "🔢 Version de ksud détectée et validée : $KSU_VER"
 
           echo "✍️ Création du script anykernel.sh nettoyé..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
@@ -247,52 +309,6 @@ jobs:
           EOF
 
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
-
-      - name: Multi-stage Kernel Compilation
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -uo pipefail
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          ccache -M ${{ env.CCACHE_SIZE }}
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS="-Wno-error"
-
-          mkdir -p ${{ env.BUILD_DIR }}
-
-          # 1. Génération initiale du defconfig dans le dossier out
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-
-          # 2. Injection des options indispensables pour ReSukiSU et SELinux
-          {
-              echo "CONFIG_KSU=y"
-              echo "CONFIG_KSU_MANUAL_HOOK=y"
-              echo "CONFIG_KPROBES=y"
-              echo "CONFIG_HAVE_KPROBES=y"
-              echo "CONFIG_KRETPROBES=y"
-              echo "CONFIG_OVERLAY_FS=y"
-              echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-              echo "CONFIG_KALLSYMS=y"
-              echo "CONFIG_KALLSYMS_ALL=y"
-              echo "CONFIG_SECURITY_SELINUX=y"
-              echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
-              echo "CONFIG_SECURITY_SELINUX_DISABLE=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-
-          # 3. Synchronisation propre de la configuration
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          
-          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
-          # 🚀 LANCEMENT DE LA COMPILATION FINALE
-          echo "🔨 Lancement de la compilation avec KSUD_VERSION=${{ env.DETECTED_KSU_VERSION }}"
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=${{ env.DETECTED_KSU_VERSION }} KSU_VERSION=${{ env.DETECTED_KSU_VERSION }} -j$(nproc) Image --output-sync=none
 
       - name: Finalize & Package to AnyKernel3
         working-directory: ${{ github.workspace }}
