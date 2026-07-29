@@ -186,23 +186,41 @@ jobs:
           """
           inject_code("fs/read_write.c", "ssize_t vfs_read", read_patch_body, "inside_brace", optional=True)
 
-          # 6. Correction de file_wrapper.c pour les noyaux 4.19
+          # 6. Correction robuste de file_wrapper.c pour le noyau 4.19 (Désactivation iopoll / remap_file_range)
           fw_path = "drivers/kernelsu/infra/file_wrapper.c"
           if os.path.exists(fw_path):
               with open(fw_path, 'r', encoding='utf-8', errors='ignore') as f:
                   fw_content = f.read()
               
-              # Nettoyage propre des remplacements incorrects précédents
-              fw_content = fw_content.replace("return NULL(kiocb, spin);", "return -EOPNOTSUPP;")
-              fw_content = fw_content.replace("return NULL(file_in, pos_in, orig, pos_out, len, remap_flags);", "return -EOPNOTSUPP;")
-              fw_content = fw_content.replace("return NULL(orig, pos_in, file_out, pos_out, len, remap_flags);", "return -EOPNOTSUPP;")
-              
-              fw_content = fw_content.replace("p->ops.iopoll = NULL ? ksu_wrapper_iopoll : NULL;", "/* p->ops.iopoll not supported in 4.19 */")
-              fw_content = fw_content.replace("p->ops.remap_file_range = NULL ? ksu_wrapper_remap_file_range : NULL;", "/* p->ops.remap_file_range not supported in 4.19 */")
-              
+              # Neutralisation propre des fonctions posant problème en 4.19
+              fw_content = fw_content.replace(
+                  "return orig->f_op->iopoll(kiocb, spin);", 
+                  "return -EOPNOTSUPP;"
+              )
+              fw_content = fw_content.replace(
+                  "if (remap_flags & REMAP_FILE_DEDUP)", 
+                  "if (0)"
+              )
+              fw_content = fw_content.replace(
+                  "return orig->f_op->remap_file_range(file_in, pos_in, orig, pos_out, len, remap_flags);", 
+                  "return -EOPNOTSUPP;"
+              )
+              fw_content = fw_content.replace(
+                  "return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);", 
+                  "return -EOPNOTSUPP;"
+              )
+              fw_content = fw_content.replace(
+                  "p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;", 
+                  "/* p->ops.iopoll not available */"
+              )
+              fw_content = fw_content.replace(
+                  "p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;", 
+                  "/* p->ops.remap_file_range not available */"
+              )
+
               with open(fw_path, 'w', encoding='utf-8') as f:
                   f.write(fw_content)
-              print("✅ file_wrapper.c nettoyé et corrigé pour le noyau 4.19")
+              print("✅ file_wrapper.c totalement nettoyé des symboles absents en 4.19")
 
           # 7. SELinux updates
           if os.path.exists("security/selinux/selinuxfs.c"):
