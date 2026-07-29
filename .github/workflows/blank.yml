@@ -14,7 +14,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -59,7 +58,7 @@ jobs:
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-          
+
           echo "📥 Récupération des en-têtes nécessaires (susfs_def.h, etc.)..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 --depth=1 || true
           if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
@@ -95,7 +94,7 @@ jobs:
                       brace_idx = content.find('{', idx)
                       if brace_idx != -1:
                           content = content[:brace_idx + 1] + "\n" + code_to_insert + "\n" + content[brace_idx + 1:]
-                          
+                  
                   with open(path, 'w', encoding='utf-8') as f:
                       f.write(content)
                   print(f"✅ Injecté avec succès dans {path}")
@@ -128,7 +127,7 @@ jobs:
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
           inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
 
-          # 3. fs/open.c
+          # 3. fs/open.c (Conforme à la doc officielle de ReSukiSU)
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot)) 
@@ -164,32 +163,9 @@ jobs:
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
-
           print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
           EOF
-
-      - name: 🔍 Téléchargement et Analyse Préalable de ksud
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "📥 Téléchargement temporaire de ksud pour extraction de version..."
-          mkdir -p temp_ksud
-          curl -fLo temp_ksud/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud || {
-            echo "❌ Erreur : Impossible de télécharger le binaire ksud !"
-            exit 1
-          }
-          chmod +x temp_ksud/ksud
           
-          KSU_VER=$(strings temp_ksud/ksud | grep -oE '[0-9]{5}' | head -n 1)
-          if [ -z "$KSU_VER" ]; then
-            KSU_VER=35008 # Valeur de secours par sécurité
-          fi
-          
-          # Sauvegarde dans un fichier texte pour éviter les soucis de portée d'environnement YAML
-          echo "$KSU_VER" > .ksu_version
-          echo "🔢 Version de ksud détectée et sauvegardée : $KSU_VER"
-          rm -rf temp_ksud
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -202,17 +178,13 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
-
-          # Récupération de la version de ksud depuis le fichier stocké à la racine du workspace
-          KSU_VER=$(cat ../.ksu_version)
-          echo "📦 Utilisation de KSUD_VERSION=$KSU_VER pour la compilation"
-
+          
           mkdir -p ${{ env.BUILD_DIR }}
-
-          # 1. Génération initiale du defconfig dans le dossier out
+          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
+          
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-
-          # 2. Injection des options indispensables pour ReSukiSU et SELinux
+          
+          # Forçage des options de configuration pour ReSukiSU & SELinux
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -227,19 +199,16 @@ jobs:
               echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
               echo "CONFIG_SECURITY_SELINUX_DISABLE=y"
           } >> ${{ env.BUILD_DIR }}/.config
-
-          # 3. Synchronisation propre de la configuration
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+          
+          # Fixs modules & Tactile Motorola
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
-          # 🚀 LANCEMENT DE LA COMPILATION FINALE AVEC LA VERSION DÉTECTÉE
-          echo "🔨 Lancement de la compilation avec KSUD_VERSION=$KSU_VER"
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=$KSU_VER KSU_VERSION=$KSU_VER -j$(nproc) Image --output-sync=none
-
-      - name: Repack & Finalize (AnyKernel3 + ksud depuis le dépôt Copilote)
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
+          
+      - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -249,23 +218,21 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -f AnyKernel3/anykernel.sh
           
-          echo "📥 Téléchargement de ton binaire ksud depuis le dépôt Copilote..."
+          echo "📥 Téléchargement de ton binaire ksud personnalisé..."
           mkdir -p AnyKernel3/patch/system/bin
-          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud || {
-            echo "❌ Erreur : Impossible de télécharger le binaire ksud depuis ton dépôt !"
-            exit 1
-          }
-          
+          # Téléchargement via le lien raw associé à ton dépôt
+          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
-          echo "✅ Binaire ksud intégré avec succès !"
 
-          echo "✍️ Création du script anykernel.sh nettoyé..."
+          echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
           ### AnyKernel3 Ramdisk Mod Script
           ## osm0sis @ xda-developers
+
           ### AnyKernel setup
+          # global properties
           properties() { '
-          kernel.string=Custom Kernel avec Risukisu for Motorola One 5G Ace
+          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
           do.devicecheck=1
           do.modules=1
           do.systemless=1
@@ -293,31 +260,35 @@ jobs:
           RAMDISK_COMPRESSION=auto;
           PATCH_VBMETA_FLAG=auto;
 
+          # import functions/variables and setup patching
           . tools/ak3-core.sh;
 
-          # Extraction et flash du noyau
+          # Remplacement du noyau brut et extraction du ramdisk
           split_boot;
+
+          # Initialisation des hooks d'espace utilisateur pour KernelSU/OverlayFS
+          if [ -f patch/system/bin/ksud ]; then
+            ui_print "⚙️ Configuration de l'environnement OverlayFS via ksud..."
+            chmod 755 patch/system/bin/ksud
+            ./patch/system/bin/ksud kernel setup-script
+          fi
+
+          # Flash de l'image modifiée
           flash_boot;
 
-          # Déploiement propre et direct du binaire ksud dans la partition data
+          # Copie persistante pour s'assurer que le userspace l'exécute au reboot
           if [ -f patch/system/bin/ksud ]; then
-            ui_print "⚙️ Installation du binaire ksud persistant..."
             mkdir -p /data/adb/ksu/bin
             cp -f patch/system/bin/ksud /data/adb/ksu/bin/ksud
             chmod 755 /data/adb/ksu/bin/ksud
           fi
           EOF
-
+          
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
-
-      - name: Finalize & Package to AnyKernel3
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-
+          
           echo "📦 Injection de l'image du noyau brut (Image)..."
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
-
+          
           if [ -f ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/dtb ]; then
             cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/dtb AnyKernel3/dtb
           fi
@@ -326,7 +297,7 @@ jobs:
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_Risukisu_kiev.zip * -x .git* README.md
-
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
