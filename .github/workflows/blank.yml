@@ -169,6 +169,14 @@ jobs:
           print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
           EOF
 
+      - name: Fix KernelSU Namespace Error for Linux 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/core/init.c" ]; then
+            echo "🔧 Correction de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
+            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
