@@ -76,12 +76,11 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
-      
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
-          echo "⚙️ Réinitialisation et injection propre des hooks..."
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/devpts/inode.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
+          echo "⚙️ Réinitialisation et injection propre des hooks (Version 4.19 Corrigée)..."
+          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/devpts/inode.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c drivers/kernelsu/infra/file_wrapper.c || true
           python3 - << 'PYTHON_EOF'
           import os
 
@@ -109,48 +108,31 @@ jobs:
                   
                   with open(path, 'w', encoding='utf-8') as f:
                       f.write(content)
-                  print(f"✅ Injecté avec succès dans {path} (via '{target_str[:20]}...')")
+                  print(f"✅ Injecté avec succès dans {path}")
                   return True
               else:
                   if not optional:
-                      print(f"❌ Cible introuvable dans {path} : '{target_str[:30]}...'")
-                  else:
-                      print(f"⚠️ Cible optionnelle introuvable dans {path} (ignoré)")
+                      print(f"❌ Cible introuvable dans {path}")
                   return False
 
           # 1. drivers/input/input.c (Safe Mode)
-          input_patch_declarations = """
-          #ifdef CONFIG_KSU
-          extern bool ksu_input_hook __read_mostly;
-          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
-          #endif
-          """
-          inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before", optional=True)
           inject_code("drivers/input/input.c", "input_handle_event", 
                       "#ifdef CONFIG_KSU\n\tksu_handle_input_handle_event(&type, &code, &value);\n#endif", 
                       "inside_brace", optional=True)
 
           # 2. fs/devpts/inode.c
-          devpts_patch_declarations = """
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_devpts(struct inode*);
-          #endif
-          """
-          inject_code("fs/devpts/inode.c", "void *devpts_get_priv(", devpts_patch_declarations, "before")
           inject_code("fs/devpts/inode.c", "void *devpts_get_priv(struct dentry *dentry)", 
-                      "#ifdef CONFIG_KSU\n\tksu_handle_devpts(dentry->d_inode);\n#endif", "inside_brace")
+                      "#ifdef CONFIG_KSU\n\tksu_handle_devpts(dentry->d_inode);\n#endif", "inside_brace", optional=True)
 
           # 3. fs/exec.c (do_execveat_common)
           exec_patch_declarations = """
           #ifdef CONFIG_KSU
           extern bool ksu_execveat_hook __read_mostly;
-          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-                      void *envp, int *flags);
-          extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
-                           void *argv, void *envp, int *flags);
+          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
+          extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
           #endif
           """
-          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_declarations, "before")
+          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_declarations, "before", optional=True)
           exec_patch_body = """
           #ifdef CONFIG_KSU
               if (unlikely(ksu_execveat_hook))
@@ -159,53 +141,53 @@ jobs:
                   ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
           #endif
           """
-          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_body, "inside_brace")
+          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_body, "inside_brace", optional=True)
 
           # 4. fs/open.c (do_faccessat)
           open_patch_declarations = """
           #ifdef CONFIG_KSU
-          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
-                               int *flags);
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
           #endif
           """
-          inject_code("fs/open.c", "long do_faccessat(", open_patch_declarations, "before")
+          inject_code("fs/open.c", "long do_faccessat(", open_patch_declarations, "before", optional=True)
           open_patch_body = """
           #ifdef CONFIG_KSU
               ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
           #endif
           """
-          inject_code("fs/open.c", "long do_faccessat", open_patch_body, "inside_brace")
+          inject_code("fs/open.c", "long do_faccessat", open_patch_body, "inside_brace", optional=True)
 
           # 5. fs/read_write.c (vfs_read)
           read_patch_declarations = """
           #ifdef CONFIG_KSU
           extern bool ksu_vfs_read_hook __read_mostly;
-          extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
-                      size_t *count_ptr, loff_t **pos);
+          extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr, size_t *count_ptr, loff_t **pos);
           #endif
           """
-          inject_code("fs/read_write.c", "ssize_t vfs_read(", read_patch_declarations, "before")
+          inject_code("fs/read_write.c", "ssize_t vfs_read(", read_patch_declarations, "before", optional=True)
           read_patch_body = """
           #ifdef CONFIG_KSU
               if (unlikely(ksu_vfs_read_hook))
                   ksu_handle_vfs_read(&file, &buf, &count, &pos);
           #endif
           """
-          inject_code("fs/read_write.c", "ssize_t vfs_read", read_patch_body, "inside_brace")
+          inject_code("fs/read_write.c", "ssize_t vfs_read", read_patch_body, "inside_brace", optional=True)
 
-          # 6. fs/stat.c (Gestion universelle stat / fstatat)
-          stat_patch_declarations = """
-          #ifdef CONFIG_KSU
-          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-          #endif
-          """
-          inject_code("fs/stat.c", "int vfs_fstatat(", stat_patch_declarations, "before", optional=True)
-          inject_code("fs/stat.c", "int vfs_fstatat", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace", optional=True)
-          
-          inject_code("fs/stat.c", "int vfs_statx(", stat_patch_declarations, "before", optional=True)
-          inject_code("fs/stat.c", "int vfs_statx", "#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flags);\n#endif", "inside_brace", optional=True)
+          # 6. Correction de file_wrapper.c pour les noyaux 4.19 (compatibilité iopoll et remap_file_range)
+          fw_path = "drivers/kernelsu/infra/file_wrapper.c"
+          if os.path.exists(fw_path):
+              with open(fw_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  fw_content = f.read()
+              fw_content = fw_content.replace("orig->f_op->iopoll", "NULL")
+              fw_content = fw_content.replace("REMAP_FILE_DEDUP", "0")
+              fw_content = fw_content.replace("orig->f_op->remap_file_range", "NULL")
+              fw_content = fw_content.replace("fp->f_op->iopoll", "NULL")
+              fw_content = fw_content.replace("fp->f_op->remap_file_range", "NULL")
+              with open(fw_path, 'w', encoding='utf-8') as f:
+                  f.write(fw_content)
+              print("✅ file_wrapper.c patché pour la compatibilité 4.19")
 
-          # 7. SELinux updates & Bypass propre en fin de fichier
+          # 7. SELinux updates
           if os.path.exists("security/selinux/selinuxfs.c"):
               with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
                   sc = f.read()
@@ -218,7 +200,6 @@ jobs:
               with open("security/selinux/hooks.c", "r", encoding="utf-8") as f:
                   hc = f.read()
               hc = hc.replace("static struct security_operations selinux_ops", "struct security_operations selinux_ops")
-              
               selinux_bypass_func = """
               #ifdef CONFIG_KSU
               __attribute__((hot))
@@ -229,12 +210,11 @@ jobs:
               """
               if "ksu_selinux_enforce_bypass" not in hc:
                   hc = hc + "\n" + selinux_bypass_func
-              
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
+
           print("✨ Processus d'injection intelligent terminé avec succès !")
           PYTHON_EOF
-          
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -254,7 +234,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Forçage des options de configuration pour ReSukiSU & SELinux
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -272,7 +251,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # Fixs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
