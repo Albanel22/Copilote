@@ -80,7 +80,7 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
+          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/devpts/inode.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
           python3 - << 'EOF'
           import os
           def inject_code(path, target_str, code_to_insert, position="before"):
@@ -111,43 +111,110 @@ jobs:
               else:
                   print(f"❌ Cible introuvable dans {path}")
 
-          # 1. fs/stat.c
-          stat_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot)) 
+          # 1. drivers/input/input.c (Safe Mode)
+          input_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern bool ksu_input_hook __read_mostly;
+          extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
+          #endif
+          """
+          inject_code("drivers/input/input.c", "static void input_handle_event(", input_patch_declarations, "before")
+          
+          input_patch_body = """
+          #ifdef CONFIG_KSU
+              if (unlikely(ksu_input_hook))
+                  ksu_handle_input_handle_event(&type, &code, &value);
+          #endif
+          """
+          inject_code("drivers/input/input.c", "static void input_handle_event(struct input_dev *dev,\n\t\tunsigned int type, unsigned int code, int value)", input_patch_body, "inside_brace")
+
+          # 2. fs/devpts/inode.c (Correction exécution de 'pm' dans le terminal)
+          devpts_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_devpts(struct inode*);
+          #endif
+          """
+          inject_code("fs/devpts/inode.c", "void *devpts_get_priv(", devpts_patch_declarations, "before")
+          
+          devpts_patch_body = """
+          #ifdef CONFIG_KSU
+              ksu_handle_devpts(dentry->d_inode);
+          #endif
+          """
+          inject_code("fs/devpts/inode.c", "void *devpts_get_priv(struct dentry *dentry)", devpts_patch_body, "inside_brace")
+
+          # 3. fs/exec.c (do_execveat_common)
+          exec_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern bool ksu_execveat_hook __read_mostly;
+          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+                      void *envp, int *flags);
+          extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+                           void *argv, void *envp, int *flags);
+          #endif
+          """
+          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_declarations, "before")
+          
+          exec_patch_body = """
+          #ifdef CONFIG_KSU
+              if (unlikely(ksu_execveat_hook))
+                  ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+              else
+                  ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
+          #endif
+          """
+          inject_code("fs/exec.c", "static int do_execveat_common(", exec_patch_body, "inside_brace")
+
+          # 4. fs/open.c (do_faccessat)
+          open_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
+                               int *flags);
+          #endif
+          """
+          inject_code("fs/open.c", "long do_faccessat(", open_patch_declarations, "before")
+          
+          open_patch_body = """
+          #ifdef CONFIG_KSU
+              ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+          #endif
+          """
+          inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_patch_body, "inside_brace")
+
+          # 5. fs/read_write.c (vfs_read)
+          read_patch_declarations = """
+          #ifdef CONFIG_KSU
+          extern bool ksu_vfs_read_hook __read_mostly;
+          extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+                      size_t *count_ptr, loff_t **pos);
+          #endif
+          """
+          inject_code("fs/read_write.c", "ssize_t vfs_read(", read_patch_declarations, "before")
+          
+          read_patch_body = """
+          #ifdef CONFIG_KSU
+              if (unlikely(ksu_vfs_read_hook))
+                  ksu_handle_vfs_read(&file, &buf, &count, &pos);
+          #endif
+          """
+          inject_code("fs/read_write.c", "ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)", read_patch_body, "inside_brace")
+
+          # 6. fs/stat.c (vfs_fstatat)
+          stat_patch_declarations = """
+          #ifdef CONFIG_KSU
           extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-          extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
-          #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
-          extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
-          #endif
           #endif
           """
-          inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
-          inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
-          inject_code("fs/stat.c", "SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
-
-          # 2. fs/exec.c
-          exec_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot))
-          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
+          inject_code("fs/stat.c", "int vfs_fstatat(", stat_patch_declarations, "before")
+          
+          stat_patch_body = """
+          #ifdef CONFIG_KSU
+              ksu_handle_stat(&dfd, &filename, &flag);
           #endif
           """
-          inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
-          inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
-          inject_code("fs/exec.c", "static int compat_do_execve(struct filename *filename,\n\tconst compat_uptr_t __user *__argv,\n\tconst compat_uptr_t __user *__envp)\n{\n\tstruct user_arg_ptr argv = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __argv,\n\t},\n\tenvp = {\n\t\t.is_compat = true,\n\t\t.ptr.compat = __envp,\n\t};", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
+          inject_code("fs/stat.c", "int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,", stat_patch_body, "inside_brace")
 
-          # 3. fs/open.c
-          open_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot)) 
-          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
-          #endif
-          """
-          inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
-          inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
-
-          # 4. SELinux updates & Bypass propre en fin de fichier
+          # 7. SELinux updates & Bypass propre en fin de fichier
           if os.path.exists("security/selinux/selinuxfs.c"):
               with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
                   sc = f.read()
@@ -173,8 +240,9 @@ jobs:
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
-          print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
+          print("✨ Hooks Safe Mode, devpts et autres injectés avec succès !")
           EOF
+          
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
