@@ -69,14 +69,18 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            echo "🔧 Suppression/Neutralisation complète de file_wrapper pour le noyau 4.19..."
-            # On vide le fichier source pour qu'il ne contienne plus d'erreurs
+            echo "🔧 Neutralisation de file_wrapper..."
             rm -f drivers/kernelsu/infra/file_wrapper.c
             touch drivers/kernelsu/infra/file_wrapper.c
-            
-            # On s'assure qu'il n'est pas appelé ou qu'on commente sa référence dans le Makefile si besoin
             sed -i '/file_wrapper.o/d' drivers/kernelsu/infra/Makefile || true
             sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
+          fi
+          # Neutralisation de seccomp_cache pour le noyau 4.19
+          if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
+            echo "🔧 Neutralisation de seccomp_cache..."
+            rm -f drivers/kernelsu/infra/seccomp_cache.c
+            touch drivers/kernelsu/infra/seccomp_cache.c
+            sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
           fi  
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
