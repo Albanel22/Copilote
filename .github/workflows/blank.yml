@@ -448,7 +448,7 @@ jobs:
         run: |
           cd ${{ env.KERNEL_PATH }}
           echo "⚙️ Réinitialisation et injection propre des hooks..."
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c || true
+          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c security/selinux/selinuxfs.c security/selinux/hooks.c security/selinux/ss/services.c || true
           python3 - << 'EOF'
           import os
           def inject_code(path, target_str, code_to_insert, position="before"):
@@ -515,12 +515,24 @@ jobs:
           inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
 
-          # 4. SELinux updates & Bypass propre en fin de fichier
+          # 4. fs/read_write.c (Hook de lecture sys_read)
+          read_declarations = """
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern bool ksu_init_rc_hook __read_mostly;
+          extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
+                          char __user **buf_ptr, size_t *count_ptr);
+          #endif
+          """
+          inject_code("fs/read_write.c", "ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)", read_declarations, "before")
+          inject_code("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook)) \n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif", "inside_brace")
+
+          # 5. SELinux updates & Rétrocompatibilité 4.19 (selinuxfs.c, hooks.c, services.c)
           if os.path.exists("security/selinux/selinuxfs.c"):
               with open("security/selinux/selinuxfs.c", "r", encoding="utf-8") as f:
                   sc = f.read()
               sc = sc.replace("static ssize_t (*write_op[])", "ssize_t (*write_op[])")
               sc = sc.replace("static const struct file_operations sel_handle_status_ops", "const struct file_operations sel_handle_status_ops")
+              sc = sc.replace("static DEFINE_MUTEX(sel_mutex);", "DEFINE_MUTEX(sel_mutex);")
               with open("security/selinux/selinuxfs.c", "w", encoding="utf-8") as f:
                   f.write(sc)
 
@@ -537,11 +549,23 @@ jobs:
               }
               #endif
               """
-              hc = hc + "\n" + selinux_bypass_func
+              if "ksu_selinux_enforce_bypass" not in hc:
+                  hc = hc + "\n" + selinux_bypass_func
               
               with open("security/selinux/hooks.c", "w", encoding="utf-8") as f:
                   f.write(hc)
-          print("✨ Hook faccessat officiel et correctifs SELinux injectés avec succès !")
+
+          if os.path.exists("security/selinux/ss/services.c"):
+              with open("security/selinux/ss/services.c", "r", encoding="utf-8") as f:
+                  svc = f.read()
+              svc = svc.replace("static struct page *selinux_status_page;", "struct page *selinux_status_page;")
+              svc = svc.replace("static DEFINE_MUTEX(selinux_status_lock);", "DEFINE_MUTEX(selinux_status_lock);")
+              svc = svc.replace("static DEFINE_RWLOCK(policy_rwlock);", "DEFINE_RWLOCK(policy_rwlock);")
+              svc = svc.replace("static void security_dump_masked_av(", "void security_dump_masked_av(")
+              with open("security/selinux/ss/services.c", "w", encoding="utf-8") as f:
+                  f.write(svc)
+
+          print("✨ Hooks, correctifs SELinux 4.19 et symboles exportés injectés avec succès !")
           EOF
 
       - name: Fix KernelSU Namespace Error for Linux 4.19
