@@ -86,6 +86,7 @@ jobs:
           static void reset_avc_cache(void)
           {
               struct selinux_avc *avc = selinux_state.avc;
+              avc_ss_reset(avc, 0);
               selnl_notify_policyload(0);
               selinux_status_update_policyload(&selinux_state, 0);
               selinux_xfrm_notify_policyload();
@@ -442,7 +443,9 @@ jobs:
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-      
+                  
+
+              
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
