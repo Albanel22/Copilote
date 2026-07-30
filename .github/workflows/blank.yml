@@ -479,6 +479,19 @@ jobs:
               else:
                   print(f"❌ Cible introuvable dans {path}")
 
+          # Ajout de l'inclusion de avc_ss.h dans rules.c pour résoudre avc_ss_reset
+          rules_path = "drivers/kernelsu/selinux/rules.c"
+          if os.path.exists(rules_path):
+              with open(rules_path, "r", encoding="utf-8") as f:
+                  content = f.read()
+              
+              if '#include "avc_ss.h"' not in content:
+                  # On l'ajoute avec les autres includes SELinux au début du fichier
+                  content = content.replace('#include "rules.h"', '#include "rules.h"\n#include "../avc_ss.h"')
+                  with open(rules_path, "w", encoding="utf-8") as f:
+                      f.write(content)
+                  print("✅ Inclusion de avc_ss.h ajoutée dans rules.c")       
+
           # 1. fs/stat.c
           stat_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
