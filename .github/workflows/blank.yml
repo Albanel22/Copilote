@@ -96,6 +96,20 @@ jobs:
             touch drivers/kernelsu/manager/pkg_observer.c
             sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
           fi
+          # Correction de allowlist.c pour le noyau 4.19 (TWA_RESUME et gestion des tâches)
+          if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
+            echo "🔧 Correction de allowlist.c pour compatibilité 4.19..."
+            # Si TWA_RESUME n'est pas défini, on le définit à 0
+            if ! grep -q "TWA_RESUME" drivers/kernelsu/policy/allowlist.c; then
+              true
+            else
+              sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
+            fi
+            
+            # S'assurer que le header task_work.h ou sched.h est bien inclus si nécessaire, 
+            # ou ajouter une définition de compatibilité en haut du fichier
+            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
+          fi
           
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
