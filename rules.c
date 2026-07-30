@@ -18,7 +18,6 @@
 
 #define ALL NULL
 
-// Définition de compatibilité pour le verrou de politique SELinux sur noyau 4.19
 #ifndef selinux_policy_lock
 extern struct mutex selinux_policy_lock;
 #endif
@@ -34,7 +33,6 @@ static void reset_avc_cache(void)
     selinux_xfrm_notify_policyload();
 }
 
-// Fonction utilitaire sécurisée pour récupérer le policydb sur noyau 4.19
 static struct policydb *ksu_get_policydb(void)
 {
     if (selinux_state.ss) {
@@ -59,7 +57,6 @@ void apply_kernelsu_rules(void)
         goto out_unlock;
     }
 
-    // Application directe des règles ReSukiSU sur la base active
     ksu_type(db, KERNEL_SU_DOMAIN, "domain");
     ksu_permissive(db, KERNEL_SU_DOMAIN);
     ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
