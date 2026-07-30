@@ -288,11 +288,16 @@ jobs:
             echo "[+] SUCCESS: pkg_observer.c neutralisé."
           fi
 
-          # Correctifs allowlist.c (TWA_RESUME et put_task_struct pour 4.19)
+          # Correctifs allowlist.c & app_profile.c pour 4.19
           if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
             sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c
             sed -i 's/put_task_struct(tsk);/\/\* put_task_struct(tsk); *\//g' drivers/kernelsu/policy/allowlist.c
             echo "[+] SUCCESS: Correctifs allowlist.c appliqués."
+          fi
+
+          if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
+            sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\* atomic_set(&current->seccomp.filter_count, 0); *\//g' drivers/kernelsu/policy/app_profile.c
+            echo "[+] SUCCESS: Correctif app_profile.c appliqué."
           fi
 
           # Fixs modules & Tactile Motorola
@@ -304,7 +309,8 @@ jobs:
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
           echo "=================================================="
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-      
+
+          
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
