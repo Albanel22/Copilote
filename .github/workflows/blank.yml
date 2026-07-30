@@ -115,6 +115,12 @@ jobs:
             echo "🔧 Injection des headers pour put_task_struct dans allowlist.c..."
             sed -i '1i #include <linux/sched/task.h>\n#ifndef HAVE_PUT_TASK_STRUCT\nextern void put_task_struct(struct task_struct *t);\n#endif\n' drivers/kernelsu/policy/allowlist.c || true
           fi
+          # Correction de app_profile.c pour le noyau 4.19 (seccomp.filter_count)
+          if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
+            echo "🔧 Correction de app_profile.c pour la compatibilité 4.19..."
+            sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
+          fi
+       
           
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
