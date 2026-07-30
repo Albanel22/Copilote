@@ -81,7 +81,14 @@ jobs:
             rm -f drivers/kernelsu/infra/seccomp_cache.c
             touch drivers/kernelsu/infra/seccomp_cache.c
             sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
-          fi  
+          fi
+          # Neutralisation de su_mount_ns pour le noyau 4.19
+          if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
+            echo "🔧 Neutralisation de su_mount_ns..."
+            rm -f drivers/kernelsu/infra/su_mount_ns.c
+            touch drivers/kernelsu/infra/su_mount_ns.c
+            sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
+          fi
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
