@@ -565,6 +565,12 @@ jobs:
               with open("security/selinux/ss/services.c", "w", encoding="utf-8") as f:
                   f.write(svc)
 
+          # Vérification rapide de la signature de avc_ss_reset dans le code source du noyau
+          import subprocess
+          print("🔍 Recherche de avc_ss_reset dans le noyau...")
+          result = subprocess.run(["grep", "-rn", "avc_ss_reset", "security/selinux/"], capture_output=True, text=True)
+          print(result.stdout if result.stdout else "⚠️ Aucune définition trouvée via grep")   
+
           print("✨ Hooks, correctifs SELinux 4.19 et symboles exportés injectés avec succès !")
           EOF
 
