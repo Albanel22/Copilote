@@ -82,14 +82,20 @@ jobs:
 
           // Verrou global de politique sous Linux 4.19
           extern struct mutex selinux_policy_lock;
+          
+          // Déclaration externe explicite de avc_ss_reset pour éviter l'erreur de fonction implicite
+          extern int avc_ss_reset(struct selinux_avc *avc, u32 seqno);
 
           static void reset_avc_cache(void)
           {
-              selnl_notify_policyload(0);
-              selinux_status_update_policyload(&selinux_state, 0);
-              selinux_xfrm_notify_policyload();
+            struct selinux_avc *avc = selinux_state.avc;
+    
+            avc_ss_reset(avc, 0);
+    
+            selnl_notify_policyload(0);
+            selinux_status_update_policyload(&selinux_state, 0);
+            selinux_xfrm_notify_policyload();
           }
-
           void apply_kernelsu_rules(void)
           {
               struct policydb *db;
