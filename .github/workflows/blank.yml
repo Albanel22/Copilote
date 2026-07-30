@@ -49,6 +49,11 @@ jobs:
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
+          # Copie de rules.c depuis la racine du workspace avant de changer de dossier
+          echo "📂 Copie de ton fichier rules.c personnalisé..."
+          mkdir -p ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux
+          cp -f rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
+          
           cd ${{ env.KERNEL_PATH }}
           
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
@@ -56,11 +61,6 @@ jobs:
           
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          
-          # Copie de rules.c en utilisant le chemin absolu GitHub Workspace (garantit de le trouver peu importe où l'on est)
-          echo "📂 Copie de ton fichier rules.c personnalisé..."
-          mkdir -p drivers/kernelsu/selinux
-          cp "${{ github.workspace }}/rules.c" drivers/kernelsu/selinux/rules.c
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
