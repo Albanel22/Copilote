@@ -46,21 +46,17 @@ jobs:
         run: |
           set -e
           
-          # 1. Copie de ton defconfig personnel dans les sources clonées
+          # 1. Copie du defconfig
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # 2. Copie directe de rules.c depuis le dossier courant du workspace vers le noyau
-          echo "📂 Copie de ton fichier rules.c personnalisé..."
+          # 2. Copie directe de rules.c vers le dossier SELinux de KernelSU
+          echo "📂 Copie de rules.c..."
           mkdir -p ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux
           cp -f rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
           
-          # 3. Ensuite seulement on entre dans le noyau
+          # 3. Entrée dans le dossier du noyau et installation de SukiSU
           cd ${{ env.KERNEL_PATH }}
-          
-          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
-          
-          echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
