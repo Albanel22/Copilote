@@ -110,6 +110,11 @@ jobs:
             # ou ajouter une définition de compatibilité en haut du fichier
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
           fi
+          # Correction finale pour put_task_struct dans allowlist.c (Noyau 4.19)
+          if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
+            echo "🔧 Injection des headers pour put_task_struct dans allowlist.c..."
+            sed -i '1i #include <linux/sched/task.h>\n#ifndef HAVE_PUT_TASK_STRUCT\nextern void put_task_struct(struct task_struct *t);\n#endif\n' drivers/kernelsu/policy/allowlist.c || true
+          fi
           
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
