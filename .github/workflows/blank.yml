@@ -48,6 +48,10 @@ jobs:
           
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          
+          # Sauvegarde temporaire de ton rules.c personnalisé à la racine pour ne pas le perdre
+          cp drivers/kernelsu/selinux/rules.c ./rules.c.bak
+          
           cd ${{ env.KERNEL_PATH }}
           
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
@@ -56,18 +60,11 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           
+          echo "💉 Restauration de ton rules.c personnalisé pour le noyau 4.19..."
+          cp -f ../rules.c.bak drivers/kernelsu/selinux/rules.c
+          
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-
-          echo "📥 Récupération des patchs et en-têtes de SUSFS pour Linux 4.19..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 --depth=1 || true
-
-          if [ -d "susfs4ksu/kernel_patches" ]; then
-              echo "💉 Application des patchs SUSFS dans le noyau..."
-              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
-              cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
-          fi
-          rm -rf susfs4ksu
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
