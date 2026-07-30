@@ -65,6 +65,16 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
+      - name: Fix SukiSU file_wrapper for Kernel 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
+            echo "🔧 Neutralisation de file_wrapper.c pour compatibilité noyau 4.19..."
+            sed -i 's/orig->f_op->iopoll/NULL/g' drivers/kernelsu/infra/file_wrapper.c || true
+            sed -i 's/orig->f_op->remap_file_range/NULL/g' drivers/kernelsu/infra/file_wrapper.c || true
+            sed -i 's/REMAP_FILE_DEDUP/0/g' drivers/kernelsu/infra/file_wrapper.c || true
+          fi    
+
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
