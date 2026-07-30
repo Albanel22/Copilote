@@ -49,10 +49,10 @@ jobs:
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # Copie ton rules.c depuis la racine du dépôt directement vers le futur emplacement SELinux (avant de changer de dossier)
+          # Copie ton rules.c depuis la racine absolue du dépôt vers les sources du noyau
           echo "📂 Copie de ton fichier rules.c personnalisé..."
           mkdir -p ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux
-          cp rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
+          cp ${{ github.workspace }}/rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
           
           cd ${{ env.KERNEL_PATH }}
           
