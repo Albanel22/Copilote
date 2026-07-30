@@ -16,15 +16,11 @@
 #include "linux/lsm_audit.h"
 #include "xfrm.h"
 
-struct selinux_policy *backup_sepolicy;
-
-#define SELINUX_POLICY_INSTEAD_SELINUX_SS
 #define ALL NULL
 
-// Sur Linux 4.19, le verrou et la politique globale se gèrent via les structures internes de sécurité
+// Verrou global de politique sous Linux 4.19
 extern struct mutex selinux_policy_lock;
 
-// Fonction de réinitialisation du cache AVC adaptée au noyau 4.19
 static void reset_avc_cache(void)
 {
     struct selinux_avc *avc = selinux_state.avc;
@@ -36,7 +32,6 @@ static void reset_avc_cache(void)
 
 void apply_kernelsu_rules(void)
 {
-    struct selinux_policy *pol, *old_pol;
     struct policydb *db;
 
     if (!getenforce()) {
@@ -44,46 +39,15 @@ void apply_kernelsu_rules(void)
     }
 
     mutex_lock(&selinux_policy_lock);
-    
-    // Récupération de la politique active sous le 4.19
-    old_pol = rcu_dereference_protected(selinux_state.policy, lockdep_is_held(&selinux_policy_lock));
-    if (!old_pol) {
-        // Fallback sécurisé si le pointeur direct est géré autrement sur cette variante 4.19
-        old_pol = container_of(selinux_state.ss, struct selinux_policy, ss);
-    }
 
-    backup_sepolicy = ksu_dup_sepolicy(old_pol);
-    if (IS_ERR(backup_sepolicy)) {
-        pr_err("failed to create backup sepolicy: %ld\n", PTR_ERR(backup_sepolicy));
-        backup_sepolicy = NULL;
-    } else {
-        backup_sepolicy->sidtab = kzalloc(sizeof(*backup_sepolicy->sidtab), GFP_KERNEL);
-        if (!backup_sepolicy->sidtab) {
-            pr_err("failed to alloc backup sidtab\n");
-            ksu_destroy_sepolicy(backup_sepolicy);
-            backup_sepolicy = NULL;
-        } else {
-            int ret = policydb_load_isids(&backup_sepolicy->policydb, backup_sepolicy->sidtab);
-            if (ret) {
-                pr_err("failed to load isids for backup sepolicy: %d!\n", ret);
-                kfree(backup_sepolicy->sidtab);
-                ksu_destroy_sepolicy(backup_sepolicy);
-                backup_sepolicy = NULL;
-            } else {
-                pr_info("backup sepolicy success! latest_granting=%d\n", backup_sepolicy->latest_granting);
-            }
-        }
-    }
-
-    pol = ksu_dup_sepolicy(old_pol);
-    if (IS_ERR(pol)) {
-        pr_err("failed to dup selinux_policy: %ld\n", PTR_ERR(pol));
+    // Accès direct au policydb global du noyau 4.19 via le sous-système de sécurité
+    db = &selinux_state.ss->policydb;
+    if (!db) {
+        pr_err("failed to get policydb for kernelsu rules\n");
         goto out_unlock;
     }
 
-    db = &pol->policydb;
-
-    // Application des règles ReSukiSU
+    // Application directe des règles ReSukiSU sur la base active
     ksu_type(db, KERNEL_SU_DOMAIN, "domain");
     ksu_permissive(db, KERNEL_SU_DOMAIN);
     ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
@@ -143,10 +107,6 @@ void apply_kernelsu_rules(void)
 
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
-
-    rcu_assign_pointer(selinux_state.policy, pol);
-    synchronize_rcu();
-    ksu_destroy_sepolicy(old_pol);
 
     reset_avc_cache();
 out_unlock:
@@ -355,7 +315,6 @@ static int apply_one_sepolicy_cmd(struct policydb *db, const struct sepol_data *
 
 int handle_sepolicy(void __user *user_data, u64 data_len)
 {
-    struct selinux_policy *pol, *old_pol;
     struct policydb *db;
     struct sepol_batch_cursor cursor;
     u8 *payload;
@@ -377,17 +336,11 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 
     mutex_lock(&selinux_policy_lock);
 
-    old_pol = rcu_dereference_protected(selinux_state.policy, lockdep_is_held(&selinux_policy_lock));
-    if (!old_pol) {
-        old_pol = container_of(selinux_state.ss, struct selinux_policy, ss);
-    }
-
-    pol = ksu_dup_sepolicy(old_pol);
-    if (IS_ERR(pol)) {
-        ret = PTR_ERR(pol);
+    db = &selinux_state.ss->policydb;
+    if (!db) {
+        ret = -EINVAL;
         goto out_unlock;
     }
-    db = &pol->policydb;
 
     cursor.cur = payload;
     cursor.end = payload + (size_t)data_len;
@@ -401,12 +354,12 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
         int expected_argc;
         u32 arg_index;
 
-        if (sepol_read_cmd_header(&cursor, &header) < 0) goto out_drop_new_policy;
+        if (sepol_read_cmd_header(&cursor, &header) < 0) goto out_unlock;
         expected_argc = sepol_expected_argc(header.cmd);
-        if (expected_argc < 0 || expected_argc > KSU_SEPOLICY_MAX_ARGS) goto out_drop_new_policy;
+        if (expected_argc < 0 || expected_argc > KSU_SEPOLICY_MAX_ARGS) goto out_unlock;
 
         for (arg_index = 0; arg_index < (u32)expected_argc; arg_index++) {
-            if (sepol_read_string(&cursor, &args[arg_index]) < 0) goto out_drop_new_policy;
+            if (sepol_read_string(&cursor, &args[arg_index]) < 0) goto out_unlock;
         }
 
         if (apply_one_sepolicy_cmd(db, &header, args) == 0) {
@@ -415,17 +368,9 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
         cmd_index++;
     }
 
-    rcu_assign_pointer(selinux_state.policy, pol);
-    synchronize_rcu();
-    ksu_destroy_sepolicy(old_pol);
-
     reset_avc_cache();
     ret = success_cmd_count;
-    goto out_unlock;
 
-out_drop_new_policy:
-    ksu_destroy_sepolicy(pol);
-    ret = -EINVAL;
 out_unlock:
     mutex_unlock(&selinux_policy_lock);
 out_free:
