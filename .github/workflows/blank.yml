@@ -49,8 +49,14 @@ jobs:
           # Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # Sauvegarde temporaire de ton rules.c personnalisé à la racine pour ne pas le perdre
-          cp drivers/kernelsu/selinux/rules.c ./rules.c.bak
+          # Sauvegarde de ton rules.c depuis ton dépôt principal
+          if [ -f "drivers/kernelsu/selinux/rules.c" ]; then
+            cp drivers/kernelsu/selinux/rules.c ./rules.c.bak
+            echo "[+] SUCCESS: rules.c trouvé et sauvegardé."
+          else
+            echo "[-] ERROR: drivers/kernelsu/selinux/rules.c introuvable dans ton dépôt !"
+            exit 1
+          fi
           
           cd ${{ env.KERNEL_PATH }}
           
@@ -65,7 +71,7 @@ jobs:
           
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-
+      
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
