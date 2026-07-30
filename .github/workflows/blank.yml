@@ -46,13 +46,17 @@ jobs:
         run: |
           set -e
           
+          # Affiche où l'on se trouve pour le debug
+          echo "Dossier courant : $PWD"
+          ls -la
+          
           # 1. Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # 2. Copie de rules.c depuis la racine du dépôt (pendant qu'on est au bon endroit)
+          # 2. Copie de rules.c en utilisant le chemin absolu garanti par GitHub Workspace
           echo "📂 Copie de ton fichier rules.c personnalisé..."
           mkdir -p ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux
-          cp -f rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
+          cp -f "${{ github.workspace }}/rules.c" ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
           
           # 3. On entre dans le dossier du noyau pour la suite
           cd ${{ env.KERNEL_PATH }}
