@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: test-sukisu
 
       - name: Install Build Dependencies
         run: |
@@ -46,17 +48,21 @@ jobs:
         run: |
           set -e
           
-          # 1. Copie du defconfig
+          # 1. Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
-          # 2. Copie directe de rules.c vers le dossier SELinux de KernelSU
-          echo "📂 Copie de rules.c..."
+          # 2. Copie de rules.c depuis la racine du dépôt (puisqu'on est sur la branche test-sukisu)
+          echo "📂 Copie de ton fichier rules.c personnalisé..."
           mkdir -p ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux
           cp -f rules.c ${{ env.KERNEL_PATH }}/drivers/kernelsu/selinux/rules.c
           
-          # 3. Entrée dans le dossier du noyau et installation de SukiSU
+          # 3. On entre dans le dossier du noyau pour la suite
           cd ${{ env.KERNEL_PATH }}
+          
+          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+          
+          echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
@@ -164,7 +170,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # Injection des options de configuration de base
           {
               echo "CONFIG_KSU=y"
               echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -185,7 +190,6 @@ jobs:
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
 
-          # Patch Tactile Motorola
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
