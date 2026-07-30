@@ -89,6 +89,13 @@ jobs:
             touch drivers/kernelsu/infra/su_mount_ns.c
             sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
           fi
+          # Neutralisation de pkg_observer pour le noyau 4.19
+          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
+            echo "🔧 Neutralisation de pkg_observer..."
+            rm -f drivers/kernelsu/manager/pkg_observer.c
+            touch drivers/kernelsu/manager/pkg_observer.c
+            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
+          fi
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
