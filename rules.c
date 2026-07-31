@@ -23,21 +23,17 @@
 extern struct mutex selinux_policy_lock;
 #endif
 
+/* Déclaration explicite pour éviter l'erreur "implicit declaration" */
+extern void avc_ss_reset(u32 seqno);
+
 static void reset_avc_cache(void)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
-    struct selinux_avc *avc = selinux_state.avc;
-    if (avc) {
-        avc_ss_reset(avc, 0);
-    }
-    selnl_notify_policyload(0);
-    selinux_status_update_policyload(&selinux_state, 0);
-#else
-    /* Compatibilité pour les noyaux plus anciens (ex: 4.19) */
     avc_ss_reset(0);
     selnl_notify_policyload(0);
-    selinux_status_update_policyload(0);
-#endif
+    
+    /* Ton noyau Motorola 4.19 exige 2 arguments ici */
+    selinux_status_update_policyload(&selinux_state, 0);
+    
     selinux_xfrm_notify_policyload();
 }
 
