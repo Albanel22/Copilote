@@ -1,6 +1,10 @@
 #ifndef __KSU_H_KERNEL_COMPAT
 #define __KSU_H_KERNEL_COMPAT
 
+#ifndef TWA_RESUME
+#define TWA_RESUME true
+#endif
+
 #include <linux/fs.h>
 #include <linux/version.h>
 #include <linux/fdtable.h>
@@ -65,10 +69,6 @@ extern ssize_t ksu_kernel_write_compat(struct file *p, const void *buf, size_t c
 // Linux pre-5.7
 // task_work_add (struct, struct, bool)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
-
-#ifndef TWA_RESUME
-#define TWA_RESUME true
-#endif
 
 static inline int do_close_fd(unsigned int fd)
 {
