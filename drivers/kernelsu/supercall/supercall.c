@@ -1,3 +1,7 @@
+#ifndef TWA_RESUME
+#define TWA_RESUME 0
+#endif
+
 #include <linux/anon_inodes.h>
 #include <linux/err.h>
 #include <linux/fdtable.h>
@@ -20,10 +24,28 @@
 #include "supercall/internal.h"
 #include "arch.h"
 #include "klog.h" // IWYU pragma: keep
+#include <linux/anon_inodes.h>
+#include <linux/err.h>
+#include <linux/fdtable.h>
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/kprobes.h>
+#include <linux/pid.h>
+#include <linux/slab.h>
+#include <linux/syscalls.h>
+#include <linux/uaccess.h>
+#include <linux/version.h>
 
-#ifndef TWA_RESUME
-#define TWA_RESUME 0
-#endif
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/namei.h>
+#include <linux/susfs.h>
+#endif // #ifdef CONFIG_KSU_SUSFS
+
+#include "../compat/kernel_compat.h"
+#include "uapi/supercall.h"
+#include "supercall/internal.h"
+#include "arch.h"
+#include "klog.h" // IWYU pragma: keep
 
 static int anon_ksu_release(struct inode *inode, struct file *filp)
 {
