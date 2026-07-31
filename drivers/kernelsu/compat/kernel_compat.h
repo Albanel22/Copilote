@@ -360,3 +360,6 @@ static inline char *sym_name(struct policydb *p, unsigned int sym_num, unsigned 
 #endif
 
 #endif
+#ifndef TWA_RESUME
+#define TWA_RESUME 0
+#endif
