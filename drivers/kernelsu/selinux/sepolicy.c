@@ -19,6 +19,9 @@
 #include "compat/kernel_compat.h" // Add check Huawei Device
 
 #define KSU_SUPPORT_ADD_TYPE
+#undef KSU_COMPAT_HAS_MODERN_POLICYDB
+#undef KSU_COMPAT_HAS_FILENAME_TRANS_KEY
+#undef KSU_COMPAT_HAS_HASHTAB_KEY_PARAMS
 
 //////////////////////////////////////////////////////
 // Declaration
@@ -600,60 +603,6 @@ static bool add_filename_trans(struct policydb *db, const char *s, const char *t
         return false;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0) || defined(KSU_COMPAT_HAS_FILENAME_TRANS_KEY)
-    struct filename_trans_key key;
-    key.ttype = tgt->value;
-    key.tclass = cls->value;
-    key.name = (char *)o;
-
-    struct filename_trans_datum *last = NULL;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) || defined(KSU_COMPAT_HAS_HASHTAB_KEY_PARAMS)
-    struct filename_trans_datum *trans = policydb_filenametr_search(db, &key);
-#else
-    struct filename_trans_datum *trans = hashtab_search(&db->filename_trans, &key);
-#endif
-    while (trans) {
-        if (ebitmap_get_bit(&trans->stypes, src->value - 1)) {
-            // Duplicate, overwrite existing data and return
-            trans->otype = def->value;
-            return true;
-        }
-        if (trans->otype == def->value)
-            break;
-        last = trans;
-        trans = trans->next;
-    }
-
-    if (trans == NULL) {
-        trans = (struct filename_trans_datum *)kcalloc(1, sizeof(*trans), GFP_KERNEL);
-        if (!trans) {
-            pr_err("add_filename_trans: Failed to alloc datum\n");
-            return false;
-        }
-        struct filename_trans_key *new_key = (struct filename_trans_key *)kzalloc(sizeof(*new_key), GFP_KERNEL);
-        if (!new_key) {
-            pr_err("add_filename_trans: Failed to alloc new_key\n");
-            kfree(trans);
-            return false;
-        }
-        *new_key = key;
-        new_key->name = kstrdup(key.name, GFP_KERNEL);
-        if (!new_key->name) {
-            pr_err("add_filename_trans: Failed to dup name\n");
-            kfree(new_key);
-            kfree(trans);
-            return false;
-        }
-        trans->next = last;
-        trans->otype = def->value;
-        hashtab_insert(&db->filename_trans, new_key, trans, filenametr_key_params);
-    }
-
-    db->compat_filename_trans_count++;
-    return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
-#else // < 5.7.0, has no filename_trans_key, but struct filename_trans
-
     struct filename_trans key;
     key.ttype = tgt->value;
     key.tclass = cls->value;
@@ -670,16 +619,22 @@ static bool add_filename_trans(struct policydb *db, const char *s, const char *t
         struct filename_trans *new_key = (struct filename_trans *)kzalloc(sizeof(*new_key), GFP_KERNEL);
         if (!new_key) {
             pr_err("add_filename_trans: Failed to alloc new_key\n");
+            kfree(trans);
             return false;
         }
         *new_key = key;
         new_key->name = kstrdup(key.name, GFP_KERNEL);
+        if (!new_key->name) {
+            pr_err("add_filename_trans: Failed to dup name\n");
+            kfree(new_key);
+            kfree(trans);
+            return false;
+        }
         trans->otype = def->value;
         hashtab_insert(db->filename_trans, new_key, trans);
     }
 
     return ebitmap_set_bit(&db->filename_trans_ttypes, src->value - 1, 1) == 0;
-#endif
 }
 
 static bool add_genfscon(struct policydb *db, const char *fs_name, const char *path, const char *context)
