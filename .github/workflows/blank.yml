@@ -60,9 +60,12 @@ jobs:
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           
+          # 📂 Remplacement par ton sepolicy.c personnalisé pour noyau 4.19
+          echo "📂 Application de ton sepolicy.c correctif..."
+          cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c
+          
           # 3. /!\ CORRECTION /!\ 
           # On copie ton rules.c APRÈS le nettoyage et l'installation du script.
-          # (On utilise ../rules.c car on est descendu dans le dossier du noyau)
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
