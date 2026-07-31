@@ -136,10 +136,10 @@ jobs:
             # Si les en-têtes de signal manquent pour task_pgrp / task_session
             sed -i '1i #include <linux/sched/signal.h>' drivers/kernelsu/supercall/dispatch.c || true
           fi
-          # Correction de supercall.c pour la macro TWA_RESUME sur noyau 4.19
+          # Injection directe de TWA_RESUME pour le noyau 4.19
           if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            echo "🔧 Correction de supercall.c pour TWA_RESUME..."
-            sed -i '1i #include "../compat/kernel_compat.h"' drivers/kernelsu/supercall/supercall.c || true
+            echo "🔧 Injection directe de TWA_RESUME dans supercall.c..."
+            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME true\n#endif' drivers/kernelsu/supercall/supercall.c || true
           fi
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
