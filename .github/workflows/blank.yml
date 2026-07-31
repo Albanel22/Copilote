@@ -99,15 +99,11 @@ jobs:
           # Correction de allowlist.c pour le noyau 4.19 (TWA_RESUME et gestion des tâches)
           if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
             echo "🔧 Correction de allowlist.c pour compatibilité 4.19..."
-            # Si TWA_RESUME n'est pas défini, on le définit à 0
             if ! grep -q "TWA_RESUME" drivers/kernelsu/policy/allowlist.c; then
               true
             else
               sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
             fi
-            
-            # S'assurer que le header task_work.h ou sched.h est bien inclus si nécessaire, 
-            # ou ajouter une définition de compatibilité en haut du fichier
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
           fi
           # Correction finale pour put_task_struct dans allowlist.c (Noyau 4.19)
@@ -120,8 +116,7 @@ jobs:
             echo "🔧 Correction de app_profile.c pour la compatibilité 4.19..."
             sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
           fi
-       
-          
+         
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -192,7 +187,7 @@ jobs:
           #ifdef CONFIG_KSU_MANUAL_HOOK
           extern bool ksu_init_rc_hook __read_mostly;
           extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
-                          char __user **buf_ptr, size_t *count_ptr);
+                              char __user **buf_ptr, size_t *count_ptr);
           #endif
           """
           inject_code("fs/read_write.c", "ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)", read_declarations, "before")
@@ -222,7 +217,11 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
+          # 🧼 Nettoyage forcé du dossier de build et des anciens objets
+          echo "🧼 Nettoyage complet du dossier out et des caches de compilation..."
+          rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
+          
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
