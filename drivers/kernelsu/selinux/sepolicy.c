@@ -16,7 +16,7 @@
 #include "sepolicy.h"
 #include "klog.h" // IWYU pragma: keep
 #include "ss/symtab.h"
-#include "../../compat/kernel_compat.h"
+#include "kernel_compat.h"
 
 #define KSU_SUPPORT_ADD_TYPE
 #undef KSU_COMPAT_HAS_MODERN_POLICYDB
