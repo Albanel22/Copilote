@@ -120,6 +120,11 @@ jobs:
             echo "🔧 Correction de app_profile.c pour la compatibilité 4.19..."
             sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
           fi
+          # Correction de event.c pour le noyau 4.19 (absence de <linux/minmax.h>)
+          if [ -f "drivers/kernelsu/sulog/event.c" ]; then
+            echo "🔧 Correction de event.c pour compatibilité 4.19..."
+            sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' drivers/kernelsu/sulog/event.c || true
+          fi
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
