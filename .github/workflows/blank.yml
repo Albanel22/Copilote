@@ -138,8 +138,8 @@ jobs:
           fi
           # Correction propre de supercall.c pour TWA_RESUME sur noyau 4.19
           if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            echo "🔧 Injection de TWA_RESUME en haut de supercall.c..."
-            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
+            echo "🔧 Injection de TWA_RESUME avant son utilisation dans supercall.c..."
+            sed -i '/task_work_add/i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif\n' drivers/kernelsu/supercall/supercall.c || true
           fi
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
