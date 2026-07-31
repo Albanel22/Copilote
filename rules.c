@@ -15,6 +15,7 @@
 #include "ss/services.h"
 #include "linux/lsm_audit.h"
 #include "xfrm.h"
+#include "avc.h" // Ajout de l'en-tête manquant
 
 #define ALL NULL
 
@@ -24,12 +25,19 @@ extern struct mutex selinux_policy_lock;
 
 static void reset_avc_cache(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
     struct selinux_avc *avc = selinux_state.avc;
     if (avc) {
         avc_ss_reset(avc, 0);
     }
     selnl_notify_policyload(0);
     selinux_status_update_policyload(&selinux_state, 0);
+#else
+    /* Compatibilité pour les noyaux plus anciens (ex: 4.19) */
+    avc_ss_reset(0);
+    selnl_notify_policyload(0);
+    selinux_status_update_policyload(0);
+#endif
     selinux_xfrm_notify_policyload();
 }
 
