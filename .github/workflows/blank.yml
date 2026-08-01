@@ -171,7 +171,20 @@ jobs:
           if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
             echo "🧹 Vidage du fichier selinux_hide.c..."
             > drivers/kernelsu/feature/selinux_hide.c
-          fi    
+          fi
+
+      - name: 🧹 Nettoyage des appels de sous-modules non supportés dans init.c
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/core/init.c" ]; then
+            echo "🔧 Suppression des appels aux symboles non résolus dans init.c..."
+            sed -i '/ksu_selinux_hide_init/d' drivers/kernelsu/core/init.c
+            sed -i '/ksu_selinux_hide_exit/d' drivers/kernelsu/core/init.c
+            sed -i '/ksu_selinux_hide_/d' drivers/kernelsu/core/init.c
+            sed -i '/ksu_file_wrapper_init/d' drivers/kernelsu/core/init.c
+            sed -i '/ksu_observer_init/d' drivers/kernelsu/core/init.c
+            sed -i '/ksu_observer_exit/d' drivers/kernelsu/core/init.c
+          fi
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
