@@ -64,14 +64,13 @@ jobs:
           echo "📂 Application de ton sepolicy.c correctif..."
           cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c
           
-          # 3. /!\ CORRECTION /!\ 
-          # On copie ton rules.c APRÈS le nettoyage et l'installation du script.
+          # 3. Remplacement par ton fichier rules.c personnalisé
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-          # 🦊 4. Intégration de SUSFS pour noyau 4.19
+          # 🦊 4. Intégration de SUSFS pour noyau 4.19 (correction de l'URL clone)
           echo "🦊 Clonage et intégration de SUSFS (version 4.19)..."
-          git clone https://gitlab.com/Simplicity1/susfs4ksu.git -b android12-4.19 ../susfs4ksu || true
+          git clone --depth=1 https://gitlab.com/Simplicity1/susfs4ksu.git -b android12-4.19 ../susfs4ksu || true
           if [ -d "../susfs4ksu" ]; then
             echo "📥 Copie des sources de SUSFS dans drivers/kernelsu/..."
             cp -r ../susfs4ksu/kernel_patches/fs/susfs drivers/kernelsu/ || true
@@ -84,15 +83,18 @@ jobs:
             fi
           fi
 
-          # 🛠️ 5. Application de ksu_manual.patch (présent à la racine du dépôt)
+          # 🛠️ 5. Application de ksu_manual.patch (avec nettoyage des retours chariot Windows \r\n)
           if [ -f "../ksu_manual.patch" ]; then
+            echo "🧹 Nettoyage des caractères de fin de ligne (CRLF -> LF) du patch..."
+            sed -i 's/\r$//' ../ksu_manual.patch
+            
             echo "📥 Application de ksu_manual.patch sur les sources du noyau..."
-            patch -p1 < ../ksu_manual.patch
+            patch -p1 --binary < ../ksu_manual.patch
             echo "✅ ksu_manual.patch appliqué avec succès !"
           else
             echo "❌ Attention : ksu_manual.patch introuvable."
           fi
-
+          
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
