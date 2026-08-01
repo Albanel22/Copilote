@@ -1,3 +1,6 @@
+#ifndef TWA_RESUME
+#define TWA_RESUME true
+#endif
 #include "../compat/kernel_compat.h"
 #include <linux/anon_inodes.h>
 #include <linux/err.h>
