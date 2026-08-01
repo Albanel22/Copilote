@@ -68,47 +68,40 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Téléchargement direct de SUSFS (version robuste) et Application du Patch
+      - name: 🦊 Installation officielle de SUSFS et Application des Patchs
         run: |
           set -e
           cd ${{ env.KERNEL_PATH }}
           
-          echo "📁 Création / Nettoyage du dossier drivers/kernelsu/susfs..."
-          rm -rf drivers/kernelsu/susfs
-          mkdir -p drivers/kernelsu/susfs
-          
-          echo "📥 Téléchargement de l'archive tar.gz de susfs4ksu..."
-          curl -L -o ../susfs.tar.gz https://github.com/simonpunk/susfs4ksu/archive/refs/heads/main.tar.gz
-          
-          echo "📦 Extraction de l'archive..."
-          mkdir -p ../susfs_extracted
-          tar -xzf ../susfs.tar.gz -C ../susfs_extracted/
-          
-          if [ -d "../susfs_extracted/"*"/kernel_patches/fs/susfs" ]; then
-            EXTRACTED_DIR=$(ls -d ../susfs_extracted/* | head -n 1)
-            echo "📋 Copie des fichiers sources de SUSFS..."
-            cp -r "$EXTRACTED_DIR/kernel_patches/fs/susfs/"* drivers/kernelsu/susfs/
-            echo "✅ Sources SUSFS intégrées avec succès !"
-          else
-            echo "❌ Erreur : Impossible de trouver le dossier susfs dans l'archive."
-            exit 1
-          fi
+          echo "📥 Placement des fichiers de SUSFS..."
+          cp ../susfs.c fs/
+          mkdir -p include/linux
+          cp ../susfs.h include/linux/
           
           cd ..
-          rm -rf ../susfs.tar.gz ../susfs_extracted
           
-          if [ -f "50_add_susfs_in_kernel-4.19.patch" ]; then
-            echo "🧹 Nettoyage des fins de ligne du patch..."
-            sed -i 's/\r$//' 50_add_susfs_in_kernel-4.19.patch
-            
-            echo "🛠️ Application de ton patch sur le noyau..."
-            cd ${{ env.KERNEL_PATH }}
-            patch -p1 --binary --fuzz=3 < ../50_add_susfs_in_kernel-4.19.patch || true
-            echo "✅ Patch appliqué !"
-          else
-            echo "❌ Erreur : 50_add_susfs_in_kernel-4.19.patch introuvable à la racine."
-            exit 1
+          echo "🧹 Nettoyage des fins de ligne des patchs..."
+          [ -f "50_add_susfs_in_kernel-4.19.patch" ] && sed -i 's/\r$//' 50_add_susfs_in_kernel-4.19.patch
+          [ -f "10_enable_susfs_for_ksu.patch" ] && sed -i 's/\r$//' 10_enable_susfs_for_ksu.patch
+          
+          echo "🛠️ Application du patch principal sur le noyau..."
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "../50_add_susfs_in_kernel-4.19.patch" ]; then
+            patch -p1 --binary --forward < ../50_add_susfs_in_kernel-4.19.patch || true
           fi
+          
+          echo "🛠️ Application du patch sur KernelSU..."
+          if [ -d "drivers/kernelsu" ] && [ -f "../../10_enable_susfs_for_ksu.patch" ]; then
+            cd drivers/kernelsu
+            patch -p1 --binary --forward < ../../10_enable_susfs_for_ksu.patch || true
+            cd ../..
+          elif [ -d "KernelSU" ] && [ -f "../10_enable_susfs_for_ksu.patch" ]; then
+            cd KernelSU
+            patch -p1 --binary --forward < ../../10_enable_susfs_for_ksu.patch || true
+            cd ..
+          fi
+          
+          echo "✅ Intégration de SUSFS terminée avec succès !"
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
