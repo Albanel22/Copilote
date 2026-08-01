@@ -64,10 +64,22 @@ jobs:
           echo "📂 Application de ton sepolicy.c correctif..."
           cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c
           
-          # 3. /!\ CORRECTION /!\ 
-          # On copie ton rules.c APRÈS le nettoyage et l'installation du script.
+          # 3. Remplacement par ton fichier rules.c personnalisé
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
+
+          # 4. 🔓 Dé-staticisation des symboles SELinux pour noyau 4.19
+          echo "🔓 Suppression des qualificatifs static pour SELinux..."
+          sed -i 's/static DEFINE_MUTEX(sel_mutex);/DEFINE_MUTEX(sel_mutex);/g' security/selinux/selinuxfs.c
+          sed -i 's/static ssize_t (\*write_op\[\])/ssize_t (\*write_op\[\])/g' security/selinux/selinuxfs.c
+          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/g' security/selinux/selinuxfs.c
+          
+          sed -i 's/static struct page \*sel_status_page;/struct page \*sel_status_page;/g' security/selinux/ss/services.c || true
+          sed -i 's/static struct page \*selinux_status_page;/struct page \*selinux_status_page;/g' security/selinux/ss/services.c || true
+          sed -i 's/static DEFINE_MUTEX(selinux_status_lock);/DEFINE_MUTEX(selinux_status_lock);/g' security/selinux/ss/services.c
+          sed -i 's/static struct rw_semaphore policy_rwlock;/struct rw_semaphore policy_rwlock;/g' security/selinux/ss/services.c
+          
+          sed -i 's/static struct security_operations selinux_ops/struct security_operations selinux_ops/g' security/selinux/hooks.c || true
 
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
