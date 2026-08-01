@@ -68,7 +68,7 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Téléchargement direct de SUSFS (sans git clone) et Application du Patch
+      - name: 🦊 Téléchargement direct de SUSFS (version robuste) et Application du Patch
         run: |
           set -e
           cd ${{ env.KERNEL_PATH }}
@@ -77,11 +77,12 @@ jobs:
           rm -rf drivers/kernelsu/susfs
           mkdir -p drivers/kernelsu/susfs
           
-          echo "📥 Téléchargement de l'archive de susfs4ksu..."
-          curl -L -o ../susfs.zip https://github.com/simonpunk/susfs4ksu/archive/refs/heads/main.zip
+          echo "📥 Téléchargement de l'archive tar.gz de susfs4ksu..."
+          curl -L -o ../susfs.tar.gz https://github.com/simonpunk/susfs4ksu/archive/refs/heads/main.tar.gz
           
           echo "📦 Extraction de l'archive..."
-          unzip -q ../susfs.zip -d ../susfs_extracted/
+          mkdir -p ../susfs_extracted
+          tar -xzf ../susfs.tar.gz -C ../susfs_extracted/
           
           if [ -d "../susfs_extracted/"*"/kernel_patches/fs/susfs" ]; then
             EXTRACTED_DIR=$(ls -d ../susfs_extracted/* | head -n 1)
@@ -94,7 +95,7 @@ jobs:
           fi
           
           cd ..
-          rm -rf ../susfs.zip ../susfs_extracted
+          rm -rf ../susfs.tar.gz ../susfs_extracted
           
           if [ -f "50_add_susfs_in_kernel-4.19.patch" ]; then
             echo "🧹 Nettoyage des fins de ligne du patch..."
