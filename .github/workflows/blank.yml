@@ -44,30 +44,6 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS
-        run: |
-          set -e
-          
-          # 1. Copie de ton defconfig personnel dans les sources clonées
-          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          
-          # 2. On entre dans le dossier du noyau pour la suite
-          cd ${{ env.KERNEL_PATH }}
-          
-          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
-          
-          echo "📥 Exécution du script d'installation ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          
-          # 📂 Remplacement par ton sepolicy.c personnalisé pour noyau 4.19
-          echo "📂 Application de ton sepolicy.c correctif..."
-          cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c
-          
-          # 3. Remplacement par ton fichier rules.c personnalisé
-          echo "📂 Remplacement par ton fichier rules.c personnalisé..."
-          cp -f ../rules.c drivers/kernelsu/selinux/rules.c
-
       - name: 🦊 Installation Propre de SUSFS et KernelSU (Minuscules)
         run: |
           set -e
@@ -95,7 +71,6 @@ jobs:
           echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelsu..."
           mkdir -p drivers
           rm -rf drivers/kernelsu drivers/kernelSU
-          # On clone directement avec un 's' minuscule pour correspondre au drivers/Kconfig d'origine
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
@@ -104,15 +79,84 @@ jobs:
           
           echo "📝 Création du fichier de compatibilité 4.19..."
           cat << 'EOF' > compat_419.c
-          // Fichier de compatibilité 4.19
+          #include <linux/kernel.h>
+          #include <linux/init.h>
+          #include <linux/fs.h>
+          #include <linux/sched.h>
+          /* --- Stubs SELinux Hide & Observer --- */
+          int __init ksu_selinux_hide_init(void) { return 0; }
+          void ksu_selinux_hide_exit(void) {}
+          int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
+          void ksu_selinux_hide_drop_backup_if_unused(void) {}
+          int ksu_selinux_hide_handle_second_stage(void) { return 0; }
+          
+          int __init ksu_observer_init(void) { return 0; }
+          void ksu_observer_exit(void) {}
+          /* --- Stubs File Wrapper --- */
+          int __init ksu_file_wrapper_init(void) { return 0; }
+          int ksu_install_file_wrapper(void) { return 0; }
+          /* --- Stubs Umount & Mount NS --- */
+          int ksu_handle_umount(struct path *path, int flags) { return 0; }
+          int setup_mount_ns(void) { return 0; }
+          /* --- Stubs Seccomp --- */
+          void ksu_seccomp_allow_cache(void) {}
+          void seccomp_filter_release(void *filter) {}
+          /* --- Variables et Verrous SELinux 4.19 --- */
+          rwlock_t *ksu_policy_rwlock_ptr = NULL;
+          void selinux_policy_lock(void) {}
+          void selinux_policy_unlock(void) {}
           EOF
+          
+          echo "🔧 Enregistrement de compat_419.o dans le Makefile de KernelSU..."
+          if [ -f "Makefile" ]; then
+            echo "obj-y += compat_419.o" >> Makefile
+          fi
           
           cd ../..
           # Nettoyage
           rm -rf temp_copilote
           echo "✅ Tout est en place sous drivers/kernelsu !"
+
+      - name: 📂 Intégration ReSukiSU (Remplacement sélectif) & Custom Configs
+        run: |
+          set -e
           
-      - name: Fix SukiSU file_wrapper for Kernel 4.19
+          # 1. Copie de ton defconfig personnel dans les sources clonées
+          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          
+          # 2. On entre dans le dossier du noyau pour la suite
+          cd ${{ env.KERNEL_PATH }}
+          
+          # 📂 Application de ton sepolicy.c correctif si présent dans temp_copilote ou récupéré
+          if [ -f "../drivers/kernelsu/selinux/sepolicy.c" ]; then
+            cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c || true
+          fi
+          
+          # 3. Remplacement par ton fichier rules.c personnalisé
+          if [ -f "../rules.c" ]; then
+            cp -f ../rules.c drivers/kernelsu/selinux/rules.c || true
+          fi
+
+      - name: Fix KernelSU Namespace Error for Linux 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/core/init.c" ]; then
+            echo "🔧 Correction de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
+            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
+          fi
+
+      - name: 🛡️ Neutralisation de selinux_hide pour le noyau 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
+            echo "🔧 Neutralisation de selinux_hide.c..."
+            rm -f drivers/kernelsu/feature/selinux_hide.c
+            touch drivers/kernelsu/feature/selinux_hide.c
+            sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
+            sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
+          fi
+
+      - name: Fix KernelSU infra files for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
@@ -122,67 +166,41 @@ jobs:
             sed -i '/file_wrapper.o/d' drivers/kernelsu/infra/Makefile || true
             sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
           fi
-          # Neutralisation de seccomp_cache pour le noyau 4.19
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
             echo "🔧 Neutralisation de seccomp_cache..."
             rm -f drivers/kernelsu/infra/seccomp_cache.c
             touch drivers/kernelsu/infra/seccomp_cache.c
             sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
           fi
-          # Neutralisation de su_mount_ns pour le noyau 4.19
           if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
             echo "🔧 Neutralisation de su_mount_ns..."
             rm -f drivers/kernelsu/infra/su_mount_ns.c
             touch drivers/kernelsu/infra/su_mount_ns.c
             sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
           fi
-          # Neutralisation de pkg_observer pour le noyau 4.19
           if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
             echo "🔧 Neutralisation de pkg_observer..."
             rm -f drivers/kernelsu/manager/pkg_observer.c
             touch drivers/kernelsu/manager/pkg_observer.c
             sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
           fi
-          # Correction de allowlist.c pour le noyau 4.19 (TWA_RESUME et gestion des tâches)
           if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
-            echo "🔧 Correction de allowlist.c pour compatibilité 4.19..."
-            if ! grep -q "TWA_RESUME" drivers/kernelsu/policy/allowlist.c; then
-              true
-            else
-              sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
-            fi
+            sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
-          fi
-          # Correction finale pour put_task_struct dans allowlist.c (Noyau 4.19)
-          if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
-            echo "🔧 Injection des headers pour put_task_struct dans allowlist.c..."
             sed -i '1i #include <linux/sched/task.h>\n#ifndef HAVE_PUT_TASK_STRUCT\nextern void put_task_struct(struct task_struct *t);\n#endif\n' drivers/kernelsu/policy/allowlist.c || true
           fi
-          # Correction de app_profile.c pour le noyau 4.19 (seccomp.filter_count)
           if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
-            echo "🔧 Correction de app_profile.c pour la compatibilité 4.19..."
             sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
           fi
-          # Correction de event.c pour le noyau 4.19 (absence de <linux/minmax.h>)
           if [ -f "drivers/kernelsu/sulog/event.c" ]; then
-            echo "🔧 Correction de event.c pour compatibilité 4.19..."
             sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' drivers/kernelsu/sulog/event.c || true
           fi
-          # Correction de dispatch.c pour le noyau 4.19 (tasklist_lock et init_task)
           if [ -f "drivers/kernelsu/supercall/dispatch.c" ]; then
-            echo "🔧 Correction de dispatch.c pour compatibilité 4.19..."
-            if ! grep -q "init_task" drivers/kernelsu/supercall/dispatch.c; then
-              true
-            else
-              sed -i 's/extern struct task_struct init_task;/#include <linux\/sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
-            fi
-            # Si les en-têtes de signal manquent pour task_pgrp / task_session
+            sed -i 's/extern struct task_struct init_task;/#include <linux\/sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
             sed -i '1i #include <linux/sched/signal.h>' drivers/kernelsu/supercall/dispatch.c || true
           fi
-          # Correction propre de TWA_RESUME en haut de supercall.c pour noyau 4.19
           if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            echo "🔧 Injection de TWA_RESUME en haut de supercall.c..."
-            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c
+            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
           fi
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
@@ -216,7 +234,7 @@ jobs:
                   print(f"✅ Injecté avec succès dans {path}")
               else:
                   print(f"❌ Cible introuvable dans {path}")
-          # 1. fs/stat.c
+          
           stat_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot)) 
@@ -225,7 +243,7 @@ jobs:
           """
           inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
           inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
-          # 2. fs/exec.c
+          
           exec_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot))
@@ -234,7 +252,7 @@ jobs:
           """
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
-          # 3. fs/open.c
+          
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot)) 
@@ -243,74 +261,18 @@ jobs:
           """
           inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
-          # 4. fs/read_write.c
+          
           read_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
           extern bool ksu_init_rc_hook __read_mostly;
           extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
-                              char __user **buf_ptr, size_t *count_ptr);
+                      char __user **buf_ptr, size_t *count_ptr);
           #endif
           """
           inject_code("fs/read_write.c", "ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)", read_declarations, "before")
           inject_code("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook)) \n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif", "inside_brace")
           print("✨ Hooks de base injectés avec succès !")
           EOF
-
-      - name: Fix KernelSU Namespace Error for Linux 4.19
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          if [ -f "drivers/kernelsu/core/init.c" ]; then
-            echo "🔧 Correction de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
-            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
-          fi
-
-      - name: 🛡️ Neutralisation de selinux_hide pour le noyau 4.19
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
-            echo "🔧 Neutralisation de selinux_hide.c..."
-            rm -f drivers/kernelsu/feature/selinux_hide.c
-            touch drivers/kernelsu/feature/selinux_hide.c
-            sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
-            sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
-          fi
-
-      - name: 🛠️ Injection des Stubs et correctifs de compilation pour KernelSU (Noyau 4.19)
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          echo "📝 Création du fichier drivers/kernelSU/compat_419.c..."
-          cat << 'EOF' > drivers/kernelSU/compat_419.c
-          #include <linux/kernel.h>
-          #include <linux/init.h>
-          #include <linux/fs.h>
-          #include <linux/sched.h>
-          /* --- Stubs SELinux Hide & Observer --- */
-          int __init ksu_selinux_hide_init(void) { return 0; }
-          void ksu_selinux_hide_exit(void) {}
-          int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
-          void ksu_selinux_hide_drop_backup_if_unused(void) {}
-          int ksu_selinux_hide_handle_second_stage(void) { return 0; }
-          
-          int __init ksu_observer_init(void) { return 0; }
-          void ksu_observer_exit(void) {}
-          /* --- Stubs File Wrapper --- */
-          int __init ksu_file_wrapper_init(void) { return 0; }
-          int ksu_install_file_wrapper(void) { return 0; }
-          /* --- Stubs Umount & Mount NS --- */
-          int ksu_handle_umount(struct path *path, int flags) { return 0; }
-          int setup_mount_ns(void) { return 0; }
-          /* --- Stubs Seccomp --- */
-          void ksu_seccomp_allow_cache(void) {}
-          void seccomp_filter_release(void *filter) {}
-          /* --- Variables et Verrous SELinux 4.19 --- */
-          rwlock_t *ksu_policy_rwlock_ptr = NULL;
-          void selinux_policy_lock(void) {}
-          void selinux_policy_unlock(void) {}
-          EOF
-          echo "🔧 Enregistrement de compat_419.o dans le Makefile de KernelSU..."
-          if [ -f "drivers/kernelsu/Makefile" ]; then
-            echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
-          fi
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -325,7 +287,6 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # 🧼 Nettoyage forcé du dossier de build et des anciens objets
           echo "🧼 Nettoyage complet du dossier out et des caches de compilation..."
           rm -rf ${{ env.BUILD_DIR }}
           mkdir -p ${{ env.BUILD_DIR }}
