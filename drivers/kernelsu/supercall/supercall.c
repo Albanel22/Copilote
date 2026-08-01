@@ -1,3 +1,4 @@
+#include "kernel_compat.h"
 #include <linux/anon_inodes.h>
 #include <linux/err.h>
 #include <linux/fdtable.h>
