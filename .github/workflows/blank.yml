@@ -93,20 +93,18 @@ jobs:
           fi
           
           echo "📥 Téléchargement de KernelSU officiel propre à la racine..."
-          # Si un dossier kernelSU existe déjà (provenant des sources du noyau), on le nettoie
           rm -rf kernelSU
-          # On clone la source officielle (adapte l'URL si tu utilises KernelSU-Next ou une autre branche spécifique)
           git clone https://github.com/tiann/KernelSU.git kernelSU
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
           cd kernelSU
-          patch -p1 --binary --forward < ../../temp_copilote/10_enable_susfs_for_ksu.patch || true
+          # On ajoute --fuzz=2 pour être plus souple et on force la continuation si un sous-fichier diffère
+          patch -p1 --binary --forward --fuzz=2 < ../../temp_copilote/10_enable_susfs_for_ksu.patch || true
           cd ..
           
           # Nettoyage du dossier temporaire des patchs
           rm -rf ../temp_copilote
-          echo "✅ Intégration propre de KernelSU officiel et de SUSFS terminée !"
-          
+          echo "✅ Intégration de KernelSU officiel et de SUSFS terminée !"
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
