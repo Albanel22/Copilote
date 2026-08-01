@@ -24,19 +24,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
-
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
-
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -44,17 +41,12 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU, SUSFS & Patch Manuel
+      - name: 📂 Intégration ReSukiSU & SUSFS
         run: |
           set -e
           
-          echo "=================================================="
-          echo " 🚀 DÉBUT DE L'INTÉGRATION REH-SUKISU & SUSFS"
-          echo "=================================================="
-
           # 1. Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          echo "🟢 [Defconfig] Configuration personnalisée appliquée."
           
           # 2. On entre dans le dossier du noyau pour la suite
           cd ${{ env.KERNEL_PATH }}
@@ -62,31 +54,17 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Téléchargement et installation de ReSukiSU..."
+          echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          echo "🟢 [ReSukiSU] Core et structure installés avec succès."
           
           # 📂 Remplacement par ton sepolicy.c personnalisé pour noyau 4.19
           echo "📂 Application de ton sepolicy.c correctif..."
           cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c
           
-          # 3. Remplacement par ton fichier rules.c personnalisé
+          # 3. /!\ CORRECTION /!\ 
+          # On copie ton rules.c APRÈS le nettoyage et l'installation du script.
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
-          echo "🟢 [SELinux] Fichiers sepolicy.c et rules.c (4.19) en place."
-
-          # 4. Application de ton fichier ksu_manual.patch avec tolérance accrue
-          echo "📥 Récupération et application de ksu_manual.patch..."
-          curl -fLo ../ksu_manual.patch "https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksu_manual.patch"
-          
-          # Nettoyage des éventuels retours chariot Windows (\r\n vers \n)
-          sed -i 's/\r$//' ../ksu_manual.patch
-          
-          # Application avec acceptation des espaces
-          git apply --reject --whitespace=fix ../ksu_manual.patch || patch -p1 < ../ksu_manual.patch || true
-          
-          echo "🟢 [Hooks & Symboles] ksu_manual.patch appliqué avec succès (Manual hooks + SELinux dé-staticisé)."
-          
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -156,34 +134,8 @@ jobs:
           fi
           # Correction propre de supercall.c pour TWA_RESUME sur noyau 4.19
           if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            echo "🔧 Ajout propre de TWA_RESUME en haut de supercall.c..."
-            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
-          fi
-
-      - name: 🛑 Désactivation de selinux_hide pour le noyau 4.19
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          if [ -f "drivers/kernelsu/feature/Makefile" ]; then
-            echo "🔧 Retrait de selinux_hide du Makefile des fonctionnalités..."
-            sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
-          fi
-          # On s'assure aussi de vider le fichier pour éviter tout résidu
-          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
-            echo "🧹 Vidage du fichier selinux_hide.c..."
-            > drivers/kernelsu/feature/selinux_hide.c
-          fi
-
-      - name: 🧹 Nettoyage des appels de sous-modules non supportés dans init.c
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          if [ -f "drivers/kernelsu/core/init.c" ]; then
-            echo "🔧 Suppression des appels aux symboles non résolus dans init.c..."
-            sed -i '/ksu_selinux_hide_init/d' drivers/kernelsu/core/init.c
-            sed -i '/ksu_selinux_hide_exit/d' drivers/kernelsu/core/init.c
-            sed -i '/ksu_selinux_hide_/d' drivers/kernelsu/core/init.c
-            sed -i '/ksu_file_wrapper_init/d' drivers/kernelsu/core/init.c
-            sed -i '/ksu_observer_init/d' drivers/kernelsu/core/init.c
-            sed -i '/ksu_observer_exit/d' drivers/kernelsu/core/init.c
+            echo "🔧 Ajout propre de TWA_RESUME dans supercall.c..."
+            echo -e "\n#ifndef TWA_RESUME\n#define TWA_RESUME true\n#endif" >> drivers/kernelsu/supercall/supercall.c
           fi
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
@@ -220,7 +172,6 @@ jobs:
                   print(f"✅ Injecté avec succès dans {path}")
               else:
                   print(f"❌ Cible introuvable dans {path}")
-
           # 1. fs/stat.c
           stat_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -230,7 +181,6 @@ jobs:
           """
           inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
           inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
-
           # 2. fs/exec.c
           exec_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -240,7 +190,6 @@ jobs:
           """
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
           inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
-
           # 3. fs/open.c
           open_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -250,7 +199,6 @@ jobs:
           """
           inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
           inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
-
           # 4. fs/read_write.c
           read_declarations = """
           #ifdef CONFIG_KSU_MANUAL_HOOK
@@ -261,10 +209,8 @@ jobs:
           """
           inject_code("fs/read_write.c", "ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)", read_declarations, "before")
           inject_code("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook)) \n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif", "inside_brace")
-
           print("✨ Hooks de base injectés avec succès !")
           EOF
-
       - name: Fix KernelSU Namespace Error for Linux 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -272,7 +218,6 @@ jobs:
             echo "🔧 Correction de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
             sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
           fi
-
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -314,12 +259,9 @@ jobs:
           } >> ${{ env.BUILD_DIR }}/.config
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -332,7 +274,6 @@ jobs:
           mkdir -p AnyKernel3/patch/system/bin
           curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
-
           cat << 'EOF' > AnyKernel3/anykernel.sh
           properties() { '
           kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
@@ -352,15 +293,12 @@ jobs:
           is_slot_device=1;
           ramdisk_compression=auto;
           patch_vbmeta_flag=auto;
-
           . tools/ak3-core.sh;
           split_boot;
-
           if [ -f patch/system/bin/ksud ]; then
             chmod 755 patch/system/bin/ksud
             ./patch/system/bin/ksud kernel setup-script
           fi
-
           flash_boot;
           EOF
           
@@ -370,7 +308,6 @@ jobs:
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_Risukisu_kiev.zip * -x .git* README.md
-
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
