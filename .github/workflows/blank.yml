@@ -68,7 +68,7 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Installation Propre de SUSFS, KernelSU et Compatibilité
+      - name: 🦊 Installation Propre de SUSFS et KernelSU (Minuscules)
         run: |
           set -e
           
@@ -92,13 +92,14 @@ jobs:
             patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
           
-          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelSU..."
+          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelsu..."
           mkdir -p drivers
           rm -rf drivers/kernelsu drivers/kernelSU
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelSU
+          # On clone directement avec un 's' minuscule pour correspondre au drivers/Kconfig d'origine
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
-          cd drivers/kernelSU
+          cd drivers/kernelsu
           patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
           
           echo "📝 Création du fichier de compatibilité 4.19..."
@@ -109,7 +110,7 @@ jobs:
           cd ../..
           # Nettoyage
           rm -rf temp_copilote
-          echo "✅ Intégration complète et propre réussie !"
+          echo "✅ Tout est en place sous drivers/kernelsu !"
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
