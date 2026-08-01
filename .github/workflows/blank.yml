@@ -68,7 +68,7 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Installation de SUSFS et KernelSU Officiel
+      - name: 🦊 Installation Propre de SUSFS et KernelSU
         run: |
           set -e
           
@@ -92,19 +92,21 @@ jobs:
             patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
           
-          echo "📥 Téléchargement de KernelSU officiel propre à la racine..."
-          rm -rf kernelSU
-          git clone https://github.com/tiann/KernelSU.git kernelSU
+          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelsu..."
+          # On s'assure de placer KernelSU dans le dossier drivers/ attendu par ton noyau
+          mkdir -p drivers
+          rm -rf drivers/kernelsu drivers/kernelSU
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
-          cd kernelSU
-          # On ajoute --fuzz=2 pour être plus souple et on force la continuation si un sous-fichier diffère
-          patch -p1 --binary --forward --fuzz=2 < ../../temp_copilote/10_enable_susfs_for_ksu.patch || true
-          cd ..
+          cd drivers/kernelsu
+          patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
+          cd ../..
           
-          # Nettoyage du dossier temporaire des patchs
-          rm -rf ../temp_copilote
-          echo "✅ Intégration de KernelSU officiel et de SUSFS terminée !"
+          # Nettoyage
+          rm -rf temp_copilote
+          echo "✅ Intégration complète et placement dans drivers/kernelsu réussis !"
+          
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
