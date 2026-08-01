@@ -232,18 +232,16 @@ jobs:
             sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
           fi
 
-      - name: 🛠️ Injection des Stubs et correctifs de compilation pour KernelSU (Noyau 4.19)
+      - name: 💉 Injection directe des Stubs dans init.c pour forcer la liaison
         run: |
           cd ${{ env.KERNEL_PATH }}
-          
-          echo "📝 Création du fichier drivers/kernelsu/compat_419.c..."
-          cat << 'EOF' > drivers/kernelsu/compat_419.c
-          #include <linux/kernel.h>
-          #include <linux/init.h>
+          if [ -f "drivers/kernelsu/core/init.c" ]; then
+            echo "📝 Ajout des stubs de compatibilité au début de init.c..."
+            cat << 'EOF' > /tmp/stubs_header.c
+          /* --- STUBS DE COMPATIBILITE KERNEL 4.19 --- */
           #include <linux/fs.h>
           #include <linux/sched.h>
 
-          /* --- Stubs SELinux Hide & Observer --- */
           int __init ksu_selinux_hide_init(void) { return 0; }
           void ksu_selinux_hide_exit(void) {}
           int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
@@ -253,28 +251,27 @@ jobs:
           int __init ksu_observer_init(void) { return 0; }
           void ksu_observer_exit(void) {}
 
-          /* --- Stubs File Wrapper --- */
           int __init ksu_file_wrapper_init(void) { return 0; }
           int ksu_install_file_wrapper(void) { return 0; }
 
-          /* --- Stubs Umount & Mount NS --- */
           int ksu_handle_umount(struct path *path, int flags) { return 0; }
           int setup_mount_ns(void) { return 0; }
 
-          /* --- Stubs Seccomp --- */
           void ksu_seccomp_allow_cache(void) {}
           void seccomp_filter_release(void *filter) {}
 
-          /* --- Variables et Verrous SELinux 4.19 --- */
           rwlock_t *ksu_policy_rwlock_ptr = NULL;
           void selinux_policy_lock(void) {}
           void selinux_policy_unlock(void) {}
-          EOF
+          /* --- FIN DES STUBS --- */
 
-          echo "🔧 Enregistrement de compat_419.o dans le Makefile de KernelSU..."
-          if [ -f "drivers/kernelsu/Makefile" ]; then
-            echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
+          EOF
+            # Fusion du header de stubs avec le contenu original d'init.c
+            cat drivers/kernelsu/core/init.c >> /tmp/stubs_header.c
+            mv /tmp/stubs_header.c drivers/kernelsu/core/init.c
+            echo "✅ Stubs injectés avec succès dans init.c"
           fi
+          
           
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
