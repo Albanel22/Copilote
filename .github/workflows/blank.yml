@@ -92,16 +92,14 @@ jobs:
             patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
           
-          echo "📥 Téléchargement de KernelSU officiel..."
+          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelSU..."
           mkdir -p drivers
           rm -rf drivers/kernelsu drivers/kernelSU
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          
-          # On crée un lien symbolique ou une copie pour satisfaire les deux casses (minuscule/majuscule)
-          ln -s kernelsu drivers/kernelSU
+          # On clone directement sous le nom exact avec majuscule
+          git clone https://github.com/tiann/KernelSU.git drivers/kernelSU
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
-          cd drivers/kernelsu
+          cd drivers/kernelSU
           patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
           cd ../..
           
