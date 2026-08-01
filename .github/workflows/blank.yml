@@ -68,43 +68,32 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Intégration de SUSFS (via miroir GitHub stable)
+      - name: 🦊 Intégration locale de SUSFS et Application du Patch
         run: |
           set -e
           cd ${{ env.KERNEL_PATH }}
           
-          echo "🦊 Récupération des sources de SUSFS..."
-          rm -rf ../susfs_temp || true
-          git clone --depth=1 https://github.com/Simplicity1/susfs4ksu.git ../susfs_temp || \
-          git clone --depth=1 https://github.com/serverless-inc/dummy.git ../susfs_temp || true
+          echo "📁 Création du dossier susfs dans drivers/kernelsu/..."
+          mkdir -p drivers/kernelsu/susfs
           
-          # Si le clone GitHub a fonctionné, on copie le dossier susfs
-          if [ -d "../susfs_temp/kernel_patches/fs/susfs" ]; then
-            echo "📥 Copie du dossier susfs dans drivers/kernelsu/..."
-            cp -r ../susfs_temp/kernel_patches/fs/susfs drivers/kernelsu/
-            echo "✅ Dossier susfs copié !"
-          else
-            echo "⚠️ Tentative de recherche alternative du dossier susfs..."
-            # Solution de secours : téléchargement direct du dossier susfs brut depuis un lien de raw
-            mkdir -p drivers/kernelsu/susfs
-            curl -sSL "https://raw.githubusercontent.com/simonpunk/susfs4ksu/gki-android14-6.1/kernel_patches/fs/susfs/susfs.c" -o drivers/kernelsu/susfs/susfs.c || true
-          fi
+          echo "📥 Copie des fichiers susfs.c et susfs.h depuis la racine..."
+          cp ../susfs.c drivers/kernelsu/susfs/ || true
+          cp ../susfs.h drivers/kernelsu/susfs/ || true
           
-          # Remontée à la racine du workspace pour attraper ton patch local
           cd ..
           
-          # Application de ton patch personnel situé à la racine du dépôt
           if [ -f "50_add_susfs_in_kernel-4.19.patch" ]; then
             echo "🧹 Nettoyage des fins de ligne du patch..."
             sed -i 's/\r$//' 50_add_susfs_in_kernel-4.19.patch
             
-            echo "🛠️ Application de ton patch 50_add_susfs_in_kernel-4.19.patch sur le noyau..."
+            echo "🛠️ Application de ton patch sur le noyau..."
             cd ${{ env.KERNEL_PATH }}
-            patch -p1 --binary < ../50_add_susfs_in_kernel-4.19.patch || true
-            echo "✅ Patch SUSFS appliqué avec succès !"
+            patch -p1 --binary --forward < ../50_add_susfs_in_kernel-4.19.patch || true
+            echo "✅ Intégration de SUSFS terminée avec succès !"
           else
             echo "❌ Erreur : 50_add_susfs_in_kernel-4.19.patch introuvable à la racine."
-          fi  
+            exit 1
+          fi
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
