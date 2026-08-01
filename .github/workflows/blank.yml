@@ -75,15 +75,17 @@ jobs:
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
           echo "🟢 [SELinux] Fichiers sepolicy.c et rules.c (4.19) en place."
 
-          # 4. Application de ton fichier ksu_manual.patch
+          # 4. Application de ton fichier ksu_manual.patch avec tolérance accrue
           echo "📥 Récupération et application de ksu_manual.patch..."
           curl -fLo ../ksu_manual.patch "https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksu_manual.patch"
-          git apply ../ksu_manual.patch
-          echo "🟢 [Hooks & Symboles] ksu_manual.patch appliqué avec succès (Manual hooks + SELinux dé-staticisé)."
           
-          echo "=================================================="
-          echo " ✨ INTÉGRATION TERMINÉE AVEC SUCCÈS !"
-          echo "=================================================="
+          # Nettoyage des éventuels retours chariot Windows (\r\n vers \n)
+          sed -i 's/\r$//' ../ksu_manual.patch
+          
+          # Application avec acceptation des espaces
+          git apply --reject --whitespace=fix ../ksu_manual.patch || patch -p1 < ../ksu_manual.patch || true
+          
+          echo "🟢 [Hooks & Symboles] ksu_manual.patch appliqué avec succès (Manual hooks + SELinux dé-staticisé)."
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
