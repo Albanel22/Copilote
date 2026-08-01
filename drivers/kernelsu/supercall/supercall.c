@@ -16,7 +16,6 @@
 #include <linux/susfs.h>
 #endif // #ifdef CONFIG_KSU_SUSFS
 
-#include "../compat/kernel_compat.h"
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
 #include "arch.h"
