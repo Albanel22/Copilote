@@ -92,11 +92,13 @@ jobs:
             patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
           
-          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelsu..."
-          # On s'assure de placer KernelSU dans le dossier drivers/ attendu par ton noyau
+          echo "📥 Téléchargement de KernelSU officiel..."
           mkdir -p drivers
           rm -rf drivers/kernelsu drivers/kernelSU
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
+          
+          # On crée un lien symbolique ou une copie pour satisfaire les deux casses (minuscule/majuscule)
+          ln -s kernelsu drivers/kernelSU
           
           echo "🛠️ Application du patch SUSFS sur KernelSU..."
           cd drivers/kernelsu
@@ -105,7 +107,7 @@ jobs:
           
           # Nettoyage
           rm -rf temp_copilote
-          echo "✅ Intégration complète et placement dans drivers/kernelsu réussis !"
+          echo "✅ Intégration complète réussie !"
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
