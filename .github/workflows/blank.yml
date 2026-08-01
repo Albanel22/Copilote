@@ -159,6 +159,19 @@ jobs:
             echo "🔧 Ajout propre de TWA_RESUME en haut de supercall.c..."
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
           fi
+
+      - name: 🛑 Désactivation de selinux_hide pour le noyau 4.19
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          if [ -f "drivers/kernelsu/feature/Makefile" ]; then
+            echo "🔧 Retrait de selinux_hide du Makefile des fonctionnalités..."
+            sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
+          fi
+          # On s'assure aussi de vider le fichier pour éviter tout résidu
+          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
+            echo "🧹 Vidage du fichier selinux_hide.c..."
+            > drivers/kernelsu/feature/selinux_hide.c
+          fi    
          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
