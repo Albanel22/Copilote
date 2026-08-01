@@ -68,7 +68,7 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Installation officielle de SUSFS et Application des Patchs
+      - name: 🦊 Installation de SUSFS et Application des Patchs
         run: |
           set -e
           cd ${{ env.KERNEL_PATH }}
@@ -78,9 +78,8 @@ jobs:
           mkdir -p include/linux
           cp ../susfs.h include/linux/
           
-          cd ..
-          
           echo "🧹 Nettoyage des fins de ligne des patchs..."
+          cd ..
           [ -f "50_add_susfs_in_kernel-4.19.patch" ] && sed -i 's/\r$//' 50_add_susfs_in_kernel-4.19.patch
           [ -f "10_enable_susfs_for_ksu.patch" ] && sed -i 's/\r$//' 10_enable_susfs_for_ksu.patch
           
@@ -91,17 +90,15 @@ jobs:
           fi
           
           echo "🛠️ Application du patch sur KernelSU..."
-          if [ -d "drivers/kernelsu" ] && [ -f "../../10_enable_susfs_for_ksu.patch" ]; then
-            cd drivers/kernelsu
+          # On entre directement dans ton dossier kernelSU qui est à la racine
+          cd kernelSU
+          if [ -f "../../10_enable_susfs_for_ksu.patch" ]; then
             patch -p1 --binary --forward < ../../10_enable_susfs_for_ksu.patch || true
-            cd ../..
-          elif [ -d "KernelSU" ] && [ -f "../10_enable_susfs_for_ksu.patch" ]; then
-            cd KernelSU
-            patch -p1 --binary --forward < ../../10_enable_susfs_for_ksu.patch || true
-            cd ..
           fi
           
-          echo "✅ Intégration de SUSFS terminée avec succès !"
+          # On revient à la racine du noyau
+          cd ..
+          echo "✅ Intégration de SUSFS et KernelSU terminée !"
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
