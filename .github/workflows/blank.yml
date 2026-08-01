@@ -68,8 +68,10 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-          # 🦊 4. Intégration de SUSFS via l'archive de simonpunk (avec recherche dynamique)
-          echo "🦊 Téléchargement et extraction de SUSFS..."
+      - name: 🦊 Intégration de SUSFS (depuis le patch local et l'archive)
+        run: |
+          set -e
+          echo "🦊 Téléchargement des sources de SUSFS..."
           rm -rf ../susfs4ksu ../susfs4ksu.zip || true
           
           curl -L -o ../susfs4ksu.zip "https://gitlab.com/simpunk/susfs4ksu/-/archive/master/susfs4ksu-master.zip"
@@ -77,31 +79,25 @@ jobs:
           mv ../susfs4ksu-master ../susfs4ksu || mv ../susfs4ksu-* ../susfs4ksu || true
           
           if [ -d "../susfs4ksu" ]; then
-            echo "📥 Recherche et copie du dossier susfs..."
-            # On cherche le dossier 'susfs' n'importe où dans l'archive extraite
+            echo "📥 Copie du dossier susfs dans drivers/kernelsu/..."
             SUSFS_DIR=$(find ../susfs4ksu -type d -name "susfs" | head -n 1)
             if [ -n "$SUSFS_DIR" ]; then
               cp -r "$SUSFS_DIR" drivers/kernelsu/
-              echo "✅ Dossier susfs copié avec succès !"
-            else
-              echo "❌ Erreur : dossier susfs introuvable dans l'archive."
-            fi
-            
-            echo "🛠️ Recherche et application du patch 4.19..."
-            # On cherche un patch compatible 4.19
-            PATCH_FILE=$(find ../susfs4ksu -name "*4.19*.patch" | head -n 1)
-            if [ -n "$PATCH_FILE" ]; then
-              echo "📄 Patch trouvé : $PATCH_FILE"
-              patch -p1 < "$PATCH_FILE" || true
-              echo "✅ Patch 4.19 appliqué !"
-            else
-              echo "⚠️ Aucun patch 4.19 spécifique trouvé, vérification d'un patch général..."
-              GEN_PATCH=$(find ../susfs4ksu -name "*.patch" | head -n 1)
-              if [ -n "$GEN_PATCH" ]; then
-                patch -p1 < "$GEN_PATCH" || true
-              fi
+              echo "✅ Dossier susfs copié !"
             fi
           fi
+
+          # Application de ton patch personnel situé à la racine du dépôt
+          if [ -f "../50_add_susfs_in_kernel-4.19.patch" ]; then
+            echo "🧹 Nettoyage des fins de ligne du patch..."
+            sed -i 's/\r$//' ../50_add_susfs_in_kernel-4.19.patch
+            
+            echo "🛠️ Application de ton patch 50_add_susfs_in_kernel-4.19.patch..."
+            patch -p1 --binary < ../50_add_susfs_in_kernel-4.19.patch || true
+            echo "✅ Patch SUSFS appliqué avec succès !"
+          else
+            echo "❌ Erreur : 50_add_susfs_in_kernel-4.19.patch introuvable à la racine."
+          fi   
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
