@@ -68,26 +68,38 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-          # 🦊 4. Intégration de SUSFS via l'archive officielle de simonpunk
-          echo "🦊 Téléchargement direct de SUSFS (simonpunk)..."
+          # 🦊 4. Intégration de SUSFS via l'archive de simonpunk (avec recherche dynamique)
+          echo "🦊 Téléchargement et extraction de SUSFS..."
           rm -rf ../susfs4ksu ../susfs4ksu.zip || true
           
-          curl -L -o ../susfs4ksu.zip "https://gitlab.com/simonpunk/susfs4ksu/-/archive/master/susfs4ksu-master.zip"
+          curl -L -o ../susfs4ksu.zip "https://gitlab.com/simpunk/susfs4ksu/-/archive/master/susfs4ksu-master.zip"
           unzip -q ../susfs4ksu.zip -d ../
-          mv ../susfs4ksu-master ../susfs4ksu
+          mv ../susfs4ksu-master ../susfs4ksu || mv ../susfs4ksu-* ../susfs4ksu || true
           
           if [ -d "../susfs4ksu" ]; then
-            echo "📥 Copie des sources de SUSFS dans drivers/kernelsu/..."
-            cp -r ../susfs4ksu/kernel_patches/fs/susfs drivers/kernelsu/ || true
-            
-            if [ -f "../susfs4ksu/kernel_patches/50_add_sysfs_in_kernel-4.19.patch" ]; then
-              echo "🛠️ Application du patch SUSFS 4.19 sur le noyau..."
-              patch -p1 < ../susfs4ksu/kernel_patches/50_add_sysfs_in_kernel-4.19.patch || true
-            elif [ -f "../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch" ]; then
-              patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch || true
+            echo "📥 Recherche et copie du dossier susfs..."
+            # On cherche le dossier 'susfs' n'importe où dans l'archive extraite
+            SUSFS_DIR=$(find ../susfs4ksu -type d -name "susfs" | head -n 1)
+            if [ -n "$SUSFS_DIR" ]; then
+              cp -r "$SUSFS_DIR" drivers/kernelsu/
+              echo "✅ Dossier susfs copié avec succès !"
             else
-              echo "⚠️ Recherche d'un patch 4.19 alternatif..."
-              find ../susfs4ksu -name "*4.19*.patch" -exec patch -p1 < {} \; || true
+              echo "❌ Erreur : dossier susfs introuvable dans l'archive."
+            fi
+            
+            echo "🛠️ Recherche et application du patch 4.19..."
+            # On cherche un patch compatible 4.19
+            PATCH_FILE=$(find ../susfs4ksu -name "*4.19*.patch" | head -n 1)
+            if [ -n "$PATCH_FILE" ]; then
+              echo "📄 Patch trouvé : $PATCH_FILE"
+              patch -p1 < "$PATCH_FILE" || true
+              echo "✅ Patch 4.19 appliqué !"
+            else
+              echo "⚠️ Aucun patch 4.19 spécifique trouvé, vérification d'un patch général..."
+              GEN_PATCH=$(find ../susfs4ksu -name "*.patch" | head -n 1)
+              if [ -n "$GEN_PATCH" ]; then
+                patch -p1 < "$GEN_PATCH" || true
+              fi
             fi
           fi
           
