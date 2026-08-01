@@ -85,8 +85,6 @@ jobs:
               echo "⚠️ Patch 4.19 pour SUSFS introuvable."
             fi
           fi
-
-          echo "✅ Intégration de base terminée (les hooks manuels seront gérés par l'étape Python dédiée)."
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
