@@ -277,8 +277,8 @@ jobs:
       - name: 🛠️ Injection des Stubs et correctifs de compilation pour KernelSU (Noyau 4.19)
         run: |
           cd ${{ env.KERNEL_PATH }}
-          echo "📝 Création du fichier drivers/kernelsu/compat_419.c..."
-          cat << 'EOF' > drivers/kernelsu/compat_419.c
+          echo "📝 Création du fichier drivers/kernelSU/compat_419.c..."
+          cat << 'EOF' > drivers/kernelSU/compat_419.c
           #include <linux/kernel.h>
           #include <linux/init.h>
           #include <linux/fs.h>
