@@ -68,21 +68,26 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-          # 🦊 4. Intégration de SUSFS pour noyau 4.19 via archive ZIP (sans authentification Git)
-          echo "🦊 Téléchargement et extraction de SUSFS (version 4.19)..."
-          curl -L -o ../susfs4ksu.zip "https://gitlab.com/Simplicity1/susfs4ksu/-/archive/android12-4.19/susfs4ksu-android12-4.19.zip"
+          # 🦊 4. Intégration de SUSFS via l'archive officielle de simonpunk
+          echo "🦊 Téléchargement direct de SUSFS (simonpunk)..."
+          rm -rf ../susfs4ksu ../susfs4ksu.zip || true
+          
+          curl -L -o ../susfs4ksu.zip "https://gitlab.com/simonpunk/susfs4ksu/-/archive/master/susfs4ksu-master.zip"
           unzip -q ../susfs4ksu.zip -d ../
-          mv ../susfs4ksu-android12-4.19 ../susfs4ksu
+          mv ../susfs4ksu-master ../susfs4ksu
           
           if [ -d "../susfs4ksu" ]; then
             echo "📥 Copie des sources de SUSFS dans drivers/kernelsu/..."
             cp -r ../susfs4ksu/kernel_patches/fs/susfs drivers/kernelsu/ || true
             
-            if [ -f "../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch" ]; then
-              echo "🛠️ Application du patch VFS SUSFS 4.19 sur le noyau..."
+            if [ -f "../susfs4ksu/kernel_patches/50_add_sysfs_in_kernel-4.19.patch" ]; then
+              echo "🛠️ Application du patch SUSFS 4.19 sur le noyau..."
+              patch -p1 < ../susfs4ksu/kernel_patches/50_add_sysfs_in_kernel-4.19.patch || true
+            elif [ -f "../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch" ]; then
               patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch || true
             else
-              echo "⚠️ Patch 4.19 pour SUSFS introuvable."
+              echo "⚠️ Recherche d'un patch 4.19 alternatif..."
+              find ../susfs4ksu -name "*4.19*.patch" -exec patch -p1 < {} \; || true
             fi
           fi
           
