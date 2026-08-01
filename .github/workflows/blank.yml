@@ -44,12 +44,17 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS
+      - name: 📂 Intégration ReSukiSU, SUSFS & Patch Manuel
         run: |
           set -e
           
+          echo "=================================================="
+          echo " 🚀 DÉBUT DE L'INTÉGRATION REH-SUKISU & SUSFS"
+          echo "=================================================="
+
           # 1. Copie de ton defconfig personnel dans les sources clonées
           cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          echo "🟢 [Defconfig] Configuration personnalisée appliquée."
           
           # 2. On entre dans le dossier du noyau pour la suite
           cd ${{ env.KERNEL_PATH }}
@@ -57,8 +62,9 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Exécution du script d'installation ReSukiSU..."
+          echo "📥 Téléchargement et installation de ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          echo "🟢 [ReSukiSU] Core et structure installés avec succès."
           
           # 📂 Remplacement par ton sepolicy.c personnalisé pour noyau 4.19
           echo "📂 Application de ton sepolicy.c correctif..."
@@ -67,20 +73,18 @@ jobs:
           # 3. Remplacement par ton fichier rules.c personnalisé
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
+          echo "🟢 [SELinux] Fichiers sepolicy.c et rules.c (4.19) en place."
 
-          # 4. 🔓 Dé-staticisation des symboles SELinux pour noyau 4.19
-          echo "🔓 Suppression des qualificatifs static pour SELinux..."
-          sed -i 's/static DEFINE_MUTEX(sel_mutex);/DEFINE_MUTEX(sel_mutex);/g' security/selinux/selinuxfs.c
-          sed -i 's/static ssize_t (\*write_op\[\])/ssize_t (\*write_op\[\])/g' security/selinux/selinuxfs.c
-          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/g' security/selinux/selinuxfs.c
+          # 4. Application de ton fichier ksu_manual.patch
+          echo "📥 Récupération et application de ksu_manual.patch..."
+          curl -fLo ../ksu_manual.patch "https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksu_manual.patch"
+          git apply ../ksu_manual.patch
+          echo "🟢 [Hooks & Symboles] ksu_manual.patch appliqué avec succès (Manual hooks + SELinux dé-staticisé)."
           
-          sed -i 's/static struct page \*sel_status_page;/struct page \*sel_status_page;/g' security/selinux/ss/services.c || true
-          sed -i 's/static struct page \*selinux_status_page;/struct page \*selinux_status_page;/g' security/selinux/ss/services.c || true
-          sed -i 's/static DEFINE_MUTEX(selinux_status_lock);/DEFINE_MUTEX(selinux_status_lock);/g' security/selinux/ss/services.c
-          sed -i 's/static struct rw_semaphore policy_rwlock;/struct rw_semaphore policy_rwlock;/g' security/selinux/ss/services.c
+          echo "=================================================="
+          echo " ✨ INTÉGRATION TERMINÉE AVEC SUCCÈS !"
+          echo "=================================================="
           
-          sed -i 's/static struct security_operations selinux_ops/struct security_operations selinux_ops/g' security/selinux/hooks.c || true
-
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
