@@ -24,16 +24,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
+
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -65,7 +68,31 @@ jobs:
           # On copie ton rules.c APRÈS le nettoyage et l'installation du script.
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
-          
+
+          # 🦊 4. Intégration de SUSFS pour noyau 4.19
+          echo "🦊 Clonage et intégration de SUSFS (version 4.19)..."
+          git clone https://gitlab.com/Simplicity1/susfs4ksu.git -b android12-4.19 ../susfs4ksu || true
+          if [ -d "../susfs4ksu" ]; then
+            echo "📥 Copie des sources de SUSFS dans drivers/kernelsu/..."
+            cp -r ../susfs4ksu/kernel_patches/fs/susfs drivers/kernelsu/ || true
+            
+            if [ -f "../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch" ]; then
+              echo "🛠️ Application du patch VFS SUSFS 4.19 sur le noyau..."
+              patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_fs-4.19.patch || true
+            else
+              echo "⚠️ Patch 4.19 pour SUSFS introuvable."
+            fi
+          fi
+
+          # 🛠️ 5. Application de ksu_manual.patch (présent à la racine du dépôt)
+          if [ -f "../ksu_manual.patch" ]; then
+            echo "📥 Application de ksu_manual.patch sur les sources du noyau..."
+            patch -p1 < ../ksu_manual.patch
+            echo "✅ ksu_manual.patch appliqué avec succès !"
+          else
+            echo "❌ Attention : ksu_manual.patch introuvable."
+          fi
+
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -128,7 +155,7 @@ jobs:
             if ! grep -q "init_task" drivers/kernelsu/supercall/dispatch.c; then
               true
             else
-              sed -i 's/extern struct task_struct init_task;/#include <linux\sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
+              sed -i 's/extern struct task_struct init_task;/#include <linux\/sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
             fi
             # Si les en-têtes de signal manquent pour task_pgrp / task_session
             sed -i '1i #include <linux/sched/signal.h>' drivers/kernelsu/supercall/dispatch.c || true
@@ -138,7 +165,7 @@ jobs:
             echo "🔧 Injection de TWA_RESUME en haut de supercall.c..."
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c
           fi
-         
+
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -152,11 +179,9 @@ jobs:
                   return
               with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                   content = f.read()
-              
               if code_to_insert in content:
                   print(f"⚠️ Déjà présent dans {path}")
                   return
-              
               if target_str in content:
                   if position == "before":
                       content = content.replace(target_str, code_to_insert + "\n" + target_str, 1)
@@ -167,7 +192,6 @@ jobs:
                       brace_idx = content.find('{', idx)
                       if brace_idx != -1:
                           content = content[:brace_idx + 1] + "\n" + code_to_insert + "\n" + content[brace_idx + 1:]
-                  
                   with open(path, 'w', encoding='utf-8') as f:
                       f.write(content)
                   print(f"✅ Injecté avec succès dans {path}")
@@ -212,7 +236,7 @@ jobs:
           inject_code("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook)) \n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif", "inside_brace")
           print("✨ Hooks de base injectés avec succès !")
           EOF
-          
+
       - name: Fix KernelSU Namespace Error for Linux 4.19
         run: |
           cd ${{ env.KERNEL_PATH }}
@@ -232,16 +256,16 @@ jobs:
             sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
           fi
 
-      - name: 💉 Injection directe des Stubs dans init.c pour forcer la liaison
+      - name: 🛠️ Injection des Stubs et correctifs de compilation pour KernelSU (Noyau 4.19)
         run: |
           cd ${{ env.KERNEL_PATH }}
-          if [ -f "drivers/kernelsu/core/init.c" ]; then
-            echo "📝 Ajout des stubs de compatibilité au début de init.c..."
-            cat << 'EOF' > /tmp/stubs_header.c
-          /* --- STUBS DE COMPATIBILITE KERNEL 4.19 --- */
+          echo "📝 Création du fichier drivers/kernelsu/compat_419.c..."
+          cat << 'EOF' > drivers/kernelsu/compat_419.c
+          #include <linux/kernel.h>
+          #include <linux/init.h>
           #include <linux/fs.h>
           #include <linux/sched.h>
-
+          /* --- Stubs SELinux Hide & Observer --- */
           int __init ksu_selinux_hide_init(void) { return 0; }
           void ksu_selinux_hide_exit(void) {}
           int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
@@ -250,29 +274,25 @@ jobs:
           
           int __init ksu_observer_init(void) { return 0; }
           void ksu_observer_exit(void) {}
-
+          /* --- Stubs File Wrapper --- */
           int __init ksu_file_wrapper_init(void) { return 0; }
           int ksu_install_file_wrapper(void) { return 0; }
-
+          /* --- Stubs Umount & Mount NS --- */
           int ksu_handle_umount(struct path *path, int flags) { return 0; }
           int setup_mount_ns(void) { return 0; }
-
+          /* --- Stubs Seccomp --- */
           void ksu_seccomp_allow_cache(void) {}
           void seccomp_filter_release(void *filter) {}
-
+          /* --- Variables et Verrous SELinux 4.19 --- */
           rwlock_t *ksu_policy_rwlock_ptr = NULL;
           void selinux_policy_lock(void) {}
           void selinux_policy_unlock(void) {}
-          /* --- FIN DES STUBS --- */
-
           EOF
-            # Fusion du header de stubs avec le contenu original d'init.c
-            cat drivers/kernelsu/core/init.c >> /tmp/stubs_header.c
-            mv /tmp/stubs_header.c drivers/kernelsu/core/init.c
-            echo "✅ Stubs injectés avec succès dans init.c"
+          echo "🔧 Enregistrement de compat_419.o dans le Makefile de KernelSU..."
+          if [ -f "drivers/kernelsu/Makefile" ]; then
+            echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
           fi
-          
-          
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -317,6 +337,7 @@ jobs:
           printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           echo "🚀 LANCEMENT DE LA COMPILATION DE L'IMAGE"
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
+
       - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -363,6 +384,7 @@ jobs:
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_Risukisu_kiev.zip * -x .git* README.md
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
