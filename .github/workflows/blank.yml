@@ -68,37 +68,44 @@ jobs:
           echo "📂 Remplacement par ton fichier rules.c personnalisé..."
           cp -f ../rules.c drivers/kernelsu/selinux/rules.c
 
-      - name: 🦊 Installation de SUSFS et Application des Patchs
+      - name: 🦊 Installation de SUSFS et KernelSU Officiel
         run: |
           set -e
-          cd ${{ env.KERNEL_PATH }}
           
-          echo "📥 Placement des fichiers de SUSFS..."
-          cp ../susfs.c fs/
+          echo "📥 Récupération des fichiers de SUSFS et des patchs depuis le dépôt Copilote..."
+          git clone -b test-sukisu https://github.com/Albanel22/Copilote.git temp_copilote
+          
+          echo "📥 Placement des fichiers de SUSFS dans le noyau..."
+          cd ${{ env.KERNEL_PATH }}
+          cp ../temp_copilote/susfs.c fs/
           mkdir -p include/linux
-          cp ../susfs.h include/linux/
+          cp ../temp_copilote/susfs.h include/linux/
           
           echo "🧹 Nettoyage des fins de ligne des patchs..."
           cd ..
-          [ -f "50_add_susfs_in_kernel-4.19.patch" ] && sed -i 's/\r$//' 50_add_susfs_in_kernel-4.19.patch
-          [ -f "10_enable_susfs_for_ksu.patch" ] && sed -i 's/\r$//' 10_enable_susfs_for_ksu.patch
+          [ -f "temp_copilote/50_add_susfs_in_kernel-4.19.patch" ] && sed -i 's/\r$//' temp_copilote/50_add_susfs_in_kernel-4.19.patch
+          [ -f "temp_copilote/10_enable_susfs_for_ksu.patch" ] && sed -i 's/\r$//' temp_copilote/10_enable_susfs_for_ksu.patch
           
           echo "🛠️ Application du patch principal sur le noyau..."
           cd ${{ env.KERNEL_PATH }}
-          if [ -f "../50_add_susfs_in_kernel-4.19.patch" ]; then
-            patch -p1 --binary --forward < ../50_add_susfs_in_kernel-4.19.patch || true
+          if [ -f "../temp_copilote/50_add_susfs_in_kernel-4.19.patch" ]; then
+            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
           
-          echo "🛠️ Application du patch sur KernelSU..."
-          # On entre directement dans ton dossier kernelSU qui est à la racine
+          echo "📥 Téléchargement de KernelSU officiel propre à la racine..."
+          # Si un dossier kernelSU existe déjà (provenant des sources du noyau), on le nettoie
+          rm -rf kernelSU
+          # On clone la source officielle (adapte l'URL si tu utilises KernelSU-Next ou une autre branche spécifique)
+          git clone https://github.com/tiann/KernelSU.git kernelSU
+          
+          echo "🛠️ Application du patch SUSFS sur KernelSU..."
           cd kernelSU
-          if [ -f "../../10_enable_susfs_for_ksu.patch" ]; then
-            patch -p1 --binary --forward < ../../10_enable_susfs_for_ksu.patch || true
-          fi
-          
-          # On revient à la racine du noyau
+          patch -p1 --binary --forward < ../../temp_copilote/10_enable_susfs_for_ksu.patch || true
           cd ..
-          echo "✅ Intégration de SUSFS et KernelSU terminée !"
+          
+          # Nettoyage du dossier temporaire des patchs
+          rm -rf ../temp_copilote
+          echo "✅ Intégration propre de KernelSU officiel et de SUSFS terminée !"
           
       - name: Fix SukiSU file_wrapper for Kernel 4.19
         run: |
