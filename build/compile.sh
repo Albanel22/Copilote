@@ -24,7 +24,7 @@ export CCACHE_DIR="${CCACHE_DIR}"
 mkdir -p "${BUILD_DIR}"
 
 echo "[STEP] Loading defconfig..."
-make O="${BUILD_DIR}" vendor/${DEFCONFIG}
+make O="${BUILD_DIR}" "vendor/${DEFCONFIG}"
 
 echo "[STEP] Building kernel..."
 make \
