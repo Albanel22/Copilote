@@ -1,4 +1,4 @@
-name: Kernel CI — build & package
+name: Kernel CI - build & package
 
 on:
   workflow_dispatch:
@@ -9,438 +9,194 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
+  BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: test-sukisu
 
-      - name: Install Build Dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
-
-      - name: Download Stock Boot Image
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "📥 Téléchargement du boot.img d'origine..."
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur download"; exit 1; }
-
-      - name: Clone Motorola Kernel Source
-        run: |
-          echo "📥 Récupération des sources du noyau..."
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex libelf-dev libssl-dev \
+            libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang llvm lld device-tree-compiler zip unzip curl git python3
 
       - name: Setup ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel
-          restore-keys: ${{ runner.os }}-ccache-
+          key: $-ccache-kernel
+          restore-keys: |
+            $-ccache-
 
-      - name: 🦊 Installation Propre de SUSFS et KernelSU (Minuscules)
+      - name: Download stock boot image
+        shell: bash
         run: |
-          set -e
-          
-          echo "📥 Récupération des fichiers de SUSFS et des patchs depuis le dépôt Copilote..."
+          set -euo pipefail
+          curl -fLo boot-stock.img "$"
+
+      - name: Clone kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
+            -b lineage-23.2 --depth=1 "$"
+
+      - name: Prepare ReSuKiSu / SusFS
+        shell: bash
+        run: |
+          set -euo pipefail
+
           git clone -b test-sukisu https://github.com/Albanel22/Copilote.git temp_copilote
-          
-          echo "📥 Placement des fichiers de SUSFS dans le noyau..."
-          cd ${{ env.KERNEL_PATH }}
-          cp ../temp_copilote/susfs.c fs/
-          mkdir -p include/linux
-          cp ../temp_copilote/susfs.h include/linux/
-          
-          echo "🧹 Nettoyage des fins de ligne des patchs..."
-          cd ..
-          [ -f "temp_copilote/50_add_susfs_in_kernel-4.19.patch" ] && sed -i 's/\r$//' temp_copilote/50_add_susfs_in_kernel-4.19.patch
-          [ -f "temp_copilote/10_enable_susfs_for_ksu.patch" ] && sed -i 's/\r$//' temp_copilote/10_enable_susfs_for_ksu.patch
-          
-          echo "🛠️ Application du patch principal sur le noyau..."
-          cd ${{ env.KERNEL_PATH }}
-          if [ -f "../temp_copilote/50_add_susfs_in_kernel-4.19.patch" ]; then
-            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
+
+          echo "Copy susfs sources..."
+          cp temp_copilote/susfs.c "$/fs/"
+          mkdir -p "$/include/linux"
+          cp temp_copilote/susfs.h "$/include/linux/"
+
+          echo "Normalize patch line endings..."
+          sed -i 's/
+          $//' temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
+          sed -i 's/
+          $//' temp_copilote/10_enable_susfs_for_ksu.patch || true
+
+          cd "$"
+
+          echo "Apply main SUSFS patch if present..."
+          if [ -f ../temp_copilote/50_add_susfs_in_kernel-4.19.patch ]; then
+            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch
           fi
-          
-          echo "📥 Téléchargement de KernelSU officiel dans drivers/kernelsu..."
+
+          echo "Clone KernelSU..."
+          rm -rf drivers/kernelsu
           mkdir -p drivers
-          rm -rf drivers/kernelsu drivers/kernelSU
           git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          
-          echo "🛠️ Application du patch SUSFS sur KernelSU..."
-          cd drivers/kernelsu
-          patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
-          
-          echo "📝 Création du fichier de compatibilité 4.19..."
-          cat << 'EOF' > compat_419.c
+
+          echo "Apply SUSFS patch to KernelSU if present..."
+          if [ -f ../../temp_copilote/10_enable_susfs_for_ksu.patch ]; then
+            cd drivers/kernelsu
+            patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch
+            cd ../..
+          fi
+
+          echo "Create compat_419.c..."
+          cat > drivers/kernelsu/compat_419.c <<'EOF'
           #include <linux/kernel.h>
           #include <linux/init.h>
           #include <linux/fs.h>
           #include <linux/sched.h>
-          EOF
-          /* --- Stubs SELinux Hide & Observer --- */
+          #include <linux/path.h>
+          #include <linux/rwlock.h>
+
           int __init ksu_selinux_hide_init(void) { return 0; }
           void ksu_selinux_hide_exit(void) {}
           int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
           void ksu_selinux_hide_drop_backup_if_unused(void) {}
           int ksu_selinux_hide_handle_second_stage(void) { return 0; }
-          
+
           int __init ksu_observer_init(void) { return 0; }
           void ksu_observer_exit(void) {}
-          /* --- Stubs File Wrapper --- */
+
           int __init ksu_file_wrapper_init(void) { return 0; }
           int ksu_install_file_wrapper(void) { return 0; }
-          /* --- Stubs Umount & Mount NS --- */
+
           int ksu_handle_umount(struct path *path, int flags) { return 0; }
           int setup_mount_ns(void) { return 0; }
-          /* --- Stubs Seccomp --- */
+
           void ksu_seccomp_allow_cache(void) {}
           void seccomp_filter_release(void *filter) {}
-          /* --- Variables et Verrous SELinux 4.19 --- */
+
           rwlock_t *ksu_policy_rwlock_ptr = NULL;
           void selinux_policy_lock(void) {}
           void selinux_policy_unlock(void) {}
           EOF
-          
-          echo "🔧 Enregistrement de compat_419.o dans le Makefile de KernelSU..."
-          if [ -f "Makefile" ]; then
-            echo "obj-y += compat_419.o" >> Makefile
-          fi
-          
-          cd ../..
-          # Nettoyage
-          rm -rf temp_copilote
-          echo "✅ Tout est en place sous drivers/kernelsu !"
 
-      - name: Sauvegarder les fichiers .rej en cas d'échec
-        if: always()
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          find . -name "*.rej" > ../rejects_list.txt
-          cat ../rejects_list.txt
-          tar -cvzf ../rejects.tar.gz $(cat ../rejects_list.txt) || true
+          echo "Register compat_419.o..."
+          if ! grep -q 'compat_419.o' drivers/kernelsu/Makefile; then
+            echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
+          fi
+
+          rm -rf ../temp_copilote
+
+      - name: Apply custom config
         shell: bash
-
-      - name: Upload des Rejets
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: kernel-patch-rejects
-          path: rejects.tar.gz
-
-      - name: 📂 Intégration ReSukiSU (Remplacement sélectif) & Custom Configs
         run: |
-          set -e
-          
-          # 1. Copie de ton defconfig personnel dans les sources clonées
-          cp kiev_perfect_defconfig ${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          
-          # 2. On entre dans le dossier du noyau pour la suite
-          cd ${{ env.KERNEL_PATH }}
-          
-          # 📂 Application de ton sepolicy.c correctif si présent dans temp_copilote ou récupéré
-          if [ -f "../drivers/kernelsu/selinux/sepolicy.c" ]; then
-            cp -f ../drivers/kernelsu/selinux/sepolicy.c drivers/kernelsu/selinux/sepolicy.c || true
-          fi
-          
-          # 3. Remplacement par ton fichier rules.c personnalisé
-          if [ -f "../rules.c" ]; then
-            cp -f ../rules.c drivers/kernelsu/selinux/rules.c || true
-          fi
+          set -euo pipefail
+          cp kiev_perfect_defconfig "$/arch/arm64/configs/vendor/$"
 
-      - name: Fix KernelSU Namespace Error for Linux 4.19
+      - name: Fix KernelSU namespace issue
+        shell: bash
         run: |
-          cd ${{ env.KERNEL_PATH }}
+          set -euo pipefail
+          cd "$"
           if [ -f "drivers/kernelsu/core/init.c" ]; then
-            echo "🔧 Correction de MODULE_IMPORT_NS dans drivers/kernelsu/core/init.c..."
-            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' drivers/kernelsu/core/init.c
+            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' \
+              drivers/kernelsu/core/init.c
           fi
 
-      - name: 🛡️ Neutralisation de selinux_hide pour le noyau 4.19
+      - name: Neutralize unsupported files for 4.19
+        shell: bash
         run: |
-          cd ${{ env.KERNEL_PATH }}
+          set -euo pipefail
+          cd "$"
+
           if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
-            echo "🔧 Neutralisation de selinux_hide.c..."
             rm -f drivers/kernelsu/feature/selinux_hide.c
             touch drivers/kernelsu/feature/selinux_hide.c
             sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
             sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
           fi
 
-      - name: Fix KernelSU infra files for Kernel 4.19
-        run: |
-          cd ${{ env.KERNEL_PATH }}
           if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            echo "🔧 Neutralisation de file_wrapper..."
             rm -f drivers/kernelsu/infra/file_wrapper.c
             touch drivers/kernelsu/infra/file_wrapper.c
             sed -i '/file_wrapper.o/d' drivers/kernelsu/infra/Makefile || true
             sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
           fi
-          
+
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
-            echo "🔧 Neutralisation de seccomp_cache..."
             rm -f drivers/kernelsu/infra/seccomp_cache.c
             touch drivers/kernelsu/infra/seccomp_cache.c
             sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
           fi
-          
+
           if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
-            echo "🔧 Neutralisation de su_mount_ns..."
             rm -f drivers/kernelsu/infra/su_mount_ns.c
             touch drivers/kernelsu/infra/su_mount_ns.c
             sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
           fi
-          
-          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
-            echo "🔧 Neutralisation de pkg_observer..."
-            rm -f drivers/kernelsu/manager/pkg_observer.c
-            touch drivers/kernelsu/manager/pkg_observer.c
-            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
-          fi
-          
-          if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
-            sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
-            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
-            sed -i '1i #include <linux/sched/task.h>\n#ifndef HAVE_PUT_TASK_STRUCT\nextern void put_task_struct(struct task_struct *t);\n#endif\n' drivers/kernelsu/policy/allowlist.c || true
-          fi
-          
-          if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
-            sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
-          fi
-          
-          if [ -f "drivers/kernelsu/sulog/event.c" ]; then
-            sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' drivers/kernelsu/sulog/event.c || true
-          fi
-          
-          if [ -f "drivers/kernelsu/supercall/dispatch.c" ]; then
-            sed -i 's/extern struct task_struct init_task;/#include <linux\/sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
-            sed -i '1i #include <linux/sched/signal.h>' drivers/kernelsu/supercall/dispatch.c || true
-          fi
-          
-          if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
-            sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
-          fi
-          
-          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
-            echo "🔧 Neutralisation complète de pkg_observer.c pour le noyau 4.19..."
-            rm -f drivers/kernelsu/manager/pkg_observer.c
-            touch drivers/kernelsu/manager/pkg_observer.c
-            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
-            sed -i '/pkg_observer.o/d' drivers/kernelsu/Makefile || true
-          fi
 
-      - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
-        run: |
-          cd ${{ env.KERNEL_PATH }}
-          echo "⚙️ Réinitialisation et injection propre des hooks..."
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c || true
-          python3 - << 'EOF'
-          import os
-          def inject_code(path, target_str, code_to_insert, position="before"):
-              if not os.path.exists(path):
-                  print(f"❌ Fichier introuvable : {path}")
-                  return
-              with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                  content = f.read()
-              if code_to_insert in content:
-                  print(f"⚠️ Déjà présent dans {path}")
-                  return
-              if target_str in content:
-                  if position == "before":
-                      content = content.replace(target_str, code_to_insert + "\n" + target_str, 1)
-                  elif position == "after":
-                      content = content.replace(target_str, target_str + "\n" + code_to_insert, 1)
-                  elif position == "inside_brace":
-                      idx = content.find(target_str)
-                      brace_idx = content.find('{', idx)
-                      if brace_idx != -1:
-                          content = content[:brace_idx + 1] + "\n" + code_to_insert + "\n" + content[brace_idx + 1:]
-                  with open(path, 'w', encoding='utf-8') as f:
-                      f.write(content)
-                  print(f"✅ Injecté avec succès dans {path}")
-              else:
-                  print(f"❌ Cible introuvable dans {path}")
-          
-          stat_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot)) 
-          extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-          #endif
-          """
-          inject_code("fs/stat.c", "SYSCALL_DEFINE2(newlstat", stat_declarations, "before")
-          inject_code("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif", "inside_brace")
-          
-          exec_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot))
-          extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
-          #endif
-          """
-          inject_code("fs/exec.c", "int do_execve(struct filename *filename,", exec_declarations, "before")
-          inject_code("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)\n{\n\tstruct user_arg_ptr argv = { .ptr.native = __argv };\n\tstruct user_arg_ptr envp = { .ptr.native = __envp };", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif", "after")
-          
-          open_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          __attribute__((hot)) 
-          extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);
-          #endif
-          """
-          inject_code("fs/open.c", "long do_faccessat(int dfd, const char __user *filename, int mode)", open_declarations, "before")
-          inject_code("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif", "inside_brace")
-          
-          read_declarations = """
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-          extern bool ksu_init_rc_hook __read_mostly;
-          extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
-                      char __user **buf_ptr, size_t *count_ptr);
-          #endif
-          """
-          inject_code("fs/read_write.c", "ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)", read_declarations, "before")
-          inject_code("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook)) \n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif", "inside_brace")
-          print("✨ Hooks de base injectés avec succès !")
-          EOF
-
-      - name: Multi-stage Kernel Compilation & ReSukiSU Integration
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -uo pipefail
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          ccache -M ${{ env.CCACHE_SIZE }}
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS="-Wno-error"
-          
-          mkdir -p ${{ env.BUILD_DIR }}
-          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          
-          # 1. Nettoyage et téléchargement des sources ReSukiSU
-          echo "🧼 Nettoyage des anciens dossiers..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
-          echo "📥 Téléchargement et installation des sources ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
-          # Neutralisation immédiate de pkg_observer.c pour le noyau 4.19
-          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
-            echo "🔧 Neutralisation de pkg_observer.c..."
-            rm -f drivers/kernelsu/manager/pkg_observer.c
-            touch drivers/kernelsu/manager/pkg_observer.c
-            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
-            sed -i '/pkg_observer.o/d' drivers/kernelsu/Makefile || true
-          fi
-          
-          # 2. Contournements pour les noyaux Non-GKI / 4.19 et neutralisation des hooks
-          echo "🔧 Application des correctifs de compatibilité..."
-          sed -i '/TP hooks are incompatible with Non-GKI/s/^/#/' drivers/kernelsu/Kbuild || true
-          sed -i '/Error.*TP hooks/s/^/#/' drivers/kernelsu/Kbuild || true
-          sed -i '/error.*TP hooks/s/^/#/' drivers/kernelsu/Kbuild || true
-          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          
-          # 2. Forçage des options de configuration (ReSukiSU, SUSFS & Manual Hooks)
-          {
-              echo "CONFIG_KSU=y"
-              echo "CONFIG_KSU_MANUAL_HOOK=y"
-              echo "CONFIG_KSU_SUSFS=y"
-              echo "CONFIG_KSU_SUSFS_HAS_CALLBACK=y"
-              echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-              echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-              echo "CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y"
-              echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-              echo "CONFIG_KPROBES=y"
-              echo "CONFIG_HAVE_KPROBES=y"
-              echo "CONFIG_KRETPROBES=y"
-              echo "CONFIG_OVERLAY_FS=y"
-              echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-              echo "CONFIG_KALLSYMS=y"
-              echo "CONFIG_KALLSYMS_ALL=y"
-              echo "CONFIG_SECURITY_SELINUX=y"
-              echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
-              echo "CONFIG_SECURITY_SELINUX_DISABLE=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          
-          # 3. Fix modules & Tactile Motorola
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-          
-          # 4. Compilation finale de l'Image avec ReSukiSU intégré
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image --output-sync=none
-          
-      - name: Repack & Finalize (AnyKernel3 + Custom ksud & OverlayFS)
-        working-directory: ${{ github.workspace }}
+      - name: Build kernel
         shell: bash
         run: |
           set -euo pipefail
-          
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
-          rm -f AnyKernel3/anykernel.sh
-          
-          mkdir -p AnyKernel3/patch/system/bin
-          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksud
-          chmod +x AnyKernel3/patch/system/bin/ksud
-          
-          cat << 'EOF' > AnyKernel3/anykernel.sh
-          properties() { '
-          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
-          do.devicecheck=1
-          do.modules=1
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=1
-          device.name1=kiev
-          device.name2=XT2113-2
-          device.name3=kiev_retde
-          device.name4=kiev_t
-          device.name5=
-          supported.versions=
-          supported.patchlevels=
-          supported.vendorpatchlevels=
-          '; } # end properties
+          cd "$"
 
-          ### AnyKernel install
-          boot_attributes() {
-            set_perm_recursive 0 0 755 644 $RAMDISK/*;
-            set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
-          } # end attributes
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC="clang"
+          export LLVM=1
+          export LLVM_IAS=1
 
-          BLOCK=/dev/block/by-name/boot;
-          IS_SLOT_DEVICE=1;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
-          
-          . tools/ak3-core.sh;
-          
-          split_boot;
-          
-          if [ -f patch/system/bin/ksud ]; then
-            chmod 755 patch/system/bin/ksud
-            ./patch/system/bin/ksud kernel setup-script
-          fi
-          
-          flash_boot;
-          EOF
-          
-          sed -i 's/\r$//' AnyKernel3/anykernel.sh
-          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
-          
-          mkdir -p final_output
-          cd AnyKernel3
-          zip -r9 ../final_output/AnyKernel3_Risukisu_kiev.zip * -x .git* README.md
+          mkdir -p "$"
+          make O="$" "$"
+          make O="$" -j"$(nproc)" LLVM=1 LLVM_IAS=1
 
-      - name: Upload Finished Packaged Assets
+      - name: Upload build artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola_anykernel3
-          path: final_output/AnyKernel3_Risukisu_kiev.zip
+          name: kernel-build-output
+          path: |
+            kernel_src/out/arch/arm64/boot/Image*
+            kernel_src/out/arch/arm64/boot/dts/**/*.dtb
+            kernel_src/out/arch/arm64/boot/dts/**/*.dtbo
