@@ -328,8 +328,9 @@ jobs:
           rm -f AnyKernel3/anykernel.sh
           
           mkdir -p AnyKernel3/patch/system/bin
-          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
+          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
+          
           cat << 'EOF' > AnyKernel3/anykernel.sh
           properties() { '
           kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
@@ -343,18 +344,31 @@ jobs:
           device.name3=kiev_retde
           device.name4=kiev_t
           device.name5=
-          '; }
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
+          boot_attributes() {
+            set_perm_recursive 0 0 755 644 $RAMDISK/*;
+            set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
           
-          block=/dev/block/by-name/boot;
-          is_slot_device=1;
-          ramdisk_compression=auto;
-          patch_vbmeta_flag=auto;
           . tools/ak3-core.sh;
+          
           split_boot;
+          
           if [ -f patch/system/bin/ksud ]; then
             chmod 755 patch/system/bin/ksud
             ./patch/system/bin/ksud kernel setup-script
           fi
+          
           flash_boot;
           EOF
           
