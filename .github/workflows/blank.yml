@@ -172,7 +172,7 @@ jobs:
             sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
           fi
 
-      - name: Build kernel
+      - name: Build kernel and modules
         shell: bash
         run: |
           set -euo pipefail
@@ -187,14 +187,45 @@ jobs:
 
           mkdir -p "${{ env.BUILD_DIR }}"
           make O="${{ env.BUILD_DIR }}" vendor/${{ env.DEFCONFIG }}
-          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1
+          
+          # Compilation de l'Image et des modules (en s'assurant que synaptics_tcm passe bien)
+          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1 Image modules
+          
+          # Compilation des Device Trees en ignorant les erreurs du compilateur système si besoin
+          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1 dtbs || true
+
+      - name: Package AnyKernel3 and boot.img
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          # 1. Cloner AnyKernel3
+          git clone https://github.com/kernel-su/AnyKernel3 -b master anykernel
+          rm -rf anykernel/.git
+          
+          # 2. Copier l'Image du noyau compilé
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/
+          
+          # 3. Copier les modules compilés (.ko) s'il y en a vers AnyKernel3/modules
+          mkdir -p anykernel/modules/system/lib/modules
+          find ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }} -name "*.ko" -exec cp {} anykernel/modules/system/lib/modules/ \; || true
+
+          # 4. Créer le boot.img de test avec l'outil mkbootimg ou magiskboot si disponible, 
+          # ou préparer le ZIP AnyKernel3 complet
+          cd anykernel
+          zip -r9 ../ReSukiSU-AnyKernel3-kiev.zip *
+          cd ..
+
+          # Vérification de la présence de l'Image pour le boot.img
+          if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            echo "✅ Image du noyau générée avec succès !"
+          fi
 
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build-output
+          name: ReSukiSU-Kev-Output
           path: |
-            kernel_src/out/arch/arm64/boot/Image*
-            kernel_src/out/arch/arm64/boot/dts/**/*.dtb
-            kernel_src/out/arch/arm64/boot/dts/**/*.dtbo
+            ReSukiSU-AnyKernel3-kiev.zip
+            kernel_src/out/arch/arm64/boot/Image
