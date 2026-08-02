@@ -102,8 +102,13 @@ jobs:
 
           echo "===> Apply SUSFS kernel patch"
 
-          patch -p1 --forward --fuzz=3 < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch
-
+          if ! patch -p1 --forward --fuzz=3 < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch; then
+              echo "::warning::Patch had rejections, checking task_mmu.c.rej"
+              if [ -f fs/proc/task_mmu.c.rej ]; then
+                  cat fs/proc/task_mmu.c.rej
+              fi
+              exit 1
+          fi
           echo "===> Install ReSuKiSU"
 
           rm -rf drivers/kernelsu
