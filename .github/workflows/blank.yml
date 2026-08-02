@@ -327,6 +327,15 @@ jobs:
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           echo "📥 Téléchargement et installation des sources ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+
+          # Neutralisation immédiate de pkg_observer.c pour le noyau 4.19
+          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
+            echo "🔧 Neutralisation de pkg_observer.c..."
+            rm -f drivers/kernelsu/manager/pkg_observer.c
+            touch drivers/kernelsu/manager/pkg_observer.c
+            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
+            sed -i '/pkg_observer.o/d' drivers/kernelsu/Makefile || true
+          fi
           
           # 2. Contournements pour les noyaux Non-GKI / 4.19 et neutralisation des hooks
           echo "🔧 Application des correctifs de compatibilité..."
