@@ -117,6 +117,22 @@ jobs:
           rm -rf temp_copilote
           echo "✅ Tout est en place sous drivers/kernelsu !"
 
+      - name: Sauvegarder les fichiers .rej en cas d'échec
+        if: always()
+        run: |
+          cd ${{ env.KERNEL_PATH }}
+          find . -name "*.rej" > ../rejects_list.txt
+          cat ../rejects_list.txt
+          tar -cvzf ../rejects.tar.gz $(cat ../rejects_list.txt) || true
+        shell: bash
+
+      - name: Upload des Rejets
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-patch-rejects
+          path: rejects.tar.gz
+
       - name: 📂 Intégration ReSukiSU (Remplacement sélectif) & Custom Configs
         run: |
           set -e
