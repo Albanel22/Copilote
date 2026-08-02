@@ -182,41 +182,57 @@ jobs:
             sed -i '/file_wrapper.o/d' drivers/kernelsu/infra/Makefile || true
             sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
           fi
+          
           if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
             echo "🔧 Neutralisation de seccomp_cache..."
             rm -f drivers/kernelsu/infra/seccomp_cache.c
             touch drivers/kernelsu/infra/seccomp_cache.c
             sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
           fi
+          
           if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
             echo "🔧 Neutralisation de su_mount_ns..."
             rm -f drivers/kernelsu/infra/su_mount_ns.c
             touch drivers/kernelsu/infra/su_mount_ns.c
             sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
           fi
+          
           if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
             echo "🔧 Neutralisation de pkg_observer..."
             rm -f drivers/kernelsu/manager/pkg_observer.c
             touch drivers/kernelsu/manager/pkg_observer.c
             sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
           fi
+          
           if [ -f "drivers/kernelsu/policy/allowlist.c" ]; then
             sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/policy/allowlist.c || true
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/policy/allowlist.c || true
             sed -i '1i #include <linux/sched/task.h>\n#ifndef HAVE_PUT_TASK_STRUCT\nextern void put_task_struct(struct task_struct *t);\n#endif\n' drivers/kernelsu/policy/allowlist.c || true
           fi
+          
           if [ -f "drivers/kernelsu/policy/app_profile.c" ]; then
             sed -i '/filter_count/d' drivers/kernelsu/policy/app_profile.c || true
           fi
+          
           if [ -f "drivers/kernelsu/sulog/event.c" ]; then
             sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' drivers/kernelsu/sulog/event.c || true
           fi
+          
           if [ -f "drivers/kernelsu/supercall/dispatch.c" ]; then
             sed -i 's/extern struct task_struct init_task;/#include <linux\/sched\/signal.h>\nextern struct task_struct init_task;/g' drivers/kernelsu/supercall/dispatch.c || true
             sed -i '1i #include <linux/sched/signal.h>' drivers/kernelsu/supercall/dispatch.c || true
           fi
+          
           if [ -f "drivers/kernelsu/supercall/supercall.c" ]; then
             sed -i '1i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' drivers/kernelsu/supercall/supercall.c || true
+          fi
+          
+          if [ -f "drivers/kernelsu/manager/pkg_observer.c" ]; then
+            echo "🔧 Neutralisation complète de pkg_observer.c pour le noyau 4.19..."
+            rm -f drivers/kernelsu/manager/pkg_observer.c
+            touch drivers/kernelsu/manager/pkg_observer.c
+            sed -i '/pkg_observer.o/d' drivers/kernelsu/manager/Makefile || true
+            sed -i '/pkg_observer.o/d' drivers/kernelsu/Makefile || true
           fi
 
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
