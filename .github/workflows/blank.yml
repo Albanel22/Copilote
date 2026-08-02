@@ -186,7 +186,7 @@ jobs:
           export LLVM_IAS=1
 
           mkdir -p "${{ env.BUILD_DIR }}"
-          make O="${{ env.BUILD_DIR }}" "${{ env.DEFCONFIG }}"
+          make O="${{ env.BUILD_DIR }}" vendor/${{ env.DEFCONFIG }}
           make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1
 
       - name: Upload build artifacts
