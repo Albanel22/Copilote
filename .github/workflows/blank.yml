@@ -290,13 +290,17 @@ jobs:
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           
-          # 1. Nettoyage et téléchargement des sources ReSukiSU (Le fameux curl)
+          # 1. Nettoyage et téléchargement des sources ReSukiSU
           echo "🧼 Nettoyage des anciens dossiers..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           echo "📥 Téléchargement et installation des sources ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           
-          # Neutralisation des vérifications de hooks pour éviter les blocages de compilation
+          # 2. Contournements pour les noyaux Non-GKI / 4.19 et neutralisation des hooks
+          echo "🔧 Application des correctifs de compatibilité..."
+          sed -i '/TP hooks are incompatible with Non-GKI/s/^/#/' drivers/kernelsu/Kbuild || true
+          sed -i '/Error.*TP hooks/s/^/#/' drivers/kernelsu/Kbuild || true
+          sed -i '/error.*TP hooks/s/^/#/' drivers/kernelsu/Kbuild || true
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
           
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
