@@ -83,10 +83,6 @@ jobs:
           #include <linux/init.h>
           #include <linux/fs.h>
           #include <linux/sched.h>
-          /* --- Stubs supplémentaires pour ReSukiSU --- */
-          void ksu_observer_exit(void) {}
-          int __init ksu_observer_init(void) { return 0; }
-          int ksu_set_current_proc_unprivillege(void) { return 0; }
           EOF
           /* --- Stubs SELinux Hide & Observer --- */
           int __init ksu_selinux_hide_init(void) { return 0; }
