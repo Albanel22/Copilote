@@ -8,7 +8,7 @@ echo "======================================"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/env.sh"
 
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 KERNEL_DIR="${ROOT_DIR}/${KERNEL_PATH}"
 
 echo "[INFO] Kernel directory : ${KERNEL_DIR}"
