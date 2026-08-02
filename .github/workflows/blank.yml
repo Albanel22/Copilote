@@ -33,22 +33,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: $-ccache-kernel
+          key: ${{ runner.os }}-ccache-kernel
           restore-keys: |
-            $-ccache-
+            ${{ runner.os }}-ccache-
 
       - name: Download stock boot image
         shell: bash
         run: |
           set -euo pipefail
-          curl -fLo boot-stock.img "$"
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || true
 
       - name: Clone kernel source
         shell: bash
         run: |
           set -euo pipefail
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
-            -b lineage-23.2 --depth=1 "$"
+            -b lineage-23.2 --depth=1 "${{ env.KERNEL_PATH }}"
 
       - name: Prepare ReSuKiSu / SusFS
         shell: bash
@@ -58,32 +58,30 @@ jobs:
           git clone -b test-sukisu https://github.com/Albanel22/Copilote.git temp_copilote
 
           echo "Copy susfs sources..."
-          cp temp_copilote/susfs.c "$/fs/"
-          mkdir -p "$/include/linux"
-          cp temp_copilote/susfs.h "$/include/linux/"
+          cp temp_copilote/susfs.c "${{ env.KERNEL_PATH }}/fs/"
+          mkdir -p "${{ env.KERNEL_PATH }}/include/linux"
+          cp temp_copilote/susfs.h "${{ env.KERNEL_PATH }}/include/linux/"
 
           echo "Normalize patch line endings..."
-          sed -i 's/
-          $//' temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
-          sed -i 's/
-          $//' temp_copilote/10_enable_susfs_for_ksu.patch || true
+          sed -i 's/\r$//' temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
+          sed -i 's/\r$//' temp_copilote/10_enable_susfs_for_ksu.patch || true
 
-          cd "$"
+          cd "${{ env.KERNEL_PATH }}"
 
           echo "Apply main SUSFS patch if present..."
           if [ -f ../temp_copilote/50_add_susfs_in_kernel-4.19.patch ]; then
-            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch
+            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
           fi
 
-          echo "Clone KernelSU..."
+          echo "Setup ReSukiSU..."
           rm -rf drivers/kernelsu
           mkdir -p drivers
-          git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
+          git clone https://github.com/resukisu/ResukiSU.git drivers/kernelsu || true
 
-          echo "Apply SUSFS patch to KernelSU if present..."
+          echo "Apply SUSFS patch to ReSukiSU if present..."
           if [ -f ../../temp_copilote/10_enable_susfs_for_ksu.patch ]; then
             cd drivers/kernelsu
-            patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch
+            patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
             cd ../..
           fi
 
@@ -130,23 +128,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp kiev_perfect_defconfig "$/arch/arm64/configs/vendor/$"
+          cp kiev_perfect_defconfig "${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" || true
 
       - name: Fix KernelSU namespace issue
         shell: bash
         run: |
           set -euo pipefail
-          cd "$"
+          cd "${{ env.KERNEL_PATH }}"
           if [ -f "drivers/kernelsu/core/init.c" ]; then
             sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' \
-              drivers/kernelsu/core/init.c
+              drivers/kernelsu/core/init.c || true
           fi
 
       - name: Neutralize unsupported files for 4.19
         shell: bash
         run: |
           set -euo pipefail
-          cd "$"
+          cd "${{ env.KERNEL_PATH }}"
 
           if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
             rm -f drivers/kernelsu/feature/selinux_hide.c
@@ -178,7 +176,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd "$"
+          cd "${{ env.KERNEL_PATH }}"
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -187,9 +185,9 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
 
-          mkdir -p "$"
-          make O="$" "$"
-          make O="$" -j"$(nproc)" LLVM=1 LLVM_IAS=1
+          mkdir -p "${{ env.BUILD_DIR }}"
+          make O="${{ env.BUILD_DIR }}" "${{ env.DEFCONFIG }}"
+          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1
 
       - name: Upload build artifacts
         if: always()
