@@ -73,7 +73,8 @@ jobs:
             --branch test-sukisu \
             https://github.com/Albanel22/Copilote.git \
             temp_copilote
-                 - name: Prepare ReSuKiSU / SUSFS
+
+      - name: Prepare ReSuKiSU / SUSFS
         shell: bash
         run: |
           set -euo pipefail
@@ -126,36 +127,36 @@ jobs:
           echo "===> Generate compat_419.c"
 
           cat > drivers/kernelsu/compat_419.c <<'EOF'
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/fs.h>
-#include <linux/path.h>
-#include <linux/rwlock.h>
+          #include <linux/kernel.h>
+          #include <linux/init.h>
+          #include <linux/fs.h>
+          #include <linux/path.h>
+          #include <linux/rwlock.h>
 
-int __init ksu_selinux_hide_init(void){return 0;}
-void ksu_selinux_hide_exit(void){}
+          int __init ksu_selinux_hide_init(void){return 0;}
+          void ksu_selinux_hide_exit(void){}
 
-int ksu_selinux_hide_handle_post_fs_data(void){return 0;}
-void ksu_selinux_hide_drop_backup_if_unused(void){}
-int ksu_selinux_hide_handle_second_stage(void){return 0;}
+          int ksu_selinux_hide_handle_post_fs_data(void){return 0;}
+          void ksu_selinux_hide_drop_backup_if_unused(void){}
+          int ksu_selinux_hide_handle_second_stage(void){return 0;}
 
-int __init ksu_observer_init(void){return 0;}
-void ksu_observer_exit(void){}
+          int __init ksu_observer_init(void){return 0;}
+          void ksu_observer_exit(void){}
 
-int __init ksu_file_wrapper_init(void){return 0;}
-int ksu_install_file_wrapper(void){return 0;}
+          int __init ksu_file_wrapper_init(void){return 0;}
+          int ksu_install_file_wrapper(void){return 0;}
 
-int ksu_handle_umount(struct path *path,int flags){return 0;}
-int setup_mount_ns(void){return 0;}
+          int ksu_handle_umount(struct path *path,int flags){return 0;}
+          int setup_mount_ns(void){return 0;}
 
-void ksu_seccomp_allow_cache(void){}
-void seccomp_filter_release(void *filter){}
+          void ksu_seccomp_allow_cache(void){}
+          void seccomp_filter_release(void *filter){}
 
-rwlock_t *ksu_policy_rwlock_ptr=NULL;
+          rwlock_t *ksu_policy_rwlock_ptr=NULL;
 
-void selinux_policy_lock(void){}
-void selinux_policy_unlock(void){}
-EOF
+          void selinux_policy_lock(void){}
+          void selinux_policy_unlock(void){}
+          EOF
 
           grep -q compat_419.o drivers/kernelsu/Makefile \
             || echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
@@ -163,8 +164,9 @@ EOF
           cd ..
 
           rm -rf temp_copilote
-                - name: Apply kernel defconfig
-      shell: bash
+
+      - name: Apply kernel defconfig
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -238,6 +240,7 @@ EOF
               sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
               sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
           fi
+
       - name: Build kernel
         shell: bash
         run: |
@@ -279,38 +282,45 @@ EOF
 
           rm -rf anykernel/.git
 
-          IMAGE=""
-
+          # Copier le noyau compilé
           if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz" ]; then
-              IMAGE="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz"
+              cp "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz" anykernel/Image.gz
           elif [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
-              IMAGE="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+              cp "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" anykernel/Image
           else
               echo "::error::Kernel image not found"
               exit 1
           fi
 
-          cp "$IMAGE" anykernel/
+          # Intégrer le boot stock pour garantir une structure valide
+          cp boot-stock.img anykernel/boot.img
 
+          # Copier les modules .ko
           mkdir -p anykernel/modules/system/lib/modules
-
           find "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}" \
               -name "*.ko" \
               -exec cp {} anykernel/modules/system/lib/modules/ \;
 
-          cd anykernel
+          # Forcer le chemin de partition direct pour Motorola
+          sed -i 's|block=boot;|block=/dev/block/bootdevice/by-name/boot;|g' anykernel/anykernel.sh || true
+          
+          if ! grep -q "block=/dev/block/bootdevice/by-name/boot" anykernel/anykernel.sh; then
+              sed -i 's|block=.*|block=/dev/block/bootdevice/by-name/boot;|g' anykernel/anykernel.sh || true
+          fi
 
+          cd anykernel
           zip -r9 ../ReSukiSU-AnyKernel3-kiev.zip .
+          cp boot.img ../boot-final.img
+          cd ..
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         if: always()
-
         with:
           name: ReSukiSU-Kiev-Output
-
           path: |
             ReSukiSU-AnyKernel3-kiev.zip
+            boot-final.img
             kernel_src/build.log
             kernel_src/out/arch/arm64/boot/Image
             kernel_src/out/arch/arm64/boot/Image.gz
