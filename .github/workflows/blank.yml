@@ -1,231 +1,319 @@
-name: Kernel CI - build & package
+name: Kernel CI - Motorola One 5G Ace (Kiev)
 
 on:
   workflow_dispatch:
 
 env:
+  DEVICE: kiev
   KERNEL_PATH: kernel_src
   BUILD_DIR: out
   ARCH: arm64
+  SUBARCH: arm64
   DEFCONFIG: lito-perf_defconfig
-  CCACHE_SIZE: 5G
+  CCACHE_SIZE: 10G
   BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: test-sukisu
+          fetch-depth: 1
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bc bison build-essential ccache flex libelf-dev libssl-dev \
-            libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            clang llvm lld device-tree-compiler zip unzip curl git python3
+            bc bison build-essential flex \
+            libssl-dev libelf-dev libncurses-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang llvm lld \
+            ccache curl git zip unzip \
+            python3 device-tree-compiler
 
       - name: Setup ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel
+          key: ${{ runner.os }}-${{ env.DEVICE }}-ccache
           restore-keys: |
-            ${{ runner.os }}-ccache-
+            ${{ runner.os }}-${{ env.DEVICE }}
+
+      - name: Configure ccache
+        run: |
+          mkdir -p ~/.cache/ccache
+          ccache --set-config=max_size=${{ env.CCACHE_SIZE }}
+          ccache -z
 
       - name: Download stock boot image
-        shell: bash
         run: |
-          set -euo pipefail
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || true
+          set -e
+          curl -L --fail \
+            -o boot-stock.img \
+            "${{ env.BOOT_URL }}"
 
       - name: Clone kernel source
+        run: |
+          set -e
+
+          git clone \
+            --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
+            "${{ env.KERNEL_PATH }}"
+
+      - name: Clone Copilote repository
+        run: |
+          git clone \
+            --depth=1 \
+            --branch test-sukisu \
+            https://github.com/Albanel22/Copilote.git \
+            temp_copilote
+                 - name: Prepare ReSuKiSU / SUSFS
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
-            -b lineage-23.2 --depth=1 "${{ env.KERNEL_PATH }}"
 
-      - name: Prepare ReSuKiSu / SusFS
-        shell: bash
-        run: |
-          set -euo pipefail
+          KERNEL="${{ env.KERNEL_PATH }}"
+          REPO="../temp_copilote"
 
-          git clone -b test-sukisu https://github.com/Albanel22/Copilote.git temp_copilote
+          echo "===> Checking required files"
 
-          echo "Copy susfs sources..."
-          cp temp_copilote/susfs.c "${{ env.KERNEL_PATH }}/fs/"
-          mkdir -p "${{ env.KERNEL_PATH }}/include/linux"
-          cp temp_copilote/susfs.h "${{ env.KERNEL_PATH }}/include/linux/"
+          test -f temp_copilote/susfs.c
+          test -f temp_copilote/susfs.h
+          test -f temp_copilote/50_add_susfs_in_kernel-4.19.patch
+          test -f temp_copilote/10_enable_susfs_for_ksu.patch
 
-          echo "Normalize patch line endings..."
-          sed -i 's/\r$//' temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
-          sed -i 's/\r$//' temp_copilote/10_enable_susfs_for_ksu.patch || true
+          echo "===> Copy SUSFS sources"
 
-          cd "${{ env.KERNEL_PATH }}"
+          mkdir -p "$KERNEL/include/linux"
 
-          echo "Apply main SUSFS patch if present..."
-          if [ -f ../temp_copilote/50_add_susfs_in_kernel-4.19.patch ]; then
-            patch -p1 --binary --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch || true
-          fi
+          cp temp_copilote/susfs.c "$KERNEL/fs/"
+          cp temp_copilote/susfs.h "$KERNEL/include/linux/"
 
-          echo "Setup ReSukiSU..."
+          sed -i 's/\r$//' temp_copilote/*.patch
+
+          cd "$KERNEL"
+
+          echo "===> Apply SUSFS kernel patch"
+
+          patch -p1 --forward < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch
+
+          echo "===> Install ReSuKiSU"
+
           rm -rf drivers/kernelsu
-          mkdir -p drivers
-          git clone https://github.com/resukisu/ResukiSU.git drivers/kernelsu || true
 
-          echo "Apply SUSFS patch to ReSukiSU if present..."
-          if [ -f ../../temp_copilote/10_enable_susfs_for_ksu.patch ]; then
-            cd drivers/kernelsu
-            patch -p1 --binary --forward --fuzz=2 < ../../../temp_copilote/10_enable_susfs_for_ksu.patch || true
-            cd ../..
-          fi
+          git clone \
+              --depth=1 \
+              https://github.com/resukisu/ResukiSU.git \
+              drivers/kernelsu
 
-          echo "Create compat_419.c..."
+          echo "===> Apply SUSFS support"
+
+          cd drivers/kernelsu
+
+          patch -p1 \
+              --forward \
+              --fuzz=2 \
+              < ../../../temp_copilote/10_enable_susfs_for_ksu.patch
+
+          cd ../..
+
+          echo "===> Generate compat_419.c"
+
           cat > drivers/kernelsu/compat_419.c <<'EOF'
-          #include <linux/kernel.h>
-          #include <linux/init.h>
-          #include <linux/fs.h>
-          #include <linux/sched.h>
-          #include <linux/path.h>
-          #include <linux/rwlock.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/fs.h>
+#include <linux/path.h>
+#include <linux/rwlock.h>
 
-          int __init ksu_selinux_hide_init(void) { return 0; }
-          void ksu_selinux_hide_exit(void) {}
-          int ksu_selinux_hide_handle_post_fs_data(void) { return 0; }
-          void ksu_selinux_hide_drop_backup_if_unused(void) {}
-          int ksu_selinux_hide_handle_second_stage(void) { return 0; }
+int __init ksu_selinux_hide_init(void){return 0;}
+void ksu_selinux_hide_exit(void){}
 
-          int __init ksu_observer_init(void) { return 0; }
-          void ksu_observer_exit(void) {}
+int ksu_selinux_hide_handle_post_fs_data(void){return 0;}
+void ksu_selinux_hide_drop_backup_if_unused(void){}
+int ksu_selinux_hide_handle_second_stage(void){return 0;}
 
-          int __init ksu_file_wrapper_init(void) { return 0; }
-          int ksu_install_file_wrapper(void) { return 0; }
+int __init ksu_observer_init(void){return 0;}
+void ksu_observer_exit(void){}
 
-          int ksu_handle_umount(struct path *path, int flags) { return 0; }
-          int setup_mount_ns(void) { return 0; }
+int __init ksu_file_wrapper_init(void){return 0;}
+int ksu_install_file_wrapper(void){return 0;}
 
-          void ksu_seccomp_allow_cache(void) {}
-          void seccomp_filter_release(void *filter) {}
+int ksu_handle_umount(struct path *path,int flags){return 0;}
+int setup_mount_ns(void){return 0;}
 
-          rwlock_t *ksu_policy_rwlock_ptr = NULL;
-          void selinux_policy_lock(void) {}
-          void selinux_policy_unlock(void) {}
-          EOF
+void ksu_seccomp_allow_cache(void){}
+void seccomp_filter_release(void *filter){}
 
-          echo "Register compat_419.o..."
-          if ! grep -q 'compat_419.o' drivers/kernelsu/Makefile; then
-            echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
+rwlock_t *ksu_policy_rwlock_ptr=NULL;
+
+void selinux_policy_lock(void){}
+void selinux_policy_unlock(void){}
+EOF
+
+          grep -q compat_419.o drivers/kernelsu/Makefile \
+            || echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
+
+          cd ..
+
+          rm -rf temp_copilote
+                - name: Apply kernel defconfig
+      shell: bash
+        run: |
+          set -euo pipefail
+
+          DEFCONFIG_DST="${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}"
+
+          if [ ! -f "kiev_perfect_defconfig" ]; then
+            echo "::error::kiev_perfect_defconfig not found"
+            exit 1
           fi
 
-          rm -rf ../temp_copilote
+          cp -f kiev_perfect_defconfig "${DEFCONFIG_DST}"
 
-      - name: Apply custom config
+      - name: Apply KernelSU compatibility fixes
         shell: bash
         run: |
           set -euo pipefail
-          cp kiev_perfect_defconfig "${{ env.KERNEL_PATH }}/arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" || true
 
-      - name: Fix KernelSU namespace issue
-        shell: bash
-        run: |
-          set -euo pipefail
           cd "${{ env.KERNEL_PATH }}"
-          if [ -f "drivers/kernelsu/core/init.c" ]; then
-            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' \
-              drivers/kernelsu/core/init.c || true
+
+          if [ -f drivers/kernelsu/core/init.c ]; then
+            sed -i \
+            '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/d' \
+            drivers/kernelsu/core/init.c
           fi
 
-      - name: Neutralize unsupported files for 4.19
+      - name: Disable unsupported KernelSU features (Kernel 4.19)
         shell: bash
         run: |
           set -euo pipefail
+
           cd "${{ env.KERNEL_PATH }}"
 
-          if [ -f "drivers/kernelsu/feature/selinux_hide.c" ]; then
-            rm -f drivers/kernelsu/feature/selinux_hide.c
-            touch drivers/kernelsu/feature/selinux_hide.c
-            sed -i '/selinux_hide.o/d' drivers/kernelsu/feature/Makefile || true
-            sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
-          fi
+          disable_module() {
+              FILE="$1"
+              MAKEFILE="$2"
+              OBJ="$3"
 
-          if [ -f "drivers/kernelsu/infra/file_wrapper.c" ]; then
-            rm -f drivers/kernelsu/infra/file_wrapper.c
-            touch drivers/kernelsu/infra/file_wrapper.c
-            sed -i '/file_wrapper.o/d' drivers/kernelsu/infra/Makefile || true
-            sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
-          fi
+              if [ -f "$FILE" ]; then
+                  echo "Disabling $OBJ"
 
-          if [ -f "drivers/kernelsu/infra/seccomp_cache.c" ]; then
-            rm -f drivers/kernelsu/infra/seccomp_cache.c
-            touch drivers/kernelsu/infra/seccomp_cache.c
-            sed -i '/seccomp_cache.o/d' drivers/kernelsu/infra/Makefile || true
-          fi
+                  rm -f "$FILE"
+                  touch "$FILE"
 
-          if [ -f "drivers/kernelsu/infra/su_mount_ns.c" ]; then
-            rm -f drivers/kernelsu/infra/su_mount_ns.c
-            touch drivers/kernelsu/infra/su_mount_ns.c
-            sed -i '/su_mount_ns.o/d' drivers/kernelsu/infra/Makefile || true
-          fi
+                  if [ -f "$MAKEFILE" ]; then
+                      sed -i "/${OBJ}/d" "$MAKEFILE"
+                  fi
+              fi
+          }
 
-      - name: Build kernel and modules
+          disable_module \
+              drivers/kernelsu/feature/selinux_hide.c \
+              drivers/kernelsu/feature/Makefile \
+              selinux_hide.o
+
+          disable_module \
+              drivers/kernelsu/infra/file_wrapper.c \
+              drivers/kernelsu/infra/Makefile \
+              file_wrapper.o
+
+          disable_module \
+              drivers/kernelsu/infra/seccomp_cache.c \
+              drivers/kernelsu/infra/Makefile \
+              seccomp_cache.o
+
+          disable_module \
+              drivers/kernelsu/infra/su_mount_ns.c \
+              drivers/kernelsu/infra/Makefile \
+              su_mount_ns.o
+
+          if [ -f drivers/kernelsu/Makefile ]; then
+              sed -i '/selinux_hide.o/d' drivers/kernelsu/Makefile || true
+              sed -i '/file_wrapper.o/d' drivers/kernelsu/Makefile || true
+          fi
+      - name: Build kernel
         shell: bash
         run: |
           set -euo pipefail
+
           cd "${{ env.KERNEL_PATH }}"
 
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC="clang"
+          export CC=clang
           export LLVM=1
           export LLVM_IAS=1
+          export CCACHE_DIR="$HOME/.cache/ccache"
 
           mkdir -p "${{ env.BUILD_DIR }}"
-          make O="${{ env.BUILD_DIR }}" vendor/${{ env.DEFCONFIG }}
-          
-          # Compilation de l'Image et des modules (en s'assurant que synaptics_tcm passe bien)
-          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1 Image modules
-          
-          # Compilation des Device Trees en ignorant les erreurs du compilateur système si besoin
-          make O="${{ env.BUILD_DIR }}" -j"$(nproc)" LLVM=1 LLVM_IAS=1 dtbs || true
 
-      - name: Package AnyKernel3 and boot.img
+          make O="${{ env.BUILD_DIR }}" vendor/${{ env.DEFCONFIG }}
+
+          make \
+            -j"$(nproc)" \
+            O="${{ env.BUILD_DIR }}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            Image Image.gz modules dtbs \
+            2>&1 | tee build.log
+
+          ccache -s
+
+      - name: Prepare AnyKernel3
         shell: bash
         run: |
           set -euo pipefail
-          
-          # 1. Cloner AnyKernel3
-          git clone https://github.com/kernel-su/AnyKernel3 -b master anykernel
+
+          git clone \
+            --depth=1 \
+            https://github.com/kernel-su/AnyKernel3.git \
+            anykernel
+
           rm -rf anykernel/.git
-          
-          # 2. Copier l'Image du noyau compilé
-          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image anykernel/
-          
-          # 3. Copier les modules compilés (.ko) s'il y en a vers AnyKernel3/modules
-          mkdir -p anykernel/modules/system/lib/modules
-          find ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }} -name "*.ko" -exec cp {} anykernel/modules/system/lib/modules/ \; || true
 
-          # 4. Créer le boot.img de test avec l'outil mkbootimg ou magiskboot si disponible, 
-          # ou préparer le ZIP AnyKernel3 complet
-          cd anykernel
-          zip -r9 ../ReSukiSU-AnyKernel3-kiev.zip *
-          cd ..
+          IMAGE=""
 
-          # Vérification de la présence de l'Image pour le boot.img
-          if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
-            echo "✅ Image du noyau générée avec succès !"
+          if [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz" ]; then
+              IMAGE="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image.gz"
+          elif [ -f "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+              IMAGE="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          else
+              echo "::error::Kernel image not found"
+              exit 1
           fi
 
-      - name: Upload build artifacts
-        if: always()
+          cp "$IMAGE" anykernel/
+
+          mkdir -p anykernel/modules/system/lib/modules
+
+          find "${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}" \
+              -name "*.ko" \
+              -exec cp {} anykernel/modules/system/lib/modules/ \;
+
+          cd anykernel
+
+          zip -r9 ../ReSukiSU-AnyKernel3-kiev.zip .
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        if: always()
+
         with:
-          name: ReSukiSU-Kev-Output
+          name: ReSukiSU-Kiev-Output
+
           path: |
             ReSukiSU-AnyKernel3-kiev.zip
+            kernel_src/build.log
             kernel_src/out/arch/arm64/boot/Image
+            kernel_src/out/arch/arm64/boot/Image.gz
+            kernel_src/out/**/*.ko
+            kernel_src/out/**/*.dtb
+            kernel_src/out/**/*.dtbo
