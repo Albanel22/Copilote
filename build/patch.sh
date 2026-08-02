@@ -24,6 +24,16 @@ echo "[STEP] Installing SUSFS sources..."
 
 mkdir -p include/linux
 
+if [ ! -f "${ROOT_DIR}/susfs.c" ]; then
+    echo "[ERROR] susfs.c not found."
+    exit 1
+fi
+
+if [ ! -f "${ROOT_DIR}/susfs.h" ]; then
+    echo "[ERROR] susfs.h not found."
+    exit 1
+fi
+
 cp "${ROOT_DIR}/susfs.c" fs/
 cp "${ROOT_DIR}/susfs.h" include/linux/
 
