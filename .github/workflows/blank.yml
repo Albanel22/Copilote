@@ -214,7 +214,7 @@ jobs:
           
           echo "📥 Téléchargement de ton binaire ksud personnalisé..."
           mkdir -p AnyKernel3/patch/system/bin
-          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/main/ksud
+          curl -fLo AnyKernel3/patch/system/bin/ksud https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
           echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
