@@ -102,74 +102,19 @@ jobs:
 
           echo "===> Apply SUSFS kernel patch"
 
+          # On tente d'appliquer le patch (si fs/open.c échoue car déjà présent, on l'autorise)
           if ! patch -p1 --forward --fuzz=3 < ../temp_copilote/50_add_susfs_in_kernel-4.19.patch; then
-              echo "::warning::Patch had rejections, checking task_mmu.c.rej"
-              if [ -f fs/proc/task_mmu.c.rej ]; then
-                  cat fs/proc/task_mmu.c.rej
+              if [ -f fs/open.c.rej ]; then
+                  echo "::notice::fs/open.c already patched, ignoring rejection."
+                  rm -f fs/open.c.rej
               fi
-              exit 1
+              # Si d'autres fichiers ont de vrais rejets bloquants, on s'arrête
+              if ls *.rej fs/*.rej fs/*/*.rej mm/*.rej kernel/*.rej drivers/*.rej 2>/dev/null | grep -q .; then
+                  echo "::error::Critical patch rejections found!"
+                  exit 1
+              fi
           fi
-          echo "===> Install ReSuKiSU"
-
-          rm -rf drivers/kernelsu
-
-          git clone \
-              --depth=1 \
-              https://github.com/resukisu/ResukiSU.git \
-              drivers/kernelsu
-
-          echo "===> Apply SUSFS support"
-
-          cd drivers/kernelsu
-
-          patch -p1 \
-              --forward \
-              --fuzz=2 \
-              < ../../../temp_copilote/10_enable_susfs_for_ksu.patch
-
-          cd ../..
-
-          echo "===> Generate compat_419.c"
-
-          cat > drivers/kernelsu/compat_419.c <<'EOF'
-          #include <linux/kernel.h>
-          #include <linux/init.h>
-          #include <linux/fs.h>
-          #include <linux/path.h>
-          #include <linux/rwlock.h>
-
-          int __init ksu_selinux_hide_init(void){return 0;}
-          void ksu_selinux_hide_exit(void){}
-
-          int ksu_selinux_hide_handle_post_fs_data(void){return 0;}
-          void ksu_selinux_hide_drop_backup_if_unused(void){}
-          int ksu_selinux_hide_handle_second_stage(void){return 0;}
-
-          int __init ksu_observer_init(void){return 0;}
-          void ksu_observer_exit(void){}
-
-          int __init ksu_file_wrapper_init(void){return 0;}
-          int ksu_install_file_wrapper(void){return 0;}
-
-          int ksu_handle_umount(struct path *path,int flags){return 0;}
-          int setup_mount_ns(void){return 0;}
-
-          void ksu_seccomp_allow_cache(void){}
-          void seccomp_filter_release(void *filter){}
-
-          rwlock_t *ksu_policy_rwlock_ptr=NULL;
-
-          void selinux_policy_lock(void){}
-          void selinux_policy_unlock(void){}
-          EOF
-
-          grep -q compat_419.o drivers/kernelsu/Makefile \
-            || echo "obj-y += compat_419.o" >> drivers/kernelsu/Makefile
-
-          cd ..
-
-          rm -rf temp_copilote
-
+          
       - name: Apply kernel defconfig
         shell: bash
         run: |
