@@ -199,11 +199,8 @@ jobs:
           export CCACHE_DIR="$HOME/.cache/ccache"
           mkdir -p "${{ env.BUILD_DIR }}"
           
-          # Utilisation du chemin relatif complet depuis arch/arm64/configs/
-          make O="${{ env.BUILD_DIR }}" ARCH=arm64 SUBARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=1 LLVM_IAS=1 vendor/lito-perf_defconfig
-          
-          # Si la ligne du dessus échoue encore, on peut aussi utiliser le chemin complet :
-          # make O="${{ env.BUILD_DIR }}" ARCH=arm64 SUBARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=1 LLVM_IAS=1 ../arch/arm64/configs/vendor/lito-perf_defconfig
+          # Configuration avec le defconfig officiel standard
+          make O="${{ env.BUILD_DIR }}" ARCH=arm64 SUBARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=1 LLVM_IAS=1 lito-perf_defconfig
           
           # Compilation du noyau
           make \
@@ -218,7 +215,7 @@ jobs:
             Image Image.gz modules dtbs \
             2>&1 | tee build.log
           ccache -s
-
+          
       - name: Prepare AnyKernel3
         shell: bash
         run: |
