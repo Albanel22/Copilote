@@ -195,29 +195,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "${{ env.KERNEL_PATH }}"
-
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang
-          export LLVM=1
-          export LLVM_IAS=1
           export CCACHE_DIR="$HOME/.cache/ccache"
-
           mkdir -p "${{ env.BUILD_DIR }}"
-
-          make O="${{ env.BUILD_DIR }}" vendor/${{ env.DEFCONFIG }}
-
+          
+          # Configuration avec ARCH=arm64 explicite pour que Kconfig trouve le defconfig dans vendor/
+          make O="${{ env.BUILD_DIR }}" ARCH=arm64 SUBARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=1 LLVM_IAS=1 vendor/${{ env.DEFCONFIG }}
+          
+          # Compilation du noyau
           make \
             -j"$(nproc)" \
             O="${{ env.BUILD_DIR }}" \
+            ARCH=arm64 \
+            SUBARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
             LLVM=1 \
             LLVM_IAS=1 \
             Image Image.gz modules dtbs \
             2>&1 | tee build.log
-
           ccache -s
 
       - name: Prepare AnyKernel3
