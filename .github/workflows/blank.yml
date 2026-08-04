@@ -78,7 +78,7 @@ jobs:
           
           echo "✅ Intégration ReSukiSU & SUSFS terminée"
 
-      - name: 🔧 AGGRESSIVE: Remove ALL infra references
+      - name: 🔧 AGGRESSIVE - Remove ALL infra references
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
@@ -91,40 +91,40 @@ jobs:
           # Step 2: Remove ALL #include statements referencing infra
           echo "🧹 Suppression de TOUS les includes infra..."
           find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -print0 | \
-            xargs -0 sed -i '/#include.*infra/d'
+            xargs -0 sed -i '/#include.*infra/d' 2>/dev/null || true
           
           # Step 3: Comment out function calls from infra
           echo "🔨 Commentage des appels infra..."
           find drivers/kernelsu -type f -name "*.c" -print0 | xargs -0 sed -i \
             -e 's/ksu_init_symbol_resolver();/\/\/ DISABLED: ksu_init_symbol_resolver();/g' \
             -e 's/ksu_file_wrapper_init();/\/\/ DISABLED: ksu_file_wrapper_init();/g' \
-            -e 's/symbol_resolver_init();/\/\/ DISABLED: symbol_resolver_init();/g'
+            -e 's/symbol_resolver_init();/\/\/ DISABLED: symbol_resolver_init();/g' 2>/dev/null || true
           
           # Step 4: Remove MODULE_IMPORT_NS
           echo "❌ Suppression de MODULE_IMPORT_NS..."
-          find drivers/kernelsu -type f -name "*.c" -print0 | xargs -0 sed -i '/MODULE_IMPORT_NS/d'
+          find drivers/kernelsu -type f -name "*.c" -print0 | xargs -0 sed -i '/MODULE_IMPORT_NS/d' 2>/dev/null || true
           
           # Step 5: Remove infra references from Makefiles
           echo "🧹 Nettoyage des Makefiles..."
           find drivers/kernelsu -type f \( -name "Makefile" -o -name "Kbuild" \) -print0 | \
-            xargs -0 sed -i '/infra/d'
+            xargs -0 sed -i '/infra/d' 2>/dev/null || true
           
           # Step 6: Neutralize hook check scripts
           echo "🔨 Neutralisation des scripts de vérification..."
-          find . -type f -name "*hook_check*" -print0 | xargs -0 -I {} sh -c 'echo "" > "{}"' || true
+          find . -type f -name "*hook_check*" -print0 | xargs -0 -I {} sh -c 'echo "" > "{}"' 2>/dev/null || true
           
           # Verify infra is completely gone
           echo "✅ Vérification : Nombre de références infra restantes..."
-          INFRA_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) | xargs grep -l "infra" 2>/dev/null | wc -l)
+          INFRA_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | xargs grep -l "infra" 2>/dev/null | wc -l)
           if [ "$INFRA_COUNT" -eq 0 ]; then
             echo "✅ Infra complètement supprimé!"
           else
             echo "⚠️ $INFRA_COUNT fichiers contiennent encore 'infra' - nettoyage supplémentaire..."
-            find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) | \
-              xargs grep -l "infra" | xargs sed -i 's/.*infra.*/\/\/ REMOVED: infra reference/g'
+            find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | \
+              xargs grep -l "infra" 2>/dev/null | xargs sed -i 's/.*infra.*/\/\/ REMOVED: infra reference/g' 2>/dev/null || true
           fi
 
-      - name: 💉 Injection des Hooks ReSukiSU via Python
+      - name: 💉 Injection des Hooks ReSukiSU
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
