@@ -9,7 +9,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  SUKISU_SETUP_URL: 'https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh'
+  SUKISU_REPO_URL: 'https://github.com/Albanel22/ReSukiSU.git'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
 
@@ -51,14 +51,11 @@ jobs:
           echo "🗑️ Purge radicale du dossier drivers/kernelsu statique de la branche et des résidus..."
           rm -rf drivers/kernelsu KernelSU susfs4ksu || true
 
-          echo "📥 Exécution du script d'installation ReSukiSU..."
-          if ! curl -LSs "${{ env.SUKISU_SETUP_URL }}" | bash -s main; then
-            echo "❌ ReSukiSU setup a échoué — arrêt immédiat"
-            exit 1
-          fi
+          echo "📥 Clônage de ton fork ReSukiSU (branch main)..."
+          git clone --depth=1 https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
 
           if [ ! -d drivers/kernelsu ]; then
-            echo "❌ drivers/kernelsu absent après setup.sh"
+            echo "❌ drivers/kernelsu absent après clone"
             exit 1
           fi
 
