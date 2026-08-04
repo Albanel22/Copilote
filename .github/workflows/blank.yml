@@ -356,8 +356,12 @@ jobs:
             CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
             ${{ env.DEFCONFIG }}
           
-          echo "🔧 Étape 2 : Injection des flags KSU/SUSFS..."
+          echo "🔧 Étape 2 : Injection des flags KSU/SUSFS/Modules..."
           cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
+          CONFIG_MODULES=y
+          CONFIG_MODULE_UNLOAD=y
+          CONFIG_MODVERSIONS=y
+          CONFIG_MODULE_SRCVERSION_ALL=y
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_SUSFS=y
@@ -378,7 +382,7 @@ jobs:
           CONFIG_SECURITY_SELINUX_DISABLE=y
           CONFIG_EOF
           
-          echo "✅ Flags KSU/SUSFS injectés"
+          echo "✅ Flags KSU/SUSFS/Modules injectés"
           
           echo "🔧 Étape 3 : Validation de la configuration..."
           make O=${{ env.BUILD_DIR }} \
@@ -532,6 +536,7 @@ jobs:
           echo "🔧 Kernel: Linux 4.19.325"
           echo "📱 Device: Motorola One 5G Ace (Kiev)"
           echo "⚡ Mods: ReSukiSU + SUSFS"
+          echo "📦 Modules: Enabled"
           echo "🔒 Security: SELinux enabled"
           echo "📦 Build Status: ${{ job.status }}"
           echo "======================================"
