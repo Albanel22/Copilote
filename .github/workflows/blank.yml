@@ -68,28 +68,34 @@ jobs:
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 -f < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # Injection propre avec déclaration explicite de ksu_handle_faccessat et du bloc SUSFS dans fs/open.c
+          # Injection propre avec déclaration explicite de ksu_handle_faccessat et du bloc SUSFS dans fs/open.c (Version sécurisée)
           python3 -c '
           path = "fs/open.c"
           with open(path, "r") as f:
               content = f.read()
 
-          # 1. Ajouter la déclaration externe pour éviter l erreur d implicit declaration
+          # 1. Ajouter la déclaration externe si elle n est pas déjà présente
           include_target = "#include <linux/uaccess.h>"
           ksu_decl = "\n#ifdef CONFIG_KSU\nextern void ksu_handle_faccessat(int *dfd, const char __user **filenameflags, int *mode, int *flags);\n#endif"
-          if "ksu_handle_faccessat" not in content and include_target in content:
-              content = content.replace(include_target, include_target + ksu_decl, 1)
+          if "ksu_handle_faccessat" not in content:
+              if include_target in content:
+                  content = content.replace(include_target, include_target + ksu_decl, 1)
+              else:
+                  content = ksu_decl + "\n" + content
 
-          # 2. Insérer l appel et le bloc SUSFS
-          anchor = "unsigned int lookup_flags = LOOKUP_FOLLOW;"
-          injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif"
-
-          if "susfs_sus_path_by_filename" not in content and anchor in content:
-              content = content.replace(anchor, anchor + injection, 1)
+          # 2. Insérer l appel et le bloc SUSFS au bon endroit (dans do_faccessat avec repli robuste)
+          if "susfs_sus_path_by_filename" not in content:
+              target_func = "long do_faccessat("
+              if target_func in content:
+                  brace_idx = content.find("{", content.find(target_func))
+                  if brace_idx != -1:
+                      injection = "\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tstruct filename* fname;\n\tint status;\n\tint error;\n#endif\n\n#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n\n#ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\tfname = getname_safe(filename);\n\tstatus = susfs_sus_path_by_filename(fname, &error, SYSCALL_FAMILY_ALL_ENOENT);\n\tputname_safe(fname);\n\tif (status) {\n\t\treturn error;\n\t}\n#endif\n"
+                      content = content[:brace_idx + 1] + injection + content[brace_idx + 1:]
+                      print("Successfully injected via fallback target do_faccessat")
               
           with open(path, "w") as f:
               f.write(content)
-          print("Successfully patched fs/open.c with explicit ksu_handle_faccessat declaration")
+          print("Successfully patched fs/open.c")
           ' || true
           
       - name: Debug and Print Patch Failures
@@ -149,16 +155,6 @@ jobs:
           echo "💉 Injection patch tactile..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
-          # Forcer explicitement Kprobes et ses dépendances dans le .config final
-          sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/g' ${{ env.BUILD_DIR }}/.config
-          sed -i 's/# CONFIG_KRETPROBES is not set/CONFIG_KRETPROBES=y/g' ${{ env.BUILD_DIR }}/.config
-          sed -i 's/# CONFIG_HAVE_KPROBES is not set/CONFIG_HAVE_KPROBES=y/g' ${{ env.BUILD_DIR }}/.config
-          
-          # Si elles n'existent pas du tout, on les ajoute à la fin du .config
-          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
-          grep -q "CONFIG_KRETPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_KRETPROBES=y" >> ${{ env.BUILD_DIR }}/.config
-          grep -q "CONFIG_HAVE_KPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_HAVE_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
-         
           # 7. Compilation finale
           echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
