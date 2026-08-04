@@ -76,6 +76,62 @@ jobs:
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
 
+                - name: 🔧 Fix fsnotify API compatibility (4.19)
+          working-directory: ${{ env.KERNEL_PATH }}
+          run: |
+          set -euo pipefail
+          echo "⚙️ Correction de la compatibilité fsnotify pour Linux 4.19..."
+          
+          if [ -f drivers/kernelsu/manager/pkg_observer.c ]; then
+            echo "🔨 Patching pkg_observer.c..."
+            python3 << 'PYTHON_FIX'
+          import re
+          
+          with open("drivers/kernelsu/manager/pkg_observer.c", "r", encoding="utf-8", errors="ignore") as f:
+              content = f.read()
+          
+          # Fix 1: Replace handle_inode_event with handle_event
+          content = re.sub(
+              r'\.handle_inode_event\s*=\s*ksu_handle_inode_event',
+              '.handle_event = ksu_handle_event',
+              content
+          )
+          
+          # Fix 2: Update function signature to match fsnotify_ops (4.19)
+          old_sig = r'static int ksu_handle_inode_event\s*\([^)]*\)'
+          new_sig = '''static int ksu_handle_event(struct fsnotify_group *group,
+                                      struct inode *inode,
+                                      u32 mask,
+                                      const void *data,
+                                      int data_type,
+                                      const unsigned char *file_name,
+                                      u32 name_len,
+                                      struct fsnotify_iter_info *iter_info)'''
+          
+          content = re.sub(old_sig, new_sig, content, flags=re.DOTALL)
+          
+          # Fix 3: Update include if needed
+          content = re.sub(
+              r'#include\s+[<"]linux/fsnotify\.h[>"]',
+              '#include <linux/fsnotify_backend.h>',
+              content
+          )
+          
+          with open("drivers/kernelsu/manager/pkg_observer.c", "w", encoding="utf-8") as f:
+              f.write(content)
+          
+          print("✅ pkg_observer.c patched for 4.19 compatibility")
+          PYTHON_FIX
+          fi
+          
+          # Additional fsnotify fixes for all manager files
+          if [ -d drivers/kernelsu/manager ]; then
+            find drivers/kernelsu/manager -name "*.c" -type f -exec sed -i \
+              's/handle_inode_event/handle_event/g' {} +
+          fi
+          
+          echo "✅ fsnotify API compatibility fixes applied"
+
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
