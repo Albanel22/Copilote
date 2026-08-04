@@ -64,6 +64,7 @@ jobs:
           
           echo "🧹 CRITICAL: Suppression des includes infra dans init.c..."
           if [ -f drivers/kernelsu/core/init.c ]; then
+              sed -i '/#include.*file_wrapper\.h/d' drivers/kernelsu/core/init.c
               sed -i '/#include.*infra\//d' drivers/kernelsu/core/init.c
               sed -i 's/ksu_autoload_next_kernel();/\/\/ ksu_autoload_next_kernel(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c || true
           fi
