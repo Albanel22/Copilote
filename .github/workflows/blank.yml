@@ -86,7 +86,12 @@ jobs:
           done
           echo "#endif" >> "$STUB_FILE"
 
-          echo "🛠️ Suppression du dossier infra incompatible..."
+          echo "🔁 Remplacement universel de tous les includes infra/ avant suppression..."
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | while read -r file; do
+            sed -i 's|#include.*infra/.*|#include "core/infra_stubs.h"|g' "$file" || true
+          done
+
+          echo "🛠️ Suppression du dossier infra maintenant que les includes sont remplacés..."
           rm -rf drivers/kernelsu/infra || true
 
           echo "🧹 Neutralisation des appels obsolètes..."
@@ -95,11 +100,6 @@ jobs:
             sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
             sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
           fi
-
-          echo "🔁 Remplacement radical et ciblé de tous les includes infra/..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | while read -r file; do
-            sed -i -E 's/#include.*infra\/[^[:space:]]+/#include "core\/infra_stubs.h"/g' "$file" || true
-          done
 
           echo "🧹 Suppression des références infra dans les Makefiles/Kbuild..."
           find drivers/kernelsu -name "Makefile" -o -name "Kbuild" -exec sed -i '/infra/d' {} + || true
