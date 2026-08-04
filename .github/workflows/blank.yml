@@ -69,10 +69,32 @@ jobs:
           fi
           FILE_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | wc -l)
           echo "ℹ️  $FILE_COUNT fichiers .c/.h trouvés sous drivers/kernelsu"
+
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "❌ drivers/kernelsu est vide ou son symlink est cassé — setup.sh n'a pas produit l'arborescence attendue"
-            ls -la drivers/kernelsu 2>&1 || true
-            exit 1
+            echo "⚠️  Dossier vide détecté — tentative de diagnostic approfondi..."
+            KSU_CLONE_DIR="$(readlink -f drivers/kernelsu/.. 2>/dev/null)/KernelSU"
+            # Le clone se fait à la racine de kernel_src, pas dans drivers/
+            KSU_CLONE_DIR="$(pwd)/KernelSU"
+            echo "ℹ️  Contenu de $KSU_CLONE_DIR (racine du clone) :"
+            ls -la "$KSU_CLONE_DIR" 2>&1 || true
+            echo "ℹ️  Contenu de $KSU_CLONE_DIR/kernel (cible du symlink) :"
+            ls -la "$KSU_CLONE_DIR/kernel" 2>&1 || true
+
+            if [ -f "$KSU_CLONE_DIR/.gitmodules" ]; then
+              echo "🔍 .gitmodules détecté — le dossier kernel/ est probablement un sous-module non initialisé :"
+              cat "$KSU_CLONE_DIR/.gitmodules"
+              echo "🔧 Initialisation des sous-modules Git..."
+              (cd "$KSU_CLONE_DIR" && git submodule update --init --recursive)
+              echo "🔁 Nouveau comptage après init des sous-modules :"
+              FILE_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | wc -l)
+              echo "ℹ️  $FILE_COUNT fichiers .c/.h trouvés désormais"
+            fi
+
+            if [ "$FILE_COUNT" -eq 0 ]; then
+              echo "❌ drivers/kernelsu toujours vide après tentative de correction automatique"
+              echo "💡 Vérifie manuellement la structure du dépôt SukiSU-Ultra/ReSukiSU (branche 'main' utilisée : $KSU_CLONE_DIR)"
+              exit 1
+            fi
           fi
 
           echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h (AVANT suppression)..."
