@@ -149,6 +149,16 @@ jobs:
           echo "💉 Injection patch tactile..."
           printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
           
+          # Forcer explicitement Kprobes et ses dépendances dans le .config final
+          sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/g' ${{ env.BUILD_DIR }}/.config
+          sed -i 's/# CONFIG_KRETPROBES is not set/CONFIG_KRETPROBES=y/g' ${{ env.BUILD_DIR }}/.config
+          sed -i 's/# CONFIG_HAVE_KPROBES is not set/CONFIG_HAVE_KPROBES=y/g' ${{ env.BUILD_DIR }}/.config
+          
+          # Si elles n'existent pas du tout, on les ajoute à la fin du .config
+          grep -q "CONFIG_KPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
+          grep -q "CONFIG_KRETPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_KRETPROBES=y" >> ${{ env.BUILD_DIR }}/.config
+          grep -q "CONFIG_HAVE_KPROBES=y" ${{ env.BUILD_DIR }}/.config || echo "CONFIG_HAVE_KPROBES=y" >> ${{ env.BUILD_DIR }}/.config
+         
           # 7. Compilation finale
           echo "🚀 Compilation finale du noyau..."
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
