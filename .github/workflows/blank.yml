@@ -62,21 +62,17 @@ jobs:
           echo "🛠️ Suppression du dossier infra incompatible avec le noyau 4.19..."
           rm -rf drivers/kernelsu/infra || true
           
-          echo "🧹 Neutralisation propre des appels obsolètes dans init.c..."
+          echo "🧹 Neutralisation propre des appels obsolètes et des includes infra..."
           if [ -f drivers/kernelsu/core/init.c ]; then
-              # Suppression des includes devenus inutiles
-              sed -i '/#include.*file_wrapper\.h/d' drivers/kernelsu/core/init.c
-              sed -i '/#include.*infra\//d' drivers/kernelsu/core/init.c
-              
-              # Mise en commentaire des fonctions et macros incompatibles sous 4.19
               sed -i 's/ksu_init_symbol_resolver();/\/\/ ksu_init_symbol_resolver(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c || true
               sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c || true
               sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c || true
           fi
           
-          echo "🧹 Nettoyage de sécurité dans les Makefiles et autres fichiers..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/#include.*file_wrapper\.h/d' {} +
+          # Nettoyage automatique et global de TOUS les includes "infra/..." dans le code ReSukiSU
           find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '/#include.*infra\//d' {} +
+          
+          echo "🧹 Suppression des références infra dans les Makefiles..."
           find drivers/kernelsu -name "Makefile" -o -name "Kbuild" | xargs sed -i '/infra/d' || true
           
           echo "🔨 Neutralisation des scripts de vérification des hooks..."
