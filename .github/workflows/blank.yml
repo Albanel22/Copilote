@@ -1,4 +1,4 @@
-name: Kernel CI — build & package (corrigé et sécurisé)
+name: Kernel CI — build & package
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  SUKISU_REPO_URL: 'https://github.com/Albanel22/ReSukiSU.git'
+  SUKISU_REPO: 'https://github.com/Albanel22/ReSukiSU.git'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
 
@@ -48,61 +48,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "🗑️ Purge radicale du dossier drivers/kernelsu statique de la branche et des résidus..."
+          echo "🗑️ Nettoyage des anciens dossiers..."
           rm -rf drivers/kernelsu KernelSU susfs4ksu || true
 
-          echo "📥 Clônage de ton fork ReSukiSU (branch main)..."
-          git clone --depth=1 https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
+          echo "📥 Clônage de ton fork ReSukiSU..."
+          git clone --depth=1 "${{ env.SUKISU_REPO }}" drivers/kernelsu
 
           if [ ! -d drivers/kernelsu ]; then
             echo "❌ drivers/kernelsu absent après clone"
             exit 1
           fi
-
-          echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h..."
-          STUB_FILE="drivers/kernelsu/core/infra_stubs.h"
-          mkdir -p drivers/kernelsu/core
-          {
-            echo "#ifndef KSU_INFRA_STUBS_H"
-            echo "#define KSU_INFRA_STUBS_H"
-            echo "/* Généré automatiquement par le CI : stubs neutres pour compat noyau 4.19 */"
-            echo "#include <linux/file.h>"
-            echo "#include <linux/fs.h>"
-          } > "$STUB_FILE"
-
-          INFRA_HEADERS=$(find drivers/kernelsu -type f -path "*infra/*.h" 2>/dev/null || true)
-          echo "$INFRA_HEADERS" | while read -r hdr; do
-            [ -z "$hdr" ] && continue
-            grep -Eo '^[a-zA-Z_][a-zA-Z0-9_ \*]*\([^;]*\);' "$hdr" 2>/dev/null | while read -r decl; do
-              if echo "$decl" | grep -q '^void'; then
-                echo "static inline $decl" | sed 's/;$/ { }/' >> "$STUB_FILE"
-              else
-                echo "static inline $decl" | sed 's/;$/ { return 0; }/' >> "$STUB_FILE"
-              fi
-            done
-          done
-          echo "#endif" >> "$STUB_FILE"
-
-          echo "🔁 Remplacement universel de tous les includes infra/ avant suppression..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | while read -r file; do
-            sed -i 's|#include.*infra/.*|#include "core/infra_stubs.h"|g' "$file" || true
-          done
-
-          echo "🛠️ Suppression du dossier infra maintenant que les includes sont remplacés..."
-          rm -rf drivers/kernelsu/infra || true
-
-          echo "🧹 Neutralisation des appels obsolètes..."
-          if [ -f drivers/kernelsu/core/init.c ]; then
-            sed -i 's/ksu_init_symbol_resolver();/\/\/ ksu_init_symbol_resolver(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
-            sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
-            sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
-          fi
-
-          echo "🧹 Suppression des références infra dans les Makefiles/Kbuild..."
-          find drivers/kernelsu -name "Makefile" -o -name "Kbuild" -exec sed -i '/infra/d' {} + || true
-
-          echo "🔨 Neutralisation des scripts de vérification des hooks..."
-          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \; || true
 
           echo "📥 Récupération et application des patchs SUSFS..."
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
@@ -121,22 +76,6 @@ jobs:
           fi
 
           echo "✅ Intégration ReSukiSU & SUSFS terminée"
-
-      - name: 🔍 Vérification post-nettoyage (fail-fast)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euo pipefail
-          RESIDUAL=$(grep -rn '#include.*infra/' drivers/kernelsu 2>/dev/null || true)
-          if [ -n "$RESIDUAL" ]; then
-            echo "❌ Includes infra/ résiduels détectés :"
-            echo "$RESIDUAL"
-            exit 1
-          fi
-          if [ ! -s drivers/kernelsu/core/infra_stubs.h ]; then
-            echo "❌ infra_stubs.h manquant ou vide"
-            exit 1
-          fi
-          echo "✅ Vérification post-nettoyage passée"
 
       - name: Prepare defconfig
         working-directory: ${{ env.KERNEL_PATH }}
