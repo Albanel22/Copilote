@@ -96,10 +96,9 @@ jobs:
             sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
           fi
 
-          echo "🔁 Remplacement universel et garanti de tous les includes infra/..."
+          echo "🔁 Remplacement radical et ciblé de tous les includes infra/..."
           find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | while read -r file; do
-            sed -i 's/#include.*infra\/.*\.h\"/#include "core\/infra_stubs.h"/g' "$file" || true
-            sed -i 's/#include.*infra\/.*\.h>/#include "core\/infra_stubs.h"/g' "$file" || true
+            sed -i -E 's/#include.*infra\/[^[:space:]]+/#include "core\/infra_stubs.h"/g' "$file" || true
           done
 
           echo "🧹 Suppression des références infra dans les Makefiles/Kbuild..."
