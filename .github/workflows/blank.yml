@@ -52,7 +52,10 @@ jobs:
           
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          
+          echo "🛠️ Correction de compatibilité init.c pour noyau 4.19..."
+          if [ -f drivers/kernelsu/core/init.c ]; then
+              sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
+          fi
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
           echo "📥 Récupération des patchs et en-têtes de SUSFS pour Linux 4.19..."
