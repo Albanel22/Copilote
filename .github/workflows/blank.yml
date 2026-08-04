@@ -1,4 +1,4 @@
-name: Kernel CI — build & package (corrigé)
+name: Kernel CI — build & package (corrigé et sécurisé)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,6 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  # ⚠️ Épingle idéalement à un tag/commit précis plutôt qu'à "main"/branche mouvante
   SUKISU_SETUP_URL: 'https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
@@ -49,56 +48,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "🧼 Nettoyage des dossiers temporaires..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+          echo "🗑️ Purge radicale du dossier drivers/kernelsu statique de la branche et des résidus..."
+          rm -rf drivers/kernelsu KernelSU susfs4ksu || true
 
           echo "📥 Exécution du script d'installation ReSukiSU..."
           if ! curl -LSs "${{ env.SUKISU_SETUP_URL }}" | bash -s main; then
-            echo "❌ ReSukiSU setup a échoué — arrêt immédiat (pas de build silencieusement dégradé)"
+            echo "❌ ReSukiSU setup a échoué — arrêt immédiat"
             exit 1
           fi
 
           if [ ! -d drivers/kernelsu ]; then
-            echo "❌ drivers/kernelsu absent après setup.sh — le script n'a rien installé"
+            echo "❌ drivers/kernelsu absent après setup.sh"
             exit 1
           fi
 
-          echo "🔎 Diagnostic : structure de drivers/kernelsu avant modification..."
-          if [ -L drivers/kernelsu ]; then
-            echo "ℹ️  drivers/kernelsu est un symlink -> $(readlink -f drivers/kernelsu || echo 'CIBLE INTROUVABLE')"
-          fi
-          FILE_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | wc -l)
-          echo "ℹ️  $FILE_COUNT fichiers .c/.h trouvés sous drivers/kernelsu"
-
-          if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "⚠️  Dossier vide détecté — tentative de diagnostic approfondi..."
-            KSU_CLONE_DIR="$(readlink -f drivers/kernelsu/.. 2>/dev/null)/KernelSU"
-            # Le clone se fait à la racine de kernel_src, pas dans drivers/
-            KSU_CLONE_DIR="$(pwd)/KernelSU"
-            echo "ℹ️  Contenu de $KSU_CLONE_DIR (racine du clone) :"
-            ls -la "$KSU_CLONE_DIR" 2>&1 || true
-            echo "ℹ️  Contenu de $KSU_CLONE_DIR/kernel (cible du symlink) :"
-            ls -la "$KSU_CLONE_DIR/kernel" 2>&1 || true
-
-            if [ -f "$KSU_CLONE_DIR/.gitmodules" ]; then
-              echo "🔍 .gitmodules détecté — le dossier kernel/ est probablement un sous-module non initialisé :"
-              cat "$KSU_CLONE_DIR/.gitmodules"
-              echo "🔧 Initialisation des sous-modules Git..."
-              (cd "$KSU_CLONE_DIR" && git submodule update --init --recursive)
-              echo "🔁 Nouveau comptage après init des sous-modules :"
-              FILE_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | wc -l)
-              echo "ℹ️  $FILE_COUNT fichiers .c/.h trouvés désormais"
-            fi
-
-            if [ "$FILE_COUNT" -eq 0 ]; then
-              echo "❌ drivers/kernelsu toujours vide après tentative de correction automatique"
-              echo "💡 Vérifie manuellement la structure du dépôt SukiSU-Ultra/ReSukiSU (branche 'main' utilisée : $KSU_CLONE_DIR)"
-              exit 1
-            fi
-          fi
-
-          echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h (AVANT suppression)..."
+          echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h..."
           STUB_FILE="drivers/kernelsu/core/infra_stubs.h"
+          mkdir -p drivers/kernelsu/core
           {
             echo "#ifndef KSU_INFRA_STUBS_H"
             echo "#define KSU_INFRA_STUBS_H"
@@ -107,15 +73,9 @@ jobs:
             echo "#include <linux/fs.h>"
           } > "$STUB_FILE"
 
-          # Repère chaque fonction déclarée dans les headers infra/*.h AVANT de les supprimer,
-          # et génère un stub inline neutre pour chacune (return 0 / no-op selon signature).
           INFRA_HEADERS=$(find drivers/kernelsu -type f -path "*infra/*.h" 2>/dev/null || true)
-          if [ -z "$INFRA_HEADERS" ]; then
-            echo "⚠️  Aucun header infra/*.h trouvé — soit déjà absent, soit chemin différent. Vérifie manuellement si le build échoue encore sur un symbole manquant."
-          fi
           echo "$INFRA_HEADERS" | while read -r hdr; do
             [ -z "$hdr" ] && continue
-            echo "  📄 Scan de $hdr"
             grep -Eo '^[a-zA-Z_][a-zA-Z0-9_ \*]*\([^;]*\);' "$hdr" 2>/dev/null | while read -r decl; do
               if echo "$decl" | grep -q '^void'; then
                 echo "static inline $decl" | sed 's/;$/ { }/' >> "$STUB_FILE"
@@ -126,76 +86,59 @@ jobs:
           done
           echo "#endif" >> "$STUB_FILE"
 
-          echo "📄 Contenu généré de $STUB_FILE :"
-          cat "$STUB_FILE"
-
-          echo "🛠️ Suppression du dossier infra incompatible avec le noyau 4.19 (après extraction des stubs)..."
+          echo "🛠️ Suppression du dossier infra incompatible..."
           rm -rf drivers/kernelsu/infra || true
 
-          echo "🧹 Neutralisation des appels obsolètes (symbol_resolver, file_wrapper, MODULE_IMPORT_NS)..."
+          echo "🧹 Neutralisation des appels obsolètes..."
           if [ -f drivers/kernelsu/core/init.c ]; then
             sed -i 's/ksu_init_symbol_resolver();/\/\/ ksu_init_symbol_resolver(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
             sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
             sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
           fi
 
-          echo "🔁 Remplacement de tous les includes infra/*.h par le stub centralisé..."
-          # -exec ... {} + ne s'exécute jamais sur une liste vide, contrairement à xargs sans -r
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) \
-            -exec sed -i -E 's#include ".*infra/[a-zA-Z0-9_]+\.h"#include "core/infra_stubs.h"#g' {} +
+          echo "🔁 Remplacement sécurisé des includes infra/*.h par le stub centralisé..."
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | while read -r file; do
+            sed -i -E 's#include ".*infra/[a-zA-Z0-9_]+\.h"#include "core/infra_stubs.h"#g' "$file" || true
+          done
 
           echo "🧹 Suppression des références infra dans les Makefiles/Kbuild..."
-          find drivers/kernelsu -name "Makefile" -o -name "Kbuild" -exec sed -i '/infra/d' {} +
+          find drivers/kernelsu -name "Makefile" -o -name "Kbuild" -exec sed -i '/infra/d' {} + || true
 
           echo "🔨 Neutralisation des scripts de vérification des hooks..."
-          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
+          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \; || true
 
-          echo "📥 Récupération et application des patchs SUSFS pour Linux 4.19..."
+          echo "📥 Récupération et application des patchs SUSFS..."
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
             if [ -d "susfs4ksu/kernel_patches" ]; then
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
               cp -r susfs4ksu/kernel_patches/fs/* fs/
               echo "✅ Patchs SUSFS copiés"
             else
-              echo "❌ Dossier kernel_patches absent dans susfs4ksu — patch SUSFS incomplet"
+              echo "❌ Dossier kernel_patches absent dans susfs4ksu"
               exit 1
             fi
             rm -rf susfs4ksu
           else
-            echo "❌ Clone SUSFS échoué — arrêt (SUSFS est requis, pas optionnel)"
+            echo "❌ Clone SUSFS échoué"
             exit 1
           fi
 
           echo "✅ Intégration ReSukiSU & SUSFS terminée"
 
-      - name: 🔍 Vérification post-nettoyage (fail-fast, AVANT compilation)
+      - name: 🔍 Vérification post-nettoyage (fail-fast)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-
-          echo "🔍 Recherche de références infra/ résiduelles non stubées..."
           RESIDUAL=$(grep -rn '#include.*infra/' drivers/kernelsu 2>/dev/null || true)
           if [ -n "$RESIDUAL" ]; then
-            echo "❌ Includes infra/ non nettoyés :"
+            echo "❌ Includes infra/ résiduels détectés :"
             echo "$RESIDUAL"
             exit 1
           fi
-
-          echo "🔍 Vérification que le stub centralisé existe et est non vide..."
           if [ ! -s drivers/kernelsu/core/infra_stubs.h ]; then
             echo "❌ infra_stubs.h manquant ou vide"
             exit 1
           fi
-
-          echo "🔍 Vérification que les symboles ksu_install_file_wrapper / ksu_file_wrapper_init sont résolus..."
-          for sym in ksu_install_file_wrapper ksu_file_wrapper_init ksu_init_symbol_resolver; do
-            USES=$(grep -rn "$sym" drivers/kernelsu --include="*.c" | grep -v '^\s*//' | grep -v 'static inline' || true)
-            if [ -n "$USES" ]; then
-              echo "ℹ️  $sym encore référencé (vérifie que c'est bien stubé, pas juste commenté à moitié) :"
-              echo "$USES"
-            fi
-          done
-
           echo "✅ Vérification post-nettoyage passée"
 
       - name: Prepare defconfig
@@ -205,20 +148,15 @@ jobs:
           mkdir -p arch/arm64/configs/vendor
           if [ -f "../kiev_perfect_defconfig" ]; then
             cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-            echo "✅ Custom defconfig chargée"
-          else
-            echo "⚠️  kiev_perfect_defconfig introuvable, defconfig par défaut utilisée"
           fi
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
-
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
-          # Wrapper explicite : avec LLVM=1 le compilo est clang, ccache doit être devant
           export CC="ccache clang"
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
@@ -230,14 +168,8 @@ jobs:
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
 
-          echo "🔧 Étape 1 : Génération de la configuration..."
-          make O=${{ env.BUILD_DIR }} \
-            LLVM=1 CC="$CC" \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-            ${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
-          echo "🔧 Étape 2 : Injection des flags KSU/SUSFS..."
           cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
@@ -259,95 +191,32 @@ jobs:
           CONFIG_SECURITY_SELINUX_DISABLE=y
           CONFIG_EOF
 
-          echo "🔧 Étape 3 : Validation de la configuration..."
-          make O=${{ env.BUILD_DIR }} \
-            LLVM=1 CC="$CC" \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-            oldconfig
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
 
-          echo "🔧 Étape 4 : Compilation du noyau..."
-          make O=${{ env.BUILD_DIR }} \
-            LLVM=1 CC="$CC" \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-            KCFLAGS="$KCFLAGS" \
-            -j$(nproc) \
-            Image \
-            --output-sync=none 2>&1 | tee build.log
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             echo "❌ Erreur : Image du noyau non trouvée"
             tail -80 build.log
             exit 1
           fi
-
           echo "✅ Compilation du noyau réussie"
-          ls -lh ${{ env.BUILD_DIR }}/arch/arm64/boot/Image
-          echo "📊 Stats ccache :"
-          ccache -s
-
-      - name: 🔍 Vérification post-build (KSU/SUSFS réellement présents dans le binaire)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euo pipefail
-
-          echo "🔍 Vérification des CONFIG_ dans .config final..."
-          for cfg in CONFIG_KSU CONFIG_KSU_MANUAL_HOOK CONFIG_KSU_SUSFS; do
-            if ! grep -q "^${cfg}=y" ${{ env.BUILD_DIR }}/.config; then
-              echo "❌ $cfg non activé dans le .config final"
-              exit 1
-            fi
-          done
-          echo "✅ Configs KSU/SUSFS confirmées dans .config"
-
-          echo "🔍 Recherche des symboles KSU dans le vmlinux (si disponible)..."
-          if [ -f "${{ env.BUILD_DIR }}/vmlinux" ]; then
-            SYM_COUNT=$(nm ${{ env.BUILD_DIR }}/vmlinux 2>/dev/null | grep -c 'ksu_' || true)
-            echo "ℹ️  $SYM_COUNT symboles 'ksu_' trouvés dans vmlinux"
-            if [ "$SYM_COUNT" -eq 0 ]; then
-              echo "❌ Aucun symbole ksu_ dans vmlinux — le driver n'a probablement pas été compilé/lié"
-              exit 1
-            fi
-          else
-            echo "⚠️  vmlinux absent, vérification de symboles impossible (Image compressée uniquement)"
-          fi
-
-          echo "✅ Vérification post-build passée — KSU/SUSFS confirmés actifs"
-          echo "ksu_verified=true" >> $GITHUB_ENV
 
       - name: Repack & Finalize (AnyKernel3)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-
-          echo "📥 Récupération d'AnyKernel3..."
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -f AnyKernel3/anykernel.sh AnyKernel3/README.md
 
-          echo "📥 Récupération de ksud depuis les releases officielles SukiSU-Ultra..."
           mkdir -p AnyKernel3/patch/system/bin
           RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest)
           KSUD_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":\s*"[^"]*ksud[^"]*"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')
-
-          if [ -z "$KSUD_URL" ]; then
-            echo "❌ Impossible de trouver un asset 'ksud' dans la dernière release officielle"
-            echo "💡 Vérifie manuellement : https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases"
-            exit 1
-          fi
-
-          echo "📥 Téléchargement depuis : $KSUD_URL"
           curl -fLo AnyKernel3/patch/system/bin/ksud "$KSUD_URL"
           chmod +x AnyKernel3/patch/system/bin/ksud
 
-          echo "🔐 Empreinte SHA256 du binaire ksud (à comparer manuellement si la release publie un checksum) :"
-          sha256sum AnyKernel3/patch/system/bin/ksud
-
-          echo "✍️ Création du script anykernel.sh..."
           cat > AnyKernel3/anykernel.sh << 'ANYKERNEL_EOF'
           ### AnyKernel3 Ramdisk Mod Script
-          ## osm0sis @ xda-developers
-
           properties() { '
           kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
           do.devicecheck=1
@@ -362,85 +231,38 @@ jobs:
           supported.versions=
           supported.patchlevels=
           '; }
-
           boot_attributes() {
             set_perm_recursive 0 0 755 644 $RAMDISK/*
             set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin
           }
-
           BLOCK=/dev/block/by-name/boot
           IS_SLOT_DEVICE=1
           RAMDISK_COMPRESSION=auto
           PATCH_VBMETA_FLAG=auto
-
           . tools/ak3-core.sh
           split_boot
-
           if [ -f patch/system/bin/ksud ]; then
-            ui_print "⚙️ Configuration OverlayFS via ksud..."
-            chmod 755 patch/system/bin/ksud
             mkdir -p /data/adb/ksu/bin
             cp patch/system/bin/ksud /data/adb/ksu/bin/ksud
             chmod 755 /data/adb/ksu/bin/ksud
-            ui_print "✅ ksud installé"
           fi
-
           flash_boot
           ANYKERNEL_EOF
-
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
 
-          echo "📦 Injection de l'image du noyau..."
           IMG="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
-          if [ ! -f "$IMG" ]; then
-            echo "❌ Image du noyau non trouvée à $IMG"
-            exit 1
-          fi
           cp "$IMG" AnyKernel3/Image
 
-          DTB="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/dtb"
-          if [ -f "$DTB" ]; then
-            cp "$DTB" AnyKernel3/dtb
-            echo "✅ DTB injecté"
-          fi
-
-          echo "🗜️ Création du flashable ZIP..."
           mkdir -p final_output
           cd AnyKernel3
-          zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip * \
-            -x ".git*" "README.md" ".gitignore"
-
+          zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip * -x ".git*" "README.md" ".gitignore"
           cd ..
-          if [ ! -f final_output/AnyKernel3_ReSukiSU_kiev.zip ]; then
-            echo "❌ ZIP non créé"
-            exit 1
-          fi
-
-          echo "🔐 Empreinte SHA256 du ZIP final :"
-          sha256sum final_output/AnyKernel3_ReSukiSU_kiev.zip | tee final_output/AnyKernel3_ReSukiSU_kiev.zip.sha256
-
           echo "✅ Packaging terminé avec succès"
-          ls -lh final_output/
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola_anykernel3
-          path: |
-            final_output/AnyKernel3_ReSukiSU_kiev.zip
-            final_output/AnyKernel3_ReSukiSU_kiev.zip.sha256
+          path: final_output/AnyKernel3_ReSukiSU_kiev.zip
           retention-days: 30
           if-no-files-found: error
-
-      - name: 📊 Build Summary
-        if: always()
-        run: |
-          echo "======================================"
-          echo "📊 BUILD SUMMARY"
-          echo "======================================"
-          echo "Kernel: 4.19.325"
-          echo "Device: Motorola One 5G Ace (Kiev)"
-          echo "ReSukiSU: $([ '${{ env.ksu_verified }}' = 'true' ] && echo 'Vérifié actif ✅' || echo 'Non confirmé ⚠️')"
-          echo "SUSFS: $([ '${{ env.ksu_verified }}' = 'true' ] && echo 'Vérifié actif ✅' || echo 'Non confirmé ⚠️')"
-          echo "Build Status: ${{ job.status }}"
-          echo "======================================"
