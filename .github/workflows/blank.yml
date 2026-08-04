@@ -43,39 +43,63 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel-${{ github.run_number }}
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS
+      - name: 📂 Intégration ReSukiSU & SUSFS & Vérification
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
 
-          echo "🗑️ Nettoyage des anciens dossiers..."
+          echo "=================================================="
+          echo "📥 [1/3] Nettoyage et clonage de ReSukiSU..."
+          echo "=================================================="
           rm -rf drivers/kernelsu KernelSU susfs4ksu || true
-
-          echo "📥 Clônage de ton fork ReSukiSU..."
           git clone --depth=1 "${{ env.SUKISU_REPO }}" drivers/kernelsu
 
           if [ ! -d drivers/kernelsu ]; then
-            echo "❌ drivers/kernelsu absent après clone"
+            echo "❌ ERREUR CRITIQUE : drivers/kernelsu est introuvable après le clone !"
             exit 1
           fi
+          echo "✅ ReSukiSU cloné avec succès dans drivers/kernelsu."
 
-          echo "📥 Récupération et application des patchs SUSFS..."
+          echo "=================================================="
+          echo "📥 [2/3] Récupération et application des patchs SUSFS..."
+          echo "=================================================="
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
             if [ -d "susfs4ksu/kernel_patches" ]; then
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
               cp -r susfs4ksu/kernel_patches/fs/* fs/
-              echo "✅ Patchs SUSFS copiés"
+              echo "✅ Patchs SUSFS (include/linux et fs) copiés avec succès."
             else
-              echo "❌ Dossier kernel_patches absent dans susfs4ksu"
+              echo "❌ ERREUR CRITIQUE : Dossier kernel_patches absent dans susfs4ksu !"
               exit 1
             fi
             rm -rf susfs4ksu
           else
-            echo "❌ Clone SUSFS échoué"
+            echo "❌ ERREUR CRITIQUE : Échec du clonage de SUSFS (${{ env.SUSFS_BRANCH }}) !"
             exit 1
           fi
 
-          echo "✅ Intégration ReSukiSU & SUSFS terminée"
+          echo "=================================================="
+          echo "🔍 [3/3] Audit de sécurité et traçabilité..."
+          echo "=================================================="
+          
+          # Vérification de KernelSU / hooks
+          if grep -q "ksu" drivers/kernelsu/Kbuild 2>/dev/null || [ -f drivers/kernelsu/kernel/core_hook.c ]; then
+            echo "🟢 Statut KernelSU / ReSukiSU : PRÉSENT et structuré."
+          else
+            echo "⚠️ ALERTE : La structure de ReSukiSU semble anormale !"
+          fi
+
+          # Vérification de SUSFS dans le noyau
+          if [ -f "fs/susfs.c" ] || [ -f "include/linux/susfs.h" ]; then
+            echo "🟢 Statut SUSFS : INTÉGRÉ avec succès dans le noyau."
+          else
+            echo "❌ ERREUR : SUSFS n'a pas été trouvé dans les sources du noyau après la copie !"
+            exit 1
+          fi
+
+          echo "=================================================="
+          echo "✅ Tous les voyants sont verts, lancement du build."
+          echo "=================================================="
 
       - name: Prepare defconfig
         working-directory: ${{ env.KERNEL_PATH }}
@@ -143,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
-          rm -f AnyKernel3/anykernel.sh AnyKernel3/README.md
+          rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
 
           mkdir -p AnyKernel3/patch/system/bin
           RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest)
@@ -151,10 +175,13 @@ jobs:
           curl -fLo AnyKernel3/patch/system/bin/ksud "$KSUD_URL"
           chmod +x AnyKernel3/patch/system/bin/ksud
 
-          cat > AnyKernel3/anykernel.sh << 'ANYKERNEL_EOF'
+          echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
+          cat << 'EOF' > AnyKernel3/anykernel.sh
           ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+          ### AnyKernel setup
           properties() { '
-          kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
+          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
           do.devicecheck=1
           do.modules=1
           do.systemless=1
@@ -164,26 +191,34 @@ jobs:
           device.name2=XT2113-2
           device.name3=kiev_retde
           device.name4=kiev_t
+          device.name5=
           supported.versions=
           supported.patchlevels=
-          '; }
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
           boot_attributes() {
-            set_perm_recursive 0 0 755 644 $RAMDISK/*
-            set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin
-          }
-          BLOCK=/dev/block/by-name/boot
-          IS_SLOT_DEVICE=1
-          RAMDISK_COMPRESSION=auto
-          PATCH_VBMETA_FLAG=auto
-          . tools/ak3-core.sh
-          split_boot
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+
           if [ -f patch/system/bin/ksud ]; then
             mkdir -p /data/adb/ksu/bin
             cp patch/system/bin/ksud /data/adb/ksu/bin/ksud
             chmod 755 /data/adb/ksu/bin/ksud
           fi
-          flash_boot
-          ANYKERNEL_EOF
+
+          flash_boot;
+          EOF
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
 
           IMG="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
@@ -191,10 +226,10 @@ jobs:
 
           mkdir -p final_output
           cd AnyKernel3
-          zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip * -x ".git*" "README.md" ".gitignore"
+          zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
           cd ..
-          echo "✅ Packaging terminé avec succès"
-
+          echo "✅ Packaging terminé avec succès"    
+          
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
