@@ -52,12 +52,20 @@ jobs:
           
           echo "📥 Exécution du script d'installation ReSukiSU..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          
           echo "🛠️ Correction de compatibilité init.c pour noyau 4.19..."
           if [ -f drivers/kernelsu/core/init.c ]; then
               sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
           fi
+
+          echo "🛠️ Suppression radicale du dossier infra incompatible avec le noyau 4.19..."
+          rm -rf drivers/kernelsu/infra || true
+          find drivers/kernelsu -name "Makefile" -type f -exec sed -i '/infra/d' {} + || true
+          find drivers/kernelsu -name "Kbuild" -type f -exec sed -i '/infra/d' {} + || true
+
           echo "🔨 Neutralisation radicale de TOUS les scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
+          
           echo "📥 Récupération des patchs et en-têtes de SUSFS pour Linux 4.19..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 --depth=1 || true
           if [ -d "susfs4ksu/kernel_patches" ]; then
@@ -66,6 +74,7 @@ jobs:
               cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
           fi
           rm -rf susfs4ksu
+          
       - name: 💉 Injection chirurgicale des Hooks ReSukiSU via Python
         run: |
           cd ${{ env.KERNEL_PATH }}
