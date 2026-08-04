@@ -63,17 +63,19 @@ jobs:
             exit 1
           fi
 
-          echo "🛠️ Suppression du dossier infra incompatible avec le noyau 4.19..."
-          rm -rf drivers/kernelsu/infra || true
-
-          echo "🧹 Neutralisation des appels obsolètes (symbol_resolver, file_wrapper, MODULE_IMPORT_NS)..."
-          if [ -f drivers/kernelsu/core/init.c ]; then
-            sed -i 's/ksu_init_symbol_resolver();/\/\/ ksu_init_symbol_resolver(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
-            sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
-            sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
+          echo "🔎 Diagnostic : structure de drivers/kernelsu avant modification..."
+          if [ -L drivers/kernelsu ]; then
+            echo "ℹ️  drivers/kernelsu est un symlink -> $(readlink -f drivers/kernelsu || echo 'CIBLE INTROUVABLE')"
+          fi
+          FILE_COUNT=$(find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null | wc -l)
+          echo "ℹ️  $FILE_COUNT fichiers .c/.h trouvés sous drivers/kernelsu"
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ drivers/kernelsu est vide ou son symlink est cassé — setup.sh n'a pas produit l'arborescence attendue"
+            ls -la drivers/kernelsu 2>&1 || true
+            exit 1
           fi
 
-          echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h..."
+          echo "🧩 Génération du header de stubs centralisé pour tous les includes infra/*.h (AVANT suppression)..."
           STUB_FILE="drivers/kernelsu/core/infra_stubs.h"
           {
             echo "#ifndef KSU_INFRA_STUBS_H"
@@ -83,15 +85,19 @@ jobs:
             echo "#include <linux/fs.h>"
           } > "$STUB_FILE"
 
-          # Repère chaque fonction déclarée dans les headers infra/*.h qu'on s'apprête à retirer,
+          # Repère chaque fonction déclarée dans les headers infra/*.h AVANT de les supprimer,
           # et génère un stub inline neutre pour chacune (return 0 / no-op selon signature).
-          find drivers/kernelsu -type f -path "*infra/*.h" 2>/dev/null | while read -r hdr; do
+          INFRA_HEADERS=$(find drivers/kernelsu -type f -path "*infra/*.h" 2>/dev/null || true)
+          if [ -z "$INFRA_HEADERS" ]; then
+            echo "⚠️  Aucun header infra/*.h trouvé — soit déjà absent, soit chemin différent. Vérifie manuellement si le build échoue encore sur un symbole manquant."
+          fi
+          echo "$INFRA_HEADERS" | while read -r hdr; do
+            [ -z "$hdr" ] && continue
+            echo "  📄 Scan de $hdr"
             grep -Eo '^[a-zA-Z_][a-zA-Z0-9_ \*]*\([^;]*\);' "$hdr" 2>/dev/null | while read -r decl; do
               if echo "$decl" | grep -q '^void'; then
-                fn=$(echo "$decl" | sed -E 's/^void ([a-zA-Z0-9_]+)\(.*/\1/')
                 echo "static inline $decl" | sed 's/;$/ { }/' >> "$STUB_FILE"
               else
-                fn=$(echo "$decl" | sed -E 's/^[a-zA-Z_]+ \**([a-zA-Z0-9_]+)\(.*/\1/')
                 echo "static inline $decl" | sed 's/;$/ { return 0; }/' >> "$STUB_FILE"
               fi
             done
@@ -101,12 +107,23 @@ jobs:
           echo "📄 Contenu généré de $STUB_FILE :"
           cat "$STUB_FILE"
 
+          echo "🛠️ Suppression du dossier infra incompatible avec le noyau 4.19 (après extraction des stubs)..."
+          rm -rf drivers/kernelsu/infra || true
+
+          echo "🧹 Neutralisation des appels obsolètes (symbol_resolver, file_wrapper, MODULE_IMPORT_NS)..."
+          if [ -f drivers/kernelsu/core/init.c ]; then
+            sed -i 's/ksu_init_symbol_resolver();/\/\/ ksu_init_symbol_resolver(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
+            sed -i 's/ksu_file_wrapper_init();/\/\/ ksu_file_wrapper_init(); \/\/ 4.19 compat/g' drivers/kernelsu/core/init.c
+            sed -i 's/MODULE_IMPORT_NS/\/\/ MODULE_IMPORT_NS/g' drivers/kernelsu/core/init.c
+          fi
+
           echo "🔁 Remplacement de tous les includes infra/*.h par le stub centralisé..."
-          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -print0 | \
-            xargs -0 sed -i -E 's#include ".*infra/[a-zA-Z0-9_]+\.h"#include "core/infra_stubs.h"#g'
+          # -exec ... {} + ne s'exécute jamais sur une liste vide, contrairement à xargs sans -r
+          find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) \
+            -exec sed -i -E 's#include ".*infra/[a-zA-Z0-9_]+\.h"#include "core/infra_stubs.h"#g' {} +
 
           echo "🧹 Suppression des références infra dans les Makefiles/Kbuild..."
-          find drivers/kernelsu -name "Makefile" -o -name "Kbuild" | xargs -r sed -i '/infra/d'
+          find drivers/kernelsu -name "Makefile" -o -name "Kbuild" -exec sed -i '/infra/d' {} +
 
           echo "🔨 Neutralisation des scripts de vérification des hooks..."
           find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
