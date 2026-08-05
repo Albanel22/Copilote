@@ -13,7 +13,9 @@ env:
   # pas à la racine du dépôt (contrairement à ReSukiSU). On clone donc à part et on
   # ne copie que ce sous-dossier vers drivers/kernelsu.
   SUKISU_REPO: 'https://github.com/SukiSU-Ultra/SukiSU-Ultra.git'
-  SUKISU_BRANCH: 'main'
+  # main = pensée pour GKI + hook kprobe par défaut.
+  # nongki = requise pour noyau Non-GKI avec CONFIG_KSU_MANUAL_HOOK (notre cas).
+  SUKISU_BRANCH: 'nongki'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
 
@@ -104,6 +106,16 @@ jobs:
           echo "🔍 Vérification :"
           grep -n 'kernelsu' drivers/Makefile
           grep -n 'kernelsu' drivers/Kconfig
+
+          echo "🔍 Diagnostic ciblé : présence des headers uapi/ (au cas où)..."
+          find drivers/kernelsu -iname "app_profile.h" -exec echo "  Trouvé : {}" \;
+          if ! find drivers/kernelsu -iname "app_profile.h" | grep -q .; then
+            echo "⚠️  app_profile.h introuvable nulle part sous drivers/kernelsu"
+            echo "ℹ️  Contenu de drivers/kernelsu/include/uapi (si présent) :"
+            ls -la drivers/kernelsu/include/uapi 2>&1 || echo "  (dossier absent)"
+            echo "ℹ️  Contenu de drivers/kernelsu/uapi (si présent) :"
+            ls -la drivers/kernelsu/uapi 2>&1 || echo "  (dossier absent)"
+          fi
 
           echo "=================================================="
           echo "📥 [2/3] Récupération et application des patchs SUSFS..."
