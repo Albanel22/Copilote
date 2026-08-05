@@ -13,9 +13,10 @@ env:
   # pas à la racine du dépôt (contrairement à ReSukiSU). On clone donc à part et on
   # ne copie que ce sous-dossier vers drivers/kernelsu.
   SUKISU_REPO: 'https://github.com/SukiSU-Ultra/SukiSU-Ultra.git'
-  # main = pensée pour GKI + hook kprobe par défaut.
-  # nongki = requise pour noyau Non-GKI avec CONFIG_KSU_MANUAL_HOOK (notre cas).
-  SUKISU_BRANCH: 'nongki'
+  # 'nongki' n'est pas une branche Git réelle — c'était un argument de setup.sh,
+  # pas un ref checkoutable. On reste sur main et on laisse le diagnostic localiser
+  # précisément ce qui manque pour le mode Non-GKI/hook manuel.
+  SUKISU_BRANCH: 'main'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
 
@@ -96,8 +97,8 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-            source "drivers/kernelsu/Kconfig"
-            }' drivers/Kconfig
+          source "drivers/kernelsu/Kconfig"
+          }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -209,6 +210,10 @@ jobs:
           CONFIG_EOF
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
+
+          # --- PATCH TACTILE MOTOROLA & MODULES ---
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
