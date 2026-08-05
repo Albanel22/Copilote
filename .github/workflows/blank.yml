@@ -134,6 +134,15 @@ jobs:
             echo "ℹ️  su_mount_ns.c absent, rien à patcher"
           fi
 
+          echo "🔧 Compat 4.19 : champ fsnotify_ops handle_inode_event → handle_event (+ cast) dans pkg_observer.c..."
+          PKO="drivers/kernelsu/manager/pkg_observer.c"
+          if [ -f "$PKO" ]; then
+            sed -i 's|\.handle_inode_event = ksu_handle_inode_event,|.handle_event = (int (*)(struct fsnotify_group *, struct inode *, u32, const void *, int, const unsigned char *, u32, struct fsnotify_iter_info *))ksu_handle_inode_event, /* 4.19 compat */|' "$PKO"
+            echo "✅ pkg_observer.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  pkg_observer.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
