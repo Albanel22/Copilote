@@ -190,6 +190,12 @@ jobs:
 
           mkdir -p AnyKernel3/patch/system/bin
           echo "📂 Copie de ksud depuis le dépôt local..."
+          if [ ! -f ksud ]; then
+            echo "❌ ksud introuvable à la racine de ${{ github.workspace }}"
+            echo "💡 Vérifie que le workflow a bien été lancé sur la branche 'test-sukisu' (sélecteur 'Use workflow from')"
+            ls -la .
+            exit 1
+          fi
           cp ksud AnyKernel3/patch/system/bin/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
 
