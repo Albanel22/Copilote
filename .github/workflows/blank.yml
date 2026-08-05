@@ -98,11 +98,11 @@ jobs:
 
             # f_op->iopoll n'existe pas avant 4.20 : le wrapper retourne juste "non supporté"
             sed -i 's|return orig->f_op->iopoll(kiocb, spin);|return -EOPNOTSUPP; /* 4.19 compat : iopoll absent */|' "$FW"
-            sed -i 's|p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;|p->ops.iopoll = NULL; /* 4.19 compat : iopoll absent */|' "$FW"
+            sed -i '/p->ops\.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;/d' "$FW"
 
             # f_op->remap_file_range n'existe pas avant 4.20 (API split clone/dedupe sur 4.19)
             sed -i 's|return orig->f_op->remap_file_range(.*);|return -EOPNOTSUPP; /* 4.19 compat : remap_file_range absent */|' "$FW"
-            sed -i 's|p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;|p->ops.remap_file_range = NULL; /* 4.19 compat : remap_file_range absent */|' "$FW"
+            sed -i '/p->ops\.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;/d' "$FW"
 
             echo "✅ file_wrapper.c neutralisé pour compat 4.19"
           else
