@@ -152,15 +152,28 @@ jobs:
           fi
           echo "✅ Compilation du noyau réussie"
 
-      - name: Repack & Finalize (AnyKernel3 with ksud)
+      - name: 📥 Récupération de ksud depuis ton dépôt
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
-          rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
-
-          curl -LSs "https://github.com/ReSukiSU/ReSukiSU/releases/download/v3.5.0/ksud" -o AnyKernel3/ksud || touch AnyKernel3/ksud
-          chmod +x AnyKernel3/ksud
+          echo "🔍 Téléchargement du binaire ksud depuis ta branche test-sukisu..."
+          
+          # Téléchargement direct du fichier brut depuis ton dépôt GitHub personnel
+          curl -L "https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksud" -o ksud
+          
+          # Vérification de la taille et de la validité du fichier
+          if [ -f "ksud" ]; then
+            FILE_SIZE=$(wc -c < "ksud")
+            echo "📊 Taille du ksud récupéré : $FILE_SIZE octets"
+            if [ "$FILE_SIZE" -lt 1000000 ]; then
+              echo "❌ Erreur : Le fichier ksud téléchargé semble trop petit (probablement un fichier LFS pointer ou une erreur 404)."
+              exit 1
+            fi
+          else
+            echo "❌ Erreur : Impossible de trouver le fichier ksud."
+            exit 1
+          fi
+          chmod +x ksud
 
           cat << 'EOF' > AnyKernel3/anykernel.sh
           properties() { '
