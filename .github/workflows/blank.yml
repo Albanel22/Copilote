@@ -218,6 +218,8 @@ jobs:
             mkdir -p /data/adb/ksu/bin
             cp patch/system/bin/ksud /data/adb/ksu/bin/ksud
             chmod 755 /data/adb/ksu/bin/ksud
+            # Initialisation de l'environnement SukiSU pour les noyaux non-GKI
+            ./patch/system/bin/ksud kernel setup-script || true
           fi
 
           flash_boot;
