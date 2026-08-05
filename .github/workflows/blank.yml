@@ -170,9 +170,8 @@ jobs:
           rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
 
           mkdir -p AnyKernel3/patch/system/bin
-          RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest)
-          KSUD_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":\s*"[^"]*ksud[^"]*"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')
-          curl -fLo AnyKernel3/patch/system/bin/ksud "$KSUD_URL"
+          echo "📂 Copie de ksud depuis le dépôt local..."
+          cp ksud AnyKernel3/patch/system/bin/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
 
           echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
@@ -228,8 +227,8 @@ jobs:
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
           cd ..
-          echo "✅ Packaging terminé avec succès"    
-          
+          echo "✅ Packaging terminé avec succès"
+      
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
