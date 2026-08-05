@@ -114,6 +114,28 @@ jobs:
             echo "⚠️ Fichier init.c introuvable pour le patch."
           fi
 
+          # --- AJOUTE LE CORRECTIF ICI ---
+      - name: Fix MODULE_IMPORT_NS for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          echo "🛠️ Correction de la compatibilité MODULE_IMPORT_NS pour le noyau 4.19..."
+          
+          INIT_FILE="KernelSU/kernel/core/init.c"
+          
+          if [ -f "$INIT_FILE" ]; then
+            sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/s/^/\/\//' "$INIT_FILE"
+            echo "✅ Ligne neutralisée avec succès dans $INIT_FILE"
+          else
+            echo "❌ Fichier init.c introuvable !"
+            exit 1
+          fi
+
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          # ... (la suite de ton étape de compilation habituelle)
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
