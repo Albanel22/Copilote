@@ -100,6 +100,26 @@ jobs:
             exit 1
           fi
 
+      - name: Patch file_wrapper.c for Kernel 4.19 compatibility
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          echo "🛠️ Adaptation de file_wrapper.c pour le noyau 4.19..."
+          
+          WRAPPER_FILE="KernelSU/kernel/infra/file_wrapper.c"
+          
+          if [ -f "$WRAPPER_FILE" ]; then
+            # Neutralise l'utilisation de iopoll et remap_file_range absents en 4.19
+            sed -i 's/p->ops.iopoll/#//g' "$WRAPPER_FILE" || true
+            sed -i 's/p->ops.remap_file_range/#//g' "$WRAPPER_FILE" || true
+            sed -i 's/orig->f_op->iopoll/NULL/g' "$WRAPPER_FILE" || true
+            sed -i 's/orig->f_op->remap_file_range/NULL/g' "$WRAPPER_FILE" || true
+            echo "✅ file_wrapper.c patché avec succès pour le noyau 4.19"
+          else
+            echo "⚠️ Fichier file_wrapper.c introuvable !"
+            exit 1
+          fi
+
       - name: Prepare defconfig
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
