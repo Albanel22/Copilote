@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS via setup.sh
+      - name: 📂 Intégration de ton fork ReSukiSU & SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
@@ -53,15 +53,21 @@ jobs:
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Exécution du script d'installation ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+          echo "📥 Clonage de ton fork personnel ReSukiSU..."
+          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
           
-          echo "📥 Intégration optionnelle de SUSFS..."
+          echo "📥 Intégration des patchs SUSFS..."
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
             if [ -d "susfs4ksu/kernel_patches" ]; then
+              # Copie des patchs SUSFS dans le noyau et directement dans les sources de ReSukiSU si nécessaire
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
               cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
-              echo "✅ Patchs SUSFS intégrés."
+              
+              # Si ton fork intègre déjà les patchs susfs pour ksu, on s'assure que les headers communiquent bien
+              if [ -d "susfs4ksu/kernel_patches/kernelsu" ]; then
+                cp -r susfs4ksu/kernel_patches/kernelsu/* drivers/kernelsu/ || true
+              fi
+              echo "✅ Patchs SUSFS intégrés avec ton fork."
             fi
             rm -rf susfs4ksu
           fi
