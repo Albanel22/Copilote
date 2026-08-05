@@ -9,6 +9,7 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
 
@@ -23,6 +24,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
+      - name: Download Stock Boot Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📥 Téléchargement du boot.img d'origine (version 20260726)..."
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur de téléchargement du boot.img"; exit 1; }
 
       - name: Clone Motorola Kernel Source
         run: |
@@ -106,7 +114,7 @@ jobs:
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
 
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32${{ env.DEFCONFIG }}
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
           {
             echo "CONFIG_KSU=y"
@@ -130,7 +138,7 @@ jobs:
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
 
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             echo "❌ Erreur : Image du noyau non trouvée"
@@ -145,7 +153,6 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
 
-          # Téléchargement d'un binaire ksud stable correspondant pour alimenter le ZIP
           curl -LSs "https://github.com/ReSukiSU/ReSukiSU/releases/download/v3.5.0/ksud" -o AnyKernel3/ksud || touch AnyKernel3/ksud
           chmod +x AnyKernel3/ksud
 
