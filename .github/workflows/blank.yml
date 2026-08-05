@@ -89,6 +89,26 @@ jobs:
 
           rm -rf SukiSU-Ultra-src
 
+          echo "🔧 Compat 4.19 : neutralisation de iopoll/remap_file_range (absents avant 4.20) dans file_wrapper.c..."
+          FW="drivers/kernelsu/infra/file_wrapper.c"
+          if [ -f "$FW" ]; then
+            # REMAP_FILE_DEDUP n'existe pas avant 4.20 : on fournit un fallback
+            { echo "#ifndef REMAP_FILE_DEDUP"; echo "#define REMAP_FILE_DEDUP (1 << 0)"; echo "#endif"; cat "$FW"; } > "${FW}.tmp"
+            mv "${FW}.tmp" "$FW"
+
+            # f_op->iopoll n'existe pas avant 4.20 : le wrapper retourne juste "non supporté"
+            sed -i 's|return orig->f_op->iopoll(kiocb, spin);|return -EOPNOTSUPP; /* 4.19 compat : iopoll absent */|' "$FW"
+            sed -i 's|p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;|p->ops.iopoll = NULL; /* 4.19 compat : iopoll absent */|' "$FW"
+
+            # f_op->remap_file_range n'existe pas avant 4.20 (API split clone/dedupe sur 4.19)
+            sed -i 's|return orig->f_op->remap_file_range(.*);|return -EOPNOTSUPP; /* 4.19 compat : remap_file_range absent */|' "$FW"
+            sed -i 's|p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;|p->ops.remap_file_range = NULL; /* 4.19 compat : remap_file_range absent */|' "$FW"
+
+            echo "✅ file_wrapper.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  file_wrapper.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
