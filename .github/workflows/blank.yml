@@ -80,6 +80,32 @@ jobs:
           echo "✅ SukiSU-Ultra (driver) copié avec succès dans drivers/kernelsu."
 
           echo "=================================================="
+          echo "🔗 [1b/3] Enregistrement du driver dans le système de build du noyau..."
+          echo "=================================================="
+          # setup.sh officiel fait ça automatiquement ('[+] Modified Makefile.' / '[+] Modified Kconfig.')
+          # On le reproduit ici puisqu'on clone le driver directement au lieu d'utiliser setup.sh.
+          if ! grep -q 'kernelsu' drivers/Makefile 2>/dev/null; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            echo "✅ drivers/Makefile mis à jour"
+          else
+            echo "ℹ️  drivers/Makefile référence déjà kernelsu"
+          fi
+
+          if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
+            # Insère juste avant le dernier "endmenu" du fichier
+            sed -i '0,/^endmenu/{/^endmenu/i\
+            source "drivers/kernelsu/Kconfig"
+            }' drivers/Kconfig
+            echo "✅ drivers/Kconfig mis à jour"
+          else
+            echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
+          fi
+
+          echo "🔍 Vérification :"
+          grep -n 'kernelsu' drivers/Makefile
+          grep -n 'kernelsu' drivers/Kconfig
+
+          echo "=================================================="
           echo "📥 [2/3] Récupération et application des patchs SUSFS..."
           echo "=================================================="
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
@@ -172,10 +198,6 @@ jobs:
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
 
-          # --- PATCH TACTILE MOTOROLA & MODULES ---
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
@@ -184,6 +206,21 @@ jobs:
             exit 1
           fi
           echo "✅ Compilation du noyau réussie"
+
+          echo "🔍 Vérification que le driver KSU a bien été LIÉ (pas juste présent en source)..."
+          if grep -q "drivers/kernelsu/" build.log; then
+            echo "✅ Le compilateur a bien traité des fichiers dans drivers/kernelsu/"
+          else
+            echo "❌ ALERTE : aucune trace de compilation dans drivers/kernelsu/ dans les logs de build !"
+            echo "💡 Le driver est probablement resté non lié — vérifie drivers/Makefile et drivers/Kconfig"
+          fi
+          if [ -f "${{ env.BUILD_DIR }}/vmlinux" ]; then
+            SYM_COUNT=$(nm "${{ env.BUILD_DIR }}/vmlinux" 2>/dev/null | grep -c 'ksu_' || true)
+            echo "ℹ️  $SYM_COUNT symboles 'ksu_' trouvés dans vmlinux"
+            if [ "$SYM_COUNT" -eq 0 ]; then
+              echo "❌ ALERTE : aucun symbole ksu_ dans vmlinux — le driver n'est pas dans le binaire final !"
+            fi
+          fi
 
       - name: Repack & Finalize (AnyKernel3)
         working-directory: ${{ github.workspace }}
