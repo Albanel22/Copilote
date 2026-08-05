@@ -214,6 +214,10 @@ jobs:
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
 
+          echo "🔧 Patchs modules & Tactile Motorola..."
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
+
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
           cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
@@ -239,10 +243,18 @@ jobs:
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
 
-          # Patchs modules & Tactile Motorola
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
+          echo "🔍 Vérification immédiate : CONFIG_KSU a-t-il survécu à oldconfig ?"
+          if grep -q '^CONFIG_KSU=y' ${{ env.BUILD_DIR }}/.config; then
+            echo "✅ CONFIG_KSU=y confirmé dans le .config final"
+          else
+            echo "❌ CONFIG_KSU absent ou désactivé après oldconfig !"
+            echo "ℹ️  Valeur actuelle :"
+            grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne CONFIG_KSU trouvée du tout)"
+            echo "ℹ️  Dépendances déclarées dans drivers/kernelsu/Kconfig :"
+            grep -n -A2 '^config KSU' drivers/kernelsu/Kconfig 2>/dev/null || echo "  (Kconfig introuvable ou pas de bloc 'config KSU')"
+            grep -n 'depends on\|select' drivers/kernelsu/Kconfig 2>/dev/null | head -20
+            exit 1
+          fi
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
