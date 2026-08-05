@@ -112,7 +112,7 @@ jobs:
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
            source "drivers/kernelsu/Kconfig"
-           }' drivers/Kconfig
+          }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -341,4 +341,4 @@ jobs:
           name: kernel-motorola_anykernel3
           path: final_output/AnyKernel3_SukiSUUltra_kiev.zip
           retention-days: 30
-          if-no-files-found: errorconcurrency: 
+          if-no-files-found: error
