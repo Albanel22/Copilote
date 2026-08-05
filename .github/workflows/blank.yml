@@ -73,6 +73,20 @@ jobs:
 
           echo "📦 Copie du sous-dossier kernel/ (le vrai driver) vers drivers/kernelsu..."
           cp -r SukiSU-Ultra-src/kernel drivers/kernelsu
+
+          echo "📦 Copie du dossier uapi/ racine du monorepo (header ABI partagé noyau↔manager)..."
+          # Le Kbuild ajoute déjà -I$(KSU_KERNEL_DIR) (= drivers/kernelsu) au chemin de recherche.
+          # Les includes "uapi/xxx.h" dans tout le code se résolvent donc automatiquement
+          # une fois ce dossier copié ici, sans avoir à dupliquer quoi que ce soit ailleurs.
+          if [ -d "SukiSU-Ultra-src/uapi" ]; then
+            cp -r SukiSU-Ultra-src/uapi drivers/kernelsu/uapi
+            echo "✅ drivers/kernelsu/uapi/ créé :"
+            ls -la drivers/kernelsu/uapi
+          else
+            echo "❌ ERREUR CRITIQUE : SukiSU-Ultra-src/uapi introuvable à la racine du monorepo !"
+            exit 1
+          fi
+
           rm -rf SukiSU-Ultra-src
 
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
@@ -108,46 +122,13 @@ jobs:
           grep -n 'kernelsu' drivers/Makefile
           grep -n 'kernelsu' drivers/Kconfig
 
-          echo "🔍 Diagnostic ciblé : présence des headers uapi/ (au cas où)..."
-          find drivers/kernelsu -iname "app_profile.h" -exec echo "  Trouvé : {}" \;
-          if ! find drivers/kernelsu -iname "app_profile.h" | grep -q .; then
-            echo "⚠️  app_profile.h introuvable nulle part sous drivers/kernelsu"
-            echo "ℹ️  Contenu de drivers/kernelsu/include/uapi (si présent) :"
-            ls -la drivers/kernelsu/include/uapi 2>&1 || echo "  (dossier absent)"
-            echo "ℹ️  Contenu de drivers/kernelsu/uapi (si présent) :"
-            ls -la drivers/kernelsu/uapi 2>&1 || echo "  (dossier absent)"
+          echo "🔍 Vérification finale : les includes uapi/ sont-ils bien résolubles ?"
+          if [ -f drivers/kernelsu/uapi/app_profile.h ]; then
+            echo "✅ drivers/kernelsu/uapi/app_profile.h présent — le -I du Kbuild devrait le résoudre partout."
+          else
+            echo "❌ drivers/kernelsu/uapi/app_profile.h toujours absent après copie !"
+            exit 1
           fi
-
-          echo "🔧 Correctif ciblé : réplication des headers explicitement attendus sous uapi/..."
-          # On ne touche qu'aux fichiers réellement référencés via #include "uapi/xxx.h" quelque part
-          # dans le code, pas à tous les headers (évite les doublons inutiles / effets de bord).
-          NEEDED=$(grep -rhoE '#include\s*"uapi/[a-zA-Z0-9_./]+\.h"' drivers/kernelsu 2>/dev/null | \
-                   sed -E 's/.*"uapi\/(.*)"/\1/' | sort -u)
-
-          if [ -z "$NEEDED" ]; then
-            echo "ℹ️  Aucun include \"uapi/...\" détecté dans le code — rien à corriger ici."
-          fi
-
-          echo "$NEEDED" | while read -r rel; do
-            [ -z "$rel" ] && continue
-            fname=$(basename "$rel")
-            # Cherche le fichier réel n'importe où sous drivers/kernelsu (hors dossiers uapi/ déjà présents)
-            SRC=$(find drivers/kernelsu -type f -name "$fname" ! -path "*/uapi/*" | head -1)
-            if [ -z "$SRC" ]; then
-              echo "❌ $fname introuvable dans drivers/kernelsu — impossible de corriger l'include uapi/$rel"
-              continue
-            fi
-            # Pour chaque fichier qui inclut "uapi/$rel", on s'assure que le sous-dossier uapi/
-            # existe à côté de LUI (résolution relative des includes entre guillemets)
-            grep -rl "\"uapi/$rel\"" drivers/kernelsu 2>/dev/null | while read -r including_file; do
-              inc_dir=$(dirname "$including_file")
-              mkdir -p "$inc_dir/uapi"
-              if [ ! -f "$inc_dir/uapi/$fname" ]; then
-                cp "$SRC" "$inc_dir/uapi/$fname"
-                echo "✅ $inc_dir/uapi/$fname créé (copie de $SRC) pour satisfaire l'include dans $including_file"
-              fi
-            done
-          done
 
           echo "=================================================="
           echo "📥 [2/3] Récupération et application des patchs SUSFS..."
@@ -241,10 +222,6 @@ jobs:
           CONFIG_EOF
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
-
-          # --- PATCH TACTILE MOTOROLA & MODULES ---
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n/* --- Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
