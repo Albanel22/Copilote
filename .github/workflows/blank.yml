@@ -143,6 +143,19 @@ jobs:
             echo "ℹ️  pkg_observer.c absent, rien à patcher"
           fi
 
+          echo "🔧 Compat 4.19 : TWA_RESUME → true (API task_work_add pré-5.9) + include put_task_struct dans allowlist.c..."
+          AL="drivers/kernelsu/policy/allowlist.c"
+          if [ -f "$AL" ]; then
+            # task_work_add() prenait un bool (true/false) avant l'introduction de l'enum TWA_* en 5.9+
+            sed -i 's|task_work_add(tsk, cb, TWA_RESUME)|task_work_add(tsk, cb, true) /* 4.19 compat : ancienne API bool */|' "$AL"
+            # put_task_struct nécessite ce header, pas forcément inclus transitivement sur ce noyau
+            { echo "#include <linux/sched/task.h>"; cat "$AL"; } > "${AL}.tmp"
+            mv "${AL}.tmp" "$AL"
+            echo "✅ allowlist.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  allowlist.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
