@@ -16,6 +16,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -55,21 +56,27 @@ jobs:
           
           echo "📥 Clonage de ton fork personnel ReSukiSU..."
           git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
-          
+
           echo "📥 Intégration des patchs SUSFS..."
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
             if [ -d "susfs4ksu/kernel_patches" ]; then
-              # Copie des patchs SUSFS dans le noyau et directement dans les sources de ReSukiSU si nécessaire
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
               cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
               
-              # Si ton fork intègre déjà les patchs susfs pour ksu, on s'assure que les headers communiquent bien
               if [ -d "susfs4ksu/kernel_patches/kernelsu" ]; then
                 cp -r susfs4ksu/kernel_patches/kernelsu/* drivers/kernelsu/ || true
               fi
               echo "✅ Patchs SUSFS intégrés avec ton fork."
             fi
             rm -rf susfs4ksu
+          fi
+
+          echo "🔗 Liaison officielle de ReSukiSU dans les drivers du noyau..."
+          if ! grep -q "kernelsu" drivers/Kconfig; then
+            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          fi
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo 'obj-y += kernelsu/' >> drivers/Makefile
           fi
 
           echo "🔨 Neutralisation des scripts de vérification des hooks..."
@@ -93,7 +100,6 @@ jobs:
                   if brace_idx != -1:
                       content = content[:brace_idx + 1] + "\n" + call_body + "\n" + content[brace_idx + 1:]
                       with open(path, 'w', encoding='utf-8') as f: f.write(content)
-
           inject_hook("drivers/input/input.c", "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_input_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif")
           inject_hook("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif")
           inject_hook("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif")
@@ -103,39 +109,6 @@ jobs:
           inject_hook("kernel/sys.c", "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif")
           print("✨ Hooks injectés avec succès !")
           EOF
-
-      - name: Inject ReSukiSU & Configure Kernel
-        working-directory: ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}
-        run: |
-          set -euo pipefail
-
-          # 1. Nettoyage et clonage propre de ReSukiSU dans drivers/
-          rm -rf drivers/kernelsu
-          git clone https://github.com/skkk/ReSukiSU.git drivers/kernelsu --depth=1
-          # (Note: Remplace l'URL ci-dessus par celle de ton fork exact si nécessaire)
-
-          # 2. Liaison officielle dans l'arborescence du noyau pour forcer la compilation
-          if ! grep -q "kernelsu" drivers/Kconfig; then
-          # Insertion avant la dernière ligne (souvent 'endmenu' ou 'source')
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          fi
-
-          if ! grep -q "kernelsu" drivers/Makefile; then
-          echo 'obj-y += kernelsu/' >> drivers/Makefile
-          fi
-
-          # 3. Injection des configurations obligatoires pour ReSukiSU dans le .config
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
-
-          # Si tu utilises un .config déjà généré :
-          if [ -f .config ]; then
-          echo "CONFIG_KSU=y" >> .config
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> .config
-          make olddefconfig
-          fi
-
-          echo "✅ ReSukiSU injecté et lié avec succès aux sources du noyau !"
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -149,12 +122,12 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
-
+          
           mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-
+          
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-
+          
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -170,15 +143,15 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
           } >> ${{ env.BUILD_DIR }}/.config
-
+          
           make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-
+          
           # Patchs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-
+          
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
-
+          
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             echo "❌ Erreur : Image du noyau non trouvée"
             exit 1
@@ -193,10 +166,9 @@ jobs:
           rm -rf AnyKernel3
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
-
-          # Copie de l'image du noyau compilé
+          
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
-
+          
           cat << 'EOF' > AnyKernel3/anykernel.sh
           ### AnyKernel3 Ramdisk Mod Script
           ## osm0sis @ xda-developers
@@ -213,13 +185,13 @@ jobs:
           device.name3=kiev_retde
           device.name4=kiev_t
           '; } # end properties
-
+          
           ### AnyKernel install
           boot_attributes() {
           set_perm_recursive 0 0 755 644 $RAMDISK/*;
           set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
           } # end attributes
-
+          
           BLOCK=/dev/block/by-name/boot;
           IS_SLOT_DEVICE=1;
           RAMDISK_COMPRESSION=auto;
@@ -228,16 +200,15 @@ jobs:
           . tools/ak3-core.sh;
           
           split_boot;
-
-          # Exécution unique du script d'installation officiel de ReSukiSU si présent dans le ramdisk/image
+          
           if [ -f /data/adb/ksu/bin/ksud ]; then
             /data/adb/ksu/bin/ksud kernel setup-script || true
           fi
-
+          
           flash_boot;
           EOF
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
-
+          
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
