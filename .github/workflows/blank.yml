@@ -152,29 +152,21 @@ jobs:
           fi
           echo "✅ Compilation du noyau réussie"
 
-      - name: 📥 Récupération de ksud depuis ton dépôt
+      - name: Repack & Finalize (AnyKernel3 with ksud)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          echo "🔍 Téléchargement du binaire ksud depuis ta branche test-sukisu..."
           
-          # Téléchargement direct du fichier brut depuis ton dépôt GitHub personnel
-          curl -L "https://raw.githubusercontent.com/Albanel22/Copilote/test-sukisu/ksud" -o ksud
-          
-          # Vérification de la taille et de la validité du fichier
-          if [ -f "ksud" ]; then
-            FILE_SIZE=$(wc -c < "ksud")
-            echo "📊 Taille du ksud récupéré : $FILE_SIZE octets"
-            if [ "$FILE_SIZE" -lt 1000000 ]; then
-              echo "❌ Erreur : Le fichier ksud téléchargé semble trop petit (probablement un fichier LFS pointer ou une erreur 404)."
-              exit 1
-            fi
-          else
-            echo "❌ Erreur : Impossible de trouver le fichier ksud."
-            exit 1
-          fi
-          chmod +x ksud
+          # Nettoyage et clonage propre d'AnyKernel3
+          rm -rf AnyKernel3
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
 
+          # Copie de ton binaire ksud validé
+          cp ksud AnyKernel3/ksud
+          chmod +x AnyKernel3/ksud
+
+          # Création sécurisée du fichier anykernel.sh dans le dossier AnyKernel3
           cat << 'EOF' > AnyKernel3/anykernel.sh
           properties() { '
           kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
@@ -185,6 +177,8 @@ jobs:
           do.cleanuponabort=1
           device.name1=kiev
           device.name2=XT2113-2
+          device.name3=kiev_retde
+          device.name4=kiev_t
           '; } # end properties
 
           block=/dev/block/by-name/boot;
@@ -204,13 +198,15 @@ jobs:
           EOF
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
 
+          # Copie de l'image du noyau compilé
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
 
+          # Création du ZIP final
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
           cd ..
-          echo "✅ Packaging AnyKernel3 terminé"
+          echo "✅ Packaging AnyKernel3 terminé avec succès !"
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
