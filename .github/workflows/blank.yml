@@ -111,7 +111,7 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-           source "drivers/kernelsu/Kconfig"
+          source "drivers/kernelsu/Kconfig"
           }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
@@ -140,10 +140,11 @@ jobs:
             fi
           fi
           # Filet de sécurité : au cas où MODULE_IMPORT_NS apparaîtrait aussi ailleurs dans le driver
+          # (le "|| true" évite que pipefail fasse échouer le script quand grep ne trouve rien à corriger)
           grep -rl '^MODULE_IMPORT_NS(' drivers/kernelsu --include="*.c" 2>/dev/null | while read -r f; do
             sed -i 's/^MODULE_IMPORT_NS(.*/\/\/ &  \/\/ 4.19 compat/' "$f"
             echo "✅ MODULE_IMPORT_NS neutralisée dans $f"
-          done
+          done || true
 
           echo "=================================================="
           echo "📥 [2/3] Récupération et application des patchs SUSFS..."
