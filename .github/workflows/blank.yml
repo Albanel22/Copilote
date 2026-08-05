@@ -118,6 +118,37 @@ jobs:
             ls -la drivers/kernelsu/uapi 2>&1 || echo "  (dossier absent)"
           fi
 
+          echo "🔧 Correctif ciblé : réplication des headers explicitement attendus sous uapi/..."
+          # On ne touche qu'aux fichiers réellement référencés via #include "uapi/xxx.h" quelque part
+          # dans le code, pas à tous les headers (évite les doublons inutiles / effets de bord).
+          NEEDED=$(grep -rhoE '#include\s*"uapi/[a-zA-Z0-9_./]+\.h"' drivers/kernelsu 2>/dev/null | \
+                   sed -E 's/.*"uapi\/(.*)"/\1/' | sort -u)
+
+          if [ -z "$NEEDED" ]; then
+            echo "ℹ️  Aucun include \"uapi/...\" détecté dans le code — rien à corriger ici."
+          fi
+
+          echo "$NEEDED" | while read -r rel; do
+            [ -z "$rel" ] && continue
+            fname=$(basename "$rel")
+            # Cherche le fichier réel n'importe où sous drivers/kernelsu (hors dossiers uapi/ déjà présents)
+            SRC=$(find drivers/kernelsu -type f -name "$fname" ! -path "*/uapi/*" | head -1)
+            if [ -z "$SRC" ]; then
+              echo "❌ $fname introuvable dans drivers/kernelsu — impossible de corriger l'include uapi/$rel"
+              continue
+            fi
+            # Pour chaque fichier qui inclut "uapi/$rel", on s'assure que le sous-dossier uapi/
+            # existe à côté de LUI (résolution relative des includes entre guillemets)
+            grep -rl "\"uapi/$rel\"" drivers/kernelsu 2>/dev/null | while read -r including_file; do
+              inc_dir=$(dirname "$including_file")
+              mkdir -p "$inc_dir/uapi"
+              if [ ! -f "$inc_dir/uapi/$fname" ]; then
+                cp "$SRC" "$inc_dir/uapi/$fname"
+                echo "✅ $inc_dir/uapi/$fname créé (copie de $SRC) pour satisfaire l'include dans $including_file"
+              fi
+            done
+          done
+
           echo "=================================================="
           echo "📥 [2/3] Récupération et application des patchs SUSFS..."
           echo "=================================================="
