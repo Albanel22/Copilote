@@ -1,0 +1,257 @@
+name: Kernel CI — build & package (SukiSU-Ultra)
+
+on:
+  workflow_dispatch:
+
+env:
+  KERNEL_PATH: kernel_src
+  BUILD_DIR: out
+  ARCH: arm64
+  DEFCONFIG: lito-perf_defconfig
+  CCACHE_SIZE: 5G
+  # SukiSU-Ultra est un monorepo : le driver noyau vit dans le sous-dossier "kernel/",
+  # pas à la racine du dépôt (contrairement à ReSukiSU). On clone donc à part et on
+  # ne copie que ce sous-dossier vers drivers/kernelsu.
+  SUKISU_REPO: 'https://github.com/SukiSU-Ultra/SukiSU-Ultra.git'
+  SUKISU_BRANCH: 'main'
+  SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
+  SUSFS_BRANCH: 'kernel-4.19'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex \
+            glibc-source libelf-dev libssl-dev libncurses-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang llvm lld device-tree-compiler zip unzip curl git python3
+
+      - name: Clone Motorola Kernel Source
+        run: |
+          set -euo pipefail
+          echo "📥 Récupération des sources du noyau..."
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
+            -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-kernel-${{ github.run_number }}
+          restore-keys: ${{ runner.os }}-ccache-
+
+      - name: 📂 Intégration SukiSU-Ultra & SUSFS & Vérification
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+
+          echo "=================================================="
+          echo "📥 [1/3] Nettoyage et clonage de SukiSU-Ultra (monorepo)..."
+          echo "=================================================="
+          rm -rf drivers/kernelsu SukiSU-Ultra-src susfs4ksu || true
+
+          # Clone à part, PAS directement dans drivers/kernelsu : SukiSU-Ultra
+          # mélange app manager + driver + docs à sa racine.
+          git clone --depth=1 -b "${{ env.SUKISU_BRANCH }}" "${{ env.SUKISU_REPO }}" SukiSU-Ultra-src
+
+          if [ ! -d "SukiSU-Ultra-src/kernel" ]; then
+            echo "❌ ERREUR CRITIQUE : SukiSU-Ultra-src/kernel introuvable — structure du dépôt inattendue"
+            echo "ℹ️  Contenu de la racine clonée :"
+            ls -la SukiSU-Ultra-src
+            exit 1
+          fi
+
+          echo "📦 Copie du sous-dossier kernel/ (le vrai driver) vers drivers/kernelsu..."
+          cp -r SukiSU-Ultra-src/kernel drivers/kernelsu
+          rm -rf SukiSU-Ultra-src
+
+          if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
+            echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
+            ls -la drivers/kernelsu
+            exit 1
+          fi
+          echo "✅ SukiSU-Ultra (driver) copié avec succès dans drivers/kernelsu."
+
+          echo "=================================================="
+          echo "📥 [2/3] Récupération et application des patchs SUSFS..."
+          echo "=================================================="
+          if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
+            if [ -d "susfs4ksu/kernel_patches" ]; then
+              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+              cp -r susfs4ksu/kernel_patches/fs/* fs/
+              echo "✅ Patchs SUSFS (include/linux et fs) copiés avec succès."
+            else
+              echo "❌ ERREUR CRITIQUE : Dossier kernel_patches absent dans susfs4ksu !"
+              exit 1
+            fi
+            rm -rf susfs4ksu
+          else
+            echo "❌ ERREUR CRITIQUE : Échec du clonage de SUSFS (${{ env.SUSFS_BRANCH }}) !"
+            exit 1
+          fi
+
+          echo "=================================================="
+          echo "🔍 [3/3] Audit de sécurité et traçabilité..."
+          echo "=================================================="
+
+          # Vérification de la structure SukiSU-Ultra (Kbuild + au moins un fichier core)
+          if [ -f drivers/kernelsu/Kbuild ] && find drivers/kernelsu -name "init.c" | grep -q .; then
+            echo "🟢 Statut SukiSU-Ultra : PRÉSENT et structuré."
+          else
+            echo "⚠️ ALERTE : La structure de SukiSU-Ultra semble anormale !"
+          fi
+
+          # Vérification de SUSFS dans le noyau
+          if [ -f "fs/susfs.c" ] || [ -f "include/linux/susfs.h" ]; then
+            echo "🟢 Statut SUSFS : INTÉGRÉ avec succès dans le noyau."
+          else
+            echo "❌ ERREUR : SUSFS n'a pas été trouvé dans les sources du noyau après la copie !"
+            exit 1
+          fi
+
+          echo "=================================================="
+          echo "✅ Tous les voyants sont verts, lancement du build."
+          echo "=================================================="
+
+      - name: Prepare defconfig
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p arch/arm64/configs/vendor
+          if [ -f "../kiev_perfect_defconfig" ]; then
+            cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          fi
+
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CC="ccache clang"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
+
+          ccache -M ${{ env.CCACHE_SIZE }}
+          ccache -z
+
+          mkdir -p ${{ env.BUILD_DIR }}
+          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
+
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+
+          cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KRETPROBES=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_OVERLAY_FS_REDIRECT_DIR=y
+          CONFIG_KALLSYMS=y
+          CONFIG_KALLSYMS_ALL=y
+          CONFIG_SECURITY_SELINUX=y
+          CONFIG_SECURITY_SELINUX_BOOTPARAM=y
+          CONFIG_SECURITY_SELINUX_DISABLE=y
+          CONFIG_EOF
+
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
+
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
+
+          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            echo "❌ Erreur : Image du noyau non trouvée"
+            tail -80 build.log
+            exit 1
+          fi
+          echo "✅ Compilation du noyau réussie"
+
+      - name: Repack & Finalize (AnyKernel3)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
+
+          mkdir -p AnyKernel3/patch/system/bin
+          echo "📂 Copie de ksud depuis le dépôt local..."
+          cp ksud AnyKernel3/patch/system/bin/ksud
+          chmod +x AnyKernel3/patch/system/bin/ksud
+
+          echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
+          cat << 'EOF' > AnyKernel3/anykernel.sh
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+          ### AnyKernel setup
+          properties() { '
+          kernel.string=Custom Kernel avec SukiSU-Ultra pour Motorola One 5G Ace
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=1
+          device.name1=kiev
+          device.name2=XT2113-2
+          device.name3=kiev_retde
+          device.name4=kiev_t
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+
+          if [ -f patch/system/bin/ksud ]; then
+            mkdir -p /data/adb/ksu/bin
+            cp patch/system/bin/ksud /data/adb/ksu/bin/ksud
+            chmod 755 /data/adb/ksu/bin/ksud
+          fi
+
+          flash_boot;
+          EOF
+          sed -i 's/\r$//' AnyKernel3/anykernel.sh
+
+          IMG="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          cp "$IMG" AnyKernel3/Image
+
+          mkdir -p final_output
+          cd AnyKernel3
+          zip -r9 ../final_output/AnyKernel3_SukiSUUltra_kiev.zip .
+          cd ..
+          echo "✅ Packaging terminé avec succès"
+
+      - name: Upload Finished Packaged Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-motorola_anykernel3
+          path: final_output/AnyKernel3_SukiSUUltra_kiev.zip
+          retention-days: 30
+          if-no-files-found: error
