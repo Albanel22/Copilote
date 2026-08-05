@@ -104,6 +104,39 @@ jobs:
           print("✨ Hooks injectés avec succès !")
           EOF
 
+      - name: Inject ReSukiSU & Configure Kernel
+        working-directory: ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}
+        run: |
+          set -euo pipefail
+
+          # 1. Nettoyage et clonage propre de ReSukiSU dans drivers/
+          rm -rf drivers/kernelsu
+          git clone https://github.com/skkk/ReSukiSU.git drivers/kernelsu --depth=1
+          # (Note: Remplace l'URL ci-dessus par celle de ton fork exact si nécessaire)
+
+          # 2. Liaison officielle dans l'arborescence du noyau pour forcer la compilation
+          if ! grep -q "kernelsu" drivers/Kconfig; then
+          # Insertion avant la dernière ligne (souvent 'endmenu' ou 'source')
+          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          fi
+
+          if ! grep -q "kernelsu" drivers/Makefile; then
+          echo 'obj-y += kernelsu/' >> drivers/Makefile
+          fi
+
+          # 3. Injection des configurations obligatoires pour ReSukiSU dans le .config
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+
+          # Si tu utilises un .config déjà généré :
+          if [ -f .config ]; then
+          echo "CONFIG_KSU=y" >> .config
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> .config
+          make olddefconfig
+          fi
+
+          echo "✅ ReSukiSU injecté et lié avec succès aux sources du noyau !"
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
@@ -152,7 +185,7 @@ jobs:
           fi
           echo "✅ Compilation du noyau réussie"
 
-      - name: Repack & Finalize (AnyKernel3 with ksud)
+      - name: Repack & Finalize (AnyKernel3 with Official ReSukiSU Setup)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -161,15 +194,15 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
 
-          cp ksud AnyKernel3/ksud
-          chmod +x AnyKernel3/ksud
+          # Copie de l'image du noyau compilé
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
 
           cat << 'EOF' > AnyKernel3/anykernel.sh
           ### AnyKernel3 Ramdisk Mod Script
           ## osm0sis @ xda-developers
           ### AnyKernel setup
           properties() { '
-          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
+          kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
           do.devicecheck=1
           do.modules=1
           do.systemless=1
@@ -179,10 +212,6 @@ jobs:
           device.name2=XT2113-2
           device.name3=kiev_retde
           device.name4=kiev_t
-          device.name5=
-          supported.versions=
-          supported.patchlevels=
-          supported.vendorpatchlevels=
           '; } # end properties
 
           ### AnyKernel install
@@ -191,7 +220,6 @@ jobs:
           set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
           } # end attributes
 
-          # boot shell variables
           BLOCK=/dev/block/by-name/boot;
           IS_SLOT_DEVICE=1;
           RAMDISK_COMPRESSION=auto;
@@ -201,10 +229,8 @@ jobs:
           
           split_boot;
 
-          if [ -f ksud ]; then
-            mkdir -p /data/adb/ksu/bin
-            cp ksud /data/adb/ksu/bin/ksud
-            chmod 755 /data/adb/ksu/bin/ksud
+          # Exécution unique du script d'installation officiel de ReSukiSU si présent dans le ramdisk/image
+          if [ -f /data/adb/ksu/bin/ksud ]; then
             /data/adb/ksu/bin/ksud kernel setup-script || true
           fi
 
@@ -212,13 +238,11 @@ jobs:
           EOF
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
 
-          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
-
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
           cd ..
-          echo "✅ Packaging AnyKernel3 terminé avec succès !"
+          echo "✅ Packaging AnyKernel3 propre terminé avec succès !"
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
