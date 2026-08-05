@@ -157,19 +157,19 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Nettoyage et clonage propre d'AnyKernel3
           rm -rf AnyKernel3
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
 
-          # Copie de ton binaire ksud validé
           cp ksud AnyKernel3/ksud
           chmod +x AnyKernel3/ksud
 
-          # Création sécurisée du fichier anykernel.sh dans le dossier AnyKernel3
           cat << 'EOF' > AnyKernel3/anykernel.sh
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+          ### AnyKernel setup
           properties() { '
-          kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
+          kernel.string=Custom Kernel avec Risukisu pour Motorola One 5G Ace
           do.devicecheck=1
           do.modules=1
           do.systemless=1
@@ -179,12 +179,26 @@ jobs:
           device.name2=XT2113-2
           device.name3=kiev_retde
           device.name4=kiev_t
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
           '; } # end properties
 
-          block=/dev/block/by-name/boot;
-          is_slot_device=1;
-          ramdisk_compression=auto;
+          ### AnyKernel install
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          
           . tools/ak3-core.sh;
+          
           split_boot;
 
           if [ -f ksud ]; then
@@ -198,10 +212,8 @@ jobs:
           EOF
           sed -i 's/\r$//' AnyKernel3/anykernel.sh
 
-          # Copie de l'image du noyau compilé
           cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
 
-          # Création du ZIP final
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
