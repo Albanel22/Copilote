@@ -109,6 +109,22 @@ jobs:
             echo "ℹ️  file_wrapper.c absent, rien à patcher"
           fi
 
+          echo "🔧 Compat 4.19 : fallback SECCOMP_ARCH_NATIVE_NR (absente avant le support seccomp multi-arch) dans seccomp_cache.c..."
+          SC="drivers/kernelsu/infra/seccomp_cache.c"
+          if [ -f "$SC" ]; then
+            {
+              echo "#include <asm/unistd.h>"
+              echo "#ifndef SECCOMP_ARCH_NATIVE_NR"
+              echo "#define SECCOMP_ARCH_NATIVE_NR NR_syscalls  /* 4.19 compat : pas de support multi-arch seccomp */"
+              echo "#endif"
+              cat "$SC"
+            } > "${SC}.tmp"
+            mv "${SC}.tmp" "$SC"
+            echo "✅ seccomp_cache.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  seccomp_cache.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
