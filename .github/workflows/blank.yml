@@ -43,64 +43,51 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel-${{ github.run_number }}
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration ReSukiSU & SUSFS & Vérification
+      - name: 📂 Intégration ReSukiSU & SUSFS via setup.sh
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euo pipefail
 
           echo "=================================================="
-          echo "📥 [1/3] Nettoyage et clonage de ReSukiSU..."
+          echo "📥 [1/3] Téléchargement et exécution du setup.sh..."
           echo "=================================================="
-          rm -rf drivers/kernelsu KernelSU susfs4ksu || true
-          git clone --depth=1 "${{ env.SUKISU_REPO }}" drivers/kernelsu
-
-          if [ ! -d drivers/kernelsu ]; then
-            echo "❌ ERREUR CRITIQUE : drivers/kernelsu est introuvable après le clone !"
-            exit 1
-          fi
-          echo "✅ ReSukiSU cloné avec succès dans drivers/kernelsu."
+          
+          # Téléchargement du script officiel
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" -o setup_sukisu.sh
+          
+          # Exécution en mode debug pour voir tout ce qu'il fait dans les logs
+          bash -x ./setup_sukisu.sh main
+          
+          # Nettoyage du script temporaire
+          rm -f setup_sukisu.sh
 
           echo "=================================================="
-          echo "📥 [2/3] Récupération et application des patchs SUSFS..."
+          echo "📥 [2/3] Intégration des patchs SUSFS..."
           echo "=================================================="
           if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
             if [ -d "susfs4ksu/kernel_patches" ]; then
               cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
               cp -r susfs4ksu/kernel_patches/fs/* fs/
-              echo "✅ Patchs SUSFS (include/linux et fs) copiés avec succès."
+              echo "✅ Patchs SUSFS copiés avec succès."
             else
-              echo "❌ ERREUR CRITIQUE : Dossier kernel_patches absent dans susfs4ksu !"
+              echo "❌ ERREUR : Dossier kernel_patches absent dans susfs4ksu !"
               exit 1
             fi
             rm -rf susfs4ksu
           else
-            echo "❌ ERREUR CRITIQUE : Échec du clonage de SUSFS (${{ env.SUSFS_BRANCH }}) !"
+            echo "❌ ERREUR : Échec du clonage de SUSFS !"
             exit 1
           fi
 
           echo "=================================================="
-          echo "🔍 [3/3] Audit de sécurité et traçabilité..."
+          echo "🔍 [3/3] Vérification finale de l'intégration..."
           echo "=================================================="
-          
-          # Vérification de KernelSU / hooks
-          if grep -q "ksu" drivers/kernelsu/Kbuild 2>/dev/null || [ -f drivers/kernelsu/kernel/core_hook.c ]; then
-            echo "🟢 Statut KernelSU / ReSukiSU : PRÉSENT et structuré."
+          if [ -d "drivers/kernelsu" ] || [ -d "KernelSU" ]; then
+            echo "🟢 Statut KernelSU / ReSukiSU : PRÉSENT."
           else
-            echo "⚠️ ALERTE : La structure de ReSukiSU semble anormale !"
-          fi
-
-          # Vérification de SUSFS dans le noyau
-          if [ -f "fs/susfs.c" ] || [ -f "include/linux/susfs.h" ]; then
-            echo "🟢 Statut SUSFS : INTÉGRÉ avec succès dans le noyau."
-          else
-            echo "❌ ERREUR : SUSFS n'a pas été trouvé dans les sources du noyau après la copie !"
+            echo "❌ ERREUR : ReSukiSU n'a pas été installé par le script setup.sh !"
             exit 1
           fi
-
-          echo "=================================================="
-          echo "✅ Tous les voyants sont verts, lancement du build."
-          echo "=================================================="
-
       - name: Prepare defconfig
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
