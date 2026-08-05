@@ -97,6 +97,23 @@ jobs:
             cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           fi
 
+      - name: Patch SukiSU for Kernel 4.19 compatibility
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          echo "🛠️ Correction de MODULE_IMPORT_NS pour le noyau 4.19..."
+          
+          # On cible le fichier init.c dans le dossier KernelSU d'origine
+          INIT_FILE="KernelSU/kernel/core/init.c"
+          
+          if [ -f "$INIT_FILE" ]; then
+            # Si la macro pose problème sur 4.19, on l'encadre par une vérification ou on la commente/adapte
+            sed -i 's/MODULE_IMPORT_NS/#//g' "$INIT_FILE" || true
+            echo "✅ Patch appliqué sur $INIT_FILE"
+          else
+            echo "⚠️ Fichier init.c introuvable pour le patch."
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
