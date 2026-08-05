@@ -125,6 +125,15 @@ jobs:
             echo "ℹ️  seccomp_cache.c absent, rien à patcher"
           fi
 
+          echo "🔧 Compat 4.19 : include uapi/linux/mount.h → linux/mount.h dans su_mount_ns.c..."
+          SMN="drivers/kernelsu/infra/su_mount_ns.c"
+          if [ -f "$SMN" ]; then
+            sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>|' "$SMN"
+            echo "✅ su_mount_ns.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  su_mount_ns.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
