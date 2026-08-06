@@ -9,13 +9,9 @@ env:
   ARCH: arm64
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
-  # SukiSU-Ultra est un monorepo : le driver noyau vit dans le sous-dossier "kernel/",
-  # pas à la racine du dépôt (contrairement à ReSukiSU). On clone donc à part et on
-  # ne copie que ce sous-dossier vers drivers/kernelsu.
-  SUKISU_REPO: 'https://github.com/SukiSU-Ultra/SukiSU-Ultra.git'
-  # 'nongki' n'est pas une branche Git réelle — c'était un argument de setup.sh,
-  # pas un ref checkoutable. On reste sur main et on laisse le diagnostic localiser
-  # précisément ce qui manque pour le mode Non-GKI/hook manuel.
+  # Fork personnel avec les correctifs de compatibilité 4.19 déjà appliqués
+  # (file_wrapper.c, su_mount_ns.c, pkg_observer.c, allowlist.c, app_profile.c, Kbuild)
+  SUKISU_REPO: 'https://github.com/Albanel22/SukiSU-Ultra.git'
   SUKISU_BRANCH: 'main'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
@@ -89,88 +85,12 @@ jobs:
 
           rm -rf SukiSU-Ultra-src
 
-          echo "🔧 Compat 4.19 : neutralisation de iopoll/remap_file_range (absents avant 4.20) dans file_wrapper.c..."
-          FW="drivers/kernelsu/infra/file_wrapper.c"
-          if [ -f "$FW" ]; then
-            # REMAP_FILE_DEDUP n'existe pas avant 4.20 : on fournit un fallback
-            { echo "#ifndef REMAP_FILE_DEDUP"; echo "#define REMAP_FILE_DEDUP (1 << 0)"; echo "#endif"; cat "$FW"; } > "${FW}.tmp"
-            mv "${FW}.tmp" "$FW"
-
-            # f_op->iopoll n'existe pas avant 4.20 : le wrapper retourne juste "non supporté"
-            sed -i 's|return orig->f_op->iopoll(kiocb, spin);|return -EOPNOTSUPP; /* 4.19 compat : iopoll absent */|' "$FW"
-            sed -i '/p->ops\.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;/d' "$FW"
-
-            # f_op->remap_file_range n'existe pas avant 4.20 (API split clone/dedupe sur 4.19)
-            sed -i 's|return orig->f_op->remap_file_range(.*);|return -EOPNOTSUPP; /* 4.19 compat : remap_file_range absent */|' "$FW"
-            sed -i '/p->ops\.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;/d' "$FW"
-
-            echo "✅ file_wrapper.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  file_wrapper.c absent, rien à patcher"
-          fi
-
-          echo "🔧 Compat 4.19 : fallback SECCOMP_ARCH_NATIVE_NR (absente avant le support seccomp multi-arch) dans seccomp_cache.c..."
-          SC="drivers/kernelsu/infra/seccomp_cache.c"
-          if [ -f "$SC" ]; then
-            {
-              echo "#include <asm/unistd.h>"
-              echo "#ifndef SECCOMP_ARCH_NATIVE_NR"
-              echo "#define SECCOMP_ARCH_NATIVE_NR NR_syscalls  /* 4.19 compat : pas de support multi-arch seccomp */"
-              echo "#endif"
-              cat "$SC"
-            } > "${SC}.tmp"
-            mv "${SC}.tmp" "$SC"
-            echo "✅ seccomp_cache.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  seccomp_cache.c absent, rien à patcher"
-          fi
-
-          echo "🔧 Compat 4.19 : include uapi/linux/mount.h → linux/mount.h dans su_mount_ns.c..."
-          SMN="drivers/kernelsu/infra/su_mount_ns.c"
-          if [ -f "$SMN" ]; then
-            sed -i 's|#include <uapi/linux/mount.h>|#include <linux/mount.h>|' "$SMN"
-            echo "✅ su_mount_ns.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  su_mount_ns.c absent, rien à patcher"
-          fi
-
-          echo "🔧 Compat 4.19 : champ fsnotify_ops handle_inode_event → handle_event (+ cast) dans pkg_observer.c..."
-          PKO="drivers/kernelsu/manager/pkg_observer.c"
-          if [ -f "$PKO" ]; then
-            sed -i 's|\.handle_inode_event = ksu_handle_inode_event,|.handle_event = (int (*)(struct fsnotify_group *, struct inode *, u32, const void *, int, const unsigned char *, u32, struct fsnotify_iter_info *))ksu_handle_inode_event, /* 4.19 compat */|' "$PKO"
-            echo "✅ pkg_observer.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  pkg_observer.c absent, rien à patcher"
-          fi
-
-          echo "🔧 Compat 4.19 : TWA_RESUME → true (API task_work_add pré-5.9) + include put_task_struct dans allowlist.c..."
-          AL="drivers/kernelsu/policy/allowlist.c"
-          if [ -f "$AL" ]; then
-            # task_work_add() prenait un bool (true/false) avant l'introduction de l'enum TWA_* en 5.9+
-            sed -i 's|task_work_add(tsk, cb, TWA_RESUME)|task_work_add(tsk, cb, true) /* 4.19 compat : ancienne API bool */|' "$AL"
-            # put_task_struct nécessite ce header, pas forcément inclus transitivement sur ce noyau
-            { echo "#include <linux/sched/task.h>"; cat "$AL"; } > "${AL}.tmp"
-            mv "${AL}.tmp" "$AL"
-            echo "✅ allowlist.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  allowlist.c absent, rien à patcher"
-          fi
-
-          echo "🔧 Compat 4.19 : suppression de seccomp.filter_count (champ absent de struct seccomp) dans app_profile.c..."
-          APF="drivers/kernelsu/policy/app_profile.c"
-          if [ -f "$APF" ]; then
-            sed -i '/atomic_set(&current->seccomp\.filter_count, 0);/d' "$APF"
-            echo "✅ app_profile.c neutralisé pour compat 4.19"
-          else
-            echo "ℹ️  app_profile.c absent, rien à patcher"
-          fi
-
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
             exit 1
           fi
-          echo "✅ SukiSU-Ultra (driver) copié avec succès dans drivers/kernelsu."
+          echo "✅ SukiSU-Ultra (driver, fork corrigé pour 4.19) copié avec succès dans drivers/kernelsu."
 
           echo "=================================================="
           echo "🔗 [1b/3] Enregistrement du driver dans le système de build du noyau..."
@@ -207,6 +127,7 @@ jobs:
           fi
 
           echo "🔧 Neutralisation de MODULE_IMPORT_NS (absente sur noyau 4.19, introduite en 5.x)..."
+          # Seul correctif runtime restant : jamais transféré dans un fichier corrigé du fork.
           if [ -f drivers/kernelsu/core/init.c ]; then
             sed -i 's/^MODULE_IMPORT_NS(.*/\/\/ &  \/\/ 4.19 compat : MODULE_IMPORT_NS absente avant 5.x/' drivers/kernelsu/core/init.c
             if grep -q '^// MODULE_IMPORT_NS' drivers/kernelsu/core/init.c; then
