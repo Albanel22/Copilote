@@ -156,6 +156,15 @@ jobs:
             echo "ℹ️  allowlist.c absent, rien à patcher"
           fi
 
+          echo "🔧 Compat 4.19 : suppression de seccomp.filter_count (champ absent de struct seccomp) dans app_profile.c..."
+          APF="drivers/kernelsu/policy/app_profile.c"
+          if [ -f "$APF" ]; then
+            sed -i '/atomic_set(&current->seccomp\.filter_count, 0);/d' "$APF"
+            echo "✅ app_profile.c neutralisé pour compat 4.19"
+          else
+            echo "ℹ️  app_profile.c absent, rien à patcher"
+          fi
+
           if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
             echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
             ls -la drivers/kernelsu
