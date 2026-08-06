@@ -127,15 +127,18 @@ jobs:
           rm -rf drivers/kernelsu
           git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu --depth=1
 
-          # 2. CORRECTION : Pointez vers kernel/Kconfig (le vrai chemin dans ton repo)
+          # 2. Liaison pointant vers le Kconfig dans le dossier 'kernel' à la racine de ton fork
           if ! grep -q "kernelsu" drivers/Kconfig; then
             sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
           fi
+          
+          # 3. Indiquer au Makefile de compiler le contenu de ce dossier 'kernel'
           if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-y += kernelsu/' >> drivers/Makefile
+            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
           fi
 
-          # 3. Application de la defconfig
+
+          # 4. Application de la defconfig
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
           make LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
