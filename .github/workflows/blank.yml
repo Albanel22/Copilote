@@ -73,10 +73,10 @@ jobs:
 
           echo "🔗 Liaison officielle de ReSukiSU dans les drivers du noyau..."
           if ! grep -q "kernelsu" drivers/Kconfig; then
-            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+            sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
           fi
           if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-y += kernelsu/' >> drivers/Makefile
+            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
           fi
 
           echo "🔨 Neutralisation des scripts de vérification des hooks..."
@@ -123,26 +123,11 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export KCFLAGS="-Wno-error"
           
-          # 1. Clonage propre de ReSukiSU
-          rm -rf drivers/kernelsu
-          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu --depth=1
-
-          # 2. Liaison pointant vers le Kconfig dans le dossier 'kernel' à la racine de ton fork
-          if ! grep -q "kernelsu" drivers/Kconfig; then
-            sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
-          fi
-          
-          # 3. Indiquer au Makefile de compiler le contenu de ce dossier 'kernel'
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
-          fi
-
-
-          # 4. Application de la defconfig
+          mkdir -p ${{ env.BUILD_DIR }}
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          make LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
           
-          # 4. Injection des options ReSukiSU et SUSFS
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          
           {
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
@@ -157,18 +142,17 @@ jobs:
             echo "CONFIG_KRETPROBES=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-          } >> .config
+          } >> ${{ env.BUILD_DIR }}/.config
           
-          make LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
           
-          # 5. Patchs modules & Tactile Motorola
+          # Patchs modules & Tactile Motorola
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
-          # 6. Compilation finale
-          make LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
           
-          if [ ! -f "arch/arm64/boot/Image" ]; then
+          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             echo "❌ Erreur : Image du noyau non trouvée"
             exit 1
           fi
