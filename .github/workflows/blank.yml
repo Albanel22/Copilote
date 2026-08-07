@@ -10,8 +10,8 @@ env:
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
-  SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
-  SUSFS_TAG: 'v2.2.0'
+  SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu/-/tree/kernel-4.19?ref_type=heads.git'
+  SUSFS_TAG: 'kermel-4.19'
 
 jobs:
   build:
