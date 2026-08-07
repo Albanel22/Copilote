@@ -206,20 +206,22 @@ jobs:
           echo "📥 Clonage temporaire de susfs4ksu pour cibler les fichiers de fonctions..."
           git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 temp_susfs_fix
           
-          # Copie de tous les fichiers .c et .h du dossier kernel_patches/fs s'ils existent
           if [ -d "temp_susfs_fix/kernel_patches/fs" ]; then
             cp -av temp_susfs_fix/kernel_patches/fs/* fs/ || true
           fi
           
-          # Forcer l'ajout de tous les fichiers source susfs dans fs/Makefile
+          # Nettoyage et réécriture propre de fs/Makefile pour éviter d'appeler des objets inexistants
           if [ -f "fs/Makefile" ]; then
-            echo "🔧 Mise à jour de fs/Makefile pour inclure les objets susfs..."
+            echo "🔧 Mise à jour propre de fs/Makefile..."
             grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
-            grep -q "susfs_funcs.o" fs/Makefile || echo "obj-y += susfs_funcs.o" >> fs/Makefile
+            # On retire l'appel à susfs_funcs.o s'il n'existe pas en tant que fichier source individuel
+            if [ ! -f "fs/susfs_funcs.c" ]; then
+              sed -i '/susfs_funcs.o/d' fs/Makefile
+            fi
           fi
           
           rm -rf temp_susfs_fix
-
+          
       - name: 🛡️ Sécurité finale SUSFS_MAGIC
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
