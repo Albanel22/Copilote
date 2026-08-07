@@ -140,7 +140,34 @@ jobs:
             
             # Si le .h contient des corps de fonctions complets { return ...; }, on les transforme en déclarations simples se terminant par un point-virgule
             sed -i 's/{ return 0; };/{/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
-          fi    
+          fi 
+
+      - name: 🛠️ Correction des doublons dans symbol_resolver
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.c" ]; then
+            echo "🔧 Ajout de gardes de compilation ou nettoyage dans symbol_resolver..."
+            # Empêche la double définition si le fichier est inclus par erreur
+            sed -i '1i#ifndef __SYMBOL_RESOLVER_C__\n#define __SYMBOL_RESOLVER_C__' drivers/kernelsu/kernel/infra/symbol_resolver.c
+            echo -e "\n#endif /* __SYMBOL_RESOLVER_C__ */" >> drivers/kernelsu/kernel/infra/symbol_resolver.c
+          fi
+          
+          # Nettoyage radical du .h pour éviter qu'il ne redéfinisse ce que le .c implémente
+          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
+            cat << 'EOF' > drivers/kernelsu/kernel/infra/symbol_resolver.h
+          #ifndef __SYMBOL_RESOLVER_H__
+          #define __SYMBOL_RESOLVER_H__
+
+          #include <linux/types.h>
+
+          unsigned long __nocfi find_kernel_symbol_exact(const char *symbol_name);
+          void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name);
+          void __init ksu_init_symbol_resolver(void);
+
+          #endif
+          EOF
+            echo "✅ symbol_resolver.h réécrit proprement !"
+          fi
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
