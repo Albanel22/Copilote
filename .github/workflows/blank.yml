@@ -127,6 +127,19 @@ jobs:
           if ! grep -q "SUSFS_MAGIC" include/linux/susfs*.h 2>/dev/null; then
             echo "⚠️ SUSFS_MAGIC introuvable dans les en-têtes, ajout de sécurité..."
             echo "#define SUSFS_MAGIC 0xDEADBEEF" >> include/linux/susfs.h
+          fi
+
+      - name: 🛠️ Correction des redéfinitions dans ReSukiSU (symbol_resolver)
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
+            echo "🔧 Correction de symbol_resolver.h pour éviter les conflits static inline..."
+            sed -i 's/static inline unsigned long find_kernel_symbol_exact/unsigned long find_kernel_symbol_exact/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
+            sed -i 's/static inline void \*ksu_resolve_symbol_for_functable_hook/void *ksu_resolve_symbol_for_functable_hook/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
+            sed -i 's/static inline void ksu_init_symbol_resolver/void ksu_init_symbol_resolver/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
+            
+            # Si le .h contient des corps de fonctions complets { return ...; }, on les transforme en déclarations simples se terminant par un point-virgule
+            sed -i 's/{ return 0; };/{/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
           fi    
 
       - name: Multi-stage Kernel Compilation
