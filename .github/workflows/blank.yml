@@ -57,30 +57,28 @@ jobs:
           echo "📥 Clonage de ton fork personnel ReSukiSU..."
           git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
 
-          echo "📥 Intégration des patchs SUSFS..."
+          echo "📥 Clonage et intégration propre de SUSFS..."
           git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 susfs4ksu
           
-          # Recherche automatique et copie des fichiers de patch SUSFS
-          if [ -d "susfs4ksu" ]; then
-            echo "🔍 Recherche des fichiers susfs..."
-            find susfs4ksu -type f
-            
-            # Copie des en-têtes et des sources si trouvés
-            cp -av susfs4ksu/kernel_patches/include/linux/* include/linux/ || echo "⚠️ Copie include/linux échouée"
-            cp -av susfs4ksu/kernel_patches/fs/* fs/ || echo "⚠️ Copie fs échouée"
-            
-            if [ -d "susfs4ksu/kernel_patches/kernelsu" ]; then
-              cp -av susfs4ksu/kernel_patches/kernelsu/* drivers/kernelsu/ || true
-            fi
-            
-            rm -rf susfs4ksu
+          # Copie explicite des en-têtes SUSFS là où le noyau et ReSukiSU les attendent
+          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
+            cp -v susfs4ksu/kernel_patches/include/linux/susfs*.h include/linux/
+          elif [ -d "susfs4ksu/include/linux" ]; then
+            cp -v susfs4ksu/include/linux/susfs*.h include/linux/
           fi
+          
+          # Copie des fichiers fs si présents
+          if [ -d "susfs4ksu/kernel_patches/fs" ]; then
+            cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
+          fi
+          
+          rm -rf susfs4ksu
 
-          # Vérification finale cruciale
+          # Vérification de sécurité absolue pour forcer l'arrêt si les fichiers manquent
           if [ -f "include/linux/susfs.h" ]; then
-            echo "✅ Fichier susfs.h trouvé avec succès !"
+            echo "✅ Succès : susfs.h est bien en place !"
           else
-            echo "❌ ERREUR : Le fichier susfs.h est toujours introuvable !"
+            echo "❌ ERREUR : susfs.h introuvable dans include/linux/ !"
             exit 1
           fi
 
