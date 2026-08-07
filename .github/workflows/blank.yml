@@ -169,23 +169,24 @@ jobs:
             echo "✅ symbol_resolver.h réécrit proprement !"
           fi
 
-      - name: 🧩 Forcer l'intégration des sources SUSFS dans fs/
+      - name: 🧩 Intégration complète de tous les patchs source SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Re-clonage rapide de susfs4ksu pour récupérer les sources fs..."
+          echo "📥 Re-clonage de susfs4ksu pour injection globale..."
           git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 temp_susfs
           
-          if [ -d "temp_susfs/kernel_patches/fs" ]; then
-            echo "📂 Copie des fichiers source susfs dans fs/..."
-            cp -av temp_susfs/kernel_patches/fs/* fs/
+          if [ -d "temp_susfs/kernel_patches" ]; then
+            echo "📂 Copie de l'arborescence des patchs kernel..."
+            cp -av temp_susfs/kernel_patches/fs/* fs/ || true
+            cp -av temp_susfs/kernel_patches/include/* include/ || true
           elif [ -d "temp_susfs/fs" ]; then
-            cp -av temp_susfs/fs/* fs/
+            cp -av temp_susfs/fs/* fs/ || true
+            cp -av temp_susfs/include/* include/ || true
           fi
           
-          # S'assure que fs/Makefile intègre susfs.o
-          if [ -f "fs/Makefile" ] && ! grep -q "susfs.o" fs/Makefile; then
+          # S'assure que susfs est compilé dans le Makefile de fs/
+          if [ -f "fs/Makefile" ] && ! grep -q "susfs" fs/Makefile; then
             echo "obj-y += susfs.o" >> fs/Makefile
-            echo "✅ Ajout de susfs.o dans fs/Makefile"
           fi
           
           rm -rf temp_susfs
