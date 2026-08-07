@@ -169,6 +169,15 @@ jobs:
             echo "✅ symbol_resolver.h réécrit proprement !"
           fi
 
+      - name: 🛠️ Forcer l'activation des symboles SUSFS dans fs/susfs.c
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if [ -f "fs/susfs.c" ]; then
+            echo "🔧 Dé-commentage ou activation forcée des fonctions susfs..."
+            # S'assure que CONFIG_KSU_SUSFS est bien pris en compte dans le fichier source
+            sed -i 's/#ifdef CONFIG_KSU_SUSFS/#if 1\/\/#ifdef CONFIG_KSU_SUSFS/g' fs/susfs.c || true
+          fi
+
       - name: 🧩 Intégration complète de tous les patchs source SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
