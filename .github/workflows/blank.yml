@@ -121,6 +121,14 @@ jobs:
           print("✨ Hooks injectés avec succès !")
           EOF
 
+      - name: 🛠️ Forcer la déclaration de SUSFS_MAGIC si absente
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if ! grep -q "SUSFS_MAGIC" include/linux/susfs*.h 2>/dev/null; then
+            echo "⚠️ SUSFS_MAGIC introuvable dans les en-têtes, ajout de sécurité..."
+            echo "#define SUSFS_MAGIC 0xDEADBEEF" >> include/linux/susfs.h
+          fi    
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
