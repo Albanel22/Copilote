@@ -169,6 +169,27 @@ jobs:
             echo "✅ symbol_resolver.h réécrit proprement !"
           fi
 
+      - name: 🧩 Forcer l'intégration des sources SUSFS dans fs/
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "📥 Re-clonage rapide de susfs4ksu pour récupérer les sources fs..."
+          git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 temp_susfs
+          
+          if [ -d "temp_susfs/kernel_patches/fs" ]; then
+            echo "📂 Copie des fichiers source susfs dans fs/..."
+            cp -av temp_susfs/kernel_patches/fs/* fs/
+          elif [ -d "temp_susfs/fs" ]; then
+            cp -av temp_susfs/fs/* fs/
+          fi
+          
+          # S'assure que fs/Makefile intègre susfs.o
+          if [ -f "fs/Makefile" ] && ! grep -q "susfs.o" fs/Makefile; then
+            echo "obj-y += susfs.o" >> fs/Makefile
+            echo "✅ Ajout de susfs.o dans fs/Makefile"
+          fi
+          
+          rm -rf temp_susfs
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
