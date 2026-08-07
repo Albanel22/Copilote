@@ -58,17 +58,30 @@ jobs:
           git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
 
           echo "📥 Intégration des patchs SUSFS..."
-          if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
-            if [ -d "susfs4ksu/kernel_patches" ]; then
-              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
-              cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
-              
-              if [ -d "susfs4ksu/kernel_patches/kernelsu" ]; then
-                cp -r susfs4ksu/kernel_patches/kernelsu/* drivers/kernelsu/ || true
-              fi
-              echo "✅ Patchs SUSFS intégrés avec ton fork."
+          git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 susfs4ksu
+          
+          # Recherche automatique et copie des fichiers de patch SUSFS
+          if [ -d "susfs4ksu" ]; then
+            echo "🔍 Recherche des fichiers susfs..."
+            find susfs4ksu -type f
+            
+            # Copie des en-têtes et des sources si trouvés
+            cp -av susfs4ksu/kernel_patches/include/linux/* include/linux/ || echo "⚠️ Copie include/linux échouée"
+            cp -av susfs4ksu/kernel_patches/fs/* fs/ || echo "⚠️ Copie fs échouée"
+            
+            if [ -d "susfs4ksu/kernel_patches/kernelsu" ]; then
+              cp -av susfs4ksu/kernel_patches/kernelsu/* drivers/kernelsu/ || true
             fi
+            
             rm -rf susfs4ksu
+          fi
+
+          # Vérification finale cruciale
+          if [ -f "include/linux/susfs.h" ]; then
+            echo "✅ Fichier susfs.h trouvé avec succès !"
+          else
+            echo "❌ ERREUR : Le fichier susfs.h est toujours introuvable !"
+            exit 1
           fi
 
           echo "🔗 Liaison officielle de ReSukiSU dans les drivers du noyau......"
