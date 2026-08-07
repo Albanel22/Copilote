@@ -191,6 +191,17 @@ jobs:
           
           rm -rf temp_susfs
 
+      - name: 🛡️ Sécurité finale SUSFS_MAGIC
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          mkdir -p include/linux
+          if ! grep -q "SUSFS_MAGIC" include/linux/susfs*.h 2>/dev/null; then
+            echo "#ifndef SUSFS_MAGIC" >> include/linux/susfs.h
+            echo "#define SUSFS_MAGIC 0x55534653" >> include/linux/susfs.h
+            echo "#endif" >> include/linux/susfs.h
+            echo "🔧 SUSFS_MAGIC injectée de force !"
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
