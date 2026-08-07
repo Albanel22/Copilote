@@ -11,7 +11,7 @@ env:
   CCACHE_SIZE: 5G
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
-  SUSFS_BRANCH: 'kernel-5.4'
+  SUSFS_TAG: 'v2.2.0'
 
 jobs:
   build:
@@ -45,20 +45,20 @@ jobs:
           key: ${{ runner.os }}-ccache-kernel
           restore-keys: ${{ runner.os }}-ccache-
 
-      - name: 📂 Intégration de ton fork ReSukiSU & SUSFS
+      - name: 📂 Intégration de ton fork ReSukiSU & SUSFS v2.2.0
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -e
           cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
           
           echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+          rm -rf drivers/kernelsu kernelSU susfs4ksu temp_susfs temp_susfs_fix || true
           
           echo "📥 Clonage de ton fork personnel ReSukiSU..."
           git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
 
-          echo "📥 Clonage et intégration propre de SUSFS..."
-          git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 susfs4ksu
+          echo "📥 Clonage et intégration propre de SUSFS (Tag: ${{ env.SUSFS_TAG }})..."
+          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 susfs4ksu
           
           # Copie explicite des en-têtes SUSFS là où le noyau et ReSukiSU les attendent
           if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
@@ -138,7 +138,6 @@ jobs:
             sed -i 's/static inline void \*ksu_resolve_symbol_for_functable_hook/void *ksu_resolve_symbol_for_functable_hook/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
             sed -i 's/static inline void ksu_init_symbol_resolver/void ksu_init_symbol_resolver/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
             
-            # Si le .h contient des corps de fonctions complets { return ...; }, on les transforme en déclarations simples se terminant par un point-virgule
             sed -i 's/{ return 0; };/{/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
           fi
 
@@ -147,12 +146,10 @@ jobs:
         run: |
           if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.c" ]; then
             echo "🔧 Ajout de gardes de compilation ou nettoyage dans symbol_resolver..."
-            # Empêche la double définition si le fichier est inclus par erreur
             sed -i '1i#ifndef __SYMBOL_RESOLVER_C__\n#define __SYMBOL_RESOLVER_C__' drivers/kernelsu/kernel/infra/symbol_resolver.c
             echo -e "\n#endif /* __SYMBOL_RESOLVER_C__ */" >> drivers/kernelsu/kernel/infra/symbol_resolver.c
           fi
           
-          # Nettoyage radical du .h pour éviter qu'il ne redéfinisse ce que le .c implémente
           if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
             cat << 'EOF' > drivers/kernelsu/kernel/infra/symbol_resolver.h
           #ifndef __SYMBOL_RESOLVER_H__
@@ -174,16 +171,13 @@ jobs:
         run: |
           if [ -f "fs/susfs.c" ]; then
             echo "🔧 Injection des fonctions de secours et levée des conditions dans fs/susfs.c..."
-            # Supprime les conditions restrictives sur les fonctions clés si elles bloquent
             sed -i 's/#ifdef CONFIG_KSU_SUSFS/#if 1/g' fs/susfs.c || true
           fi
           
-          # Si le fichier susfs.c ne définit pas explicitement ces fonctions, on les ajoute à la fin pour sauver l'édition des liens
           if [ -f "fs/susfs.c" ] && ! grep -q "susfs_is_current_proc_umounted" fs/susfs.c; then
             cat << 'EOF' >> fs/susfs.c
 
           #include <linux/sched.h>
-          // Fonctions de secours injectées automatiquement pour l'édition des liens ReSukiSU
           bool susfs_is_current_proc_umounted(void) { return false; }
           void susfs_set_current_proc_umounted(bool state) {}
           void susfs_extra_works(void *work) {}
@@ -198,8 +192,8 @@ jobs:
       - name: 🧩 Intégration complète de tous les patchs source SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "📥 Re-clonage de susfs4ksu pour injection globale..."
-          git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 temp_susfs
+          echo "📥 Re-clonage de susfs4ksu (Tag: ${{ env.SUSFS_TAG }}) pour injection globale..."
+          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs
           
           if [ -d "temp_susfs/kernel_patches" ]; then
             echo "📂 Copie de l'arborescence des patchs kernel..."
@@ -210,7 +204,6 @@ jobs:
             cp -av temp_susfs/include/* include/ || true
           fi
           
-          # S'assure que susfs est compilé dans le Makefile de fs/
           if [ -f "fs/Makefile" ] && ! grep -q "susfs" fs/Makefile; then
             echo "obj-y += susfs.o" >> fs/Makefile
           fi
@@ -221,17 +214,15 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "📥 Clonage temporaire de susfs4ksu pour cibler les fichiers de fonctions..."
-          git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1 temp_susfs_fix
+          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs_fix
           
           if [ -d "temp_susfs_fix/kernel_patches/fs" ]; then
             cp -av temp_susfs_fix/kernel_patches/fs/* fs/ || true
           fi
           
-          # Nettoyage et réécriture propre de fs/Makefile pour éviter d'appeler des objets inexistants
           if [ -f "fs/Makefile" ]; then
             echo "🔧 Mise à jour propre de fs/Makefile..."
             grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
-            # On retire l'appel à susfs_funcs.o s'il n'existe pas en tant que fichier source individuel
             if [ ! -f "fs/susfs_funcs.c" ]; then
               sed -i '/susfs_funcs.o/d' fs/Makefile
             fi
