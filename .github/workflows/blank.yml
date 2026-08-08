@@ -107,8 +107,8 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-            source "drivers/kernelsu/Kconfig"
-            }' drivers/Kconfig
+          source "drivers/kernelsu/Kconfig"
+          }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -220,14 +220,9 @@ jobs:
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
           cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          # 🔬 BUILD DIAGNOSTIC : CONFIG_KSU=n temporairement pour isoler la cause
+          # du bootloop. Remettre à y une fois le test concluant.
+          CONFIG_KSU=n
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_EXT4_FS=y
@@ -242,17 +237,12 @@ jobs:
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
 
-          echo "🔍 Vérification immédiate : CONFIG_KSU a-t-il survécu à oldconfig ?"
-          if grep -q '^CONFIG_KSU=y' ${{ env.BUILD_DIR }}/.config; then
-            echo "✅ CONFIG_KSU=y confirmé dans le .config final"
+          echo "🔍 Vérification immédiate (mode diagnostic) : CONFIG_KSU est-il bien désactivé ?"
+          if grep -q '^CONFIG_KSU=n\|^# CONFIG_KSU is not set' ${{ env.BUILD_DIR }}/.config; then
+            echo "✅ CONFIG_KSU désactivé — build diagnostic sans KSU"
           else
-            echo "❌ CONFIG_KSU absent ou désactivé après oldconfig !"
-            echo "ℹ️  Valeur actuelle :"
-            grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne CONFIG_KSU trouvée du tout)"
-            echo "ℹ️  Dépendances déclarées dans drivers/kernelsu/Kconfig :"
-            grep -n -A2 '^config KSU' drivers/kernelsu/Kconfig 2>/dev/null || echo "  (Kconfig introuvable ou pas de bloc 'config KSU')"
-            grep -n 'depends on\|select' drivers/kernelsu/Kconfig 2>/dev/null | head -20
-            exit 1
+            echo "⚠️  CONFIG_KSU semble toujours actif malgré la demande :"
+            grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne trouvée)"
           fi
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
