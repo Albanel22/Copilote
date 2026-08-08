@@ -2,6 +2,9 @@ name: KernelSU-Next & SUSFS CI — Build & Package
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - kernelsu-next
   
 env:
   KERNEL_PATH: kernel_src
