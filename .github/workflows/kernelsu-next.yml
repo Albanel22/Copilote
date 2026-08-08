@@ -2,10 +2,7 @@ name: KernelSU-Next & SUSFS CI — Build & Package
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - kernelsu-next
-  
+    
 env:
   KERNEL_PATH: kernel_src
   BUILD_DIR: out
@@ -13,6 +10,8 @@ env:
   DEFCONFIG: vendor/lito-perf_defconfig
   CCACHE_SIZE: 5G
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
+  KSU_NEXT_REPO: 'https://github.com/KernelSU-Next/KernelSU-Next.git'
+  KSU_NEXT_BRANCH: 'legacy'
 
 jobs:
   build:
@@ -33,7 +32,7 @@ jobs:
           set -euo pipefail
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur de téléchargement"; exit 1; }
-
+î
       - name: Clone Motorola Kernel Source
         run: |
           echo "📥 Récupération des sources du noyau 4.19..."
@@ -76,9 +75,17 @@ jobs:
           echo "🧼 Nettoyage des anciens dossiers ksu..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Téléchargement et installation de KernelSU-Next..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+          echo "📥 Clonage de la branche legacy de KernelSU-Next..."
+          git clone "${{ env.KSU_NEXT_REPO }}" --branch "${{ env.KSU_NEXT_BRANCH }}" --depth=1 drivers/kernelsu
 
+          echo "🔗 Liaison de KernelSU-Next dans les drivers du noyau..."
+          if ! grep -q "kernelsu" drivers/Kconfig; then
+            sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
+          fi
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
+          fi
+          
       - name: Fix file_wrapper.c for Kernel 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
