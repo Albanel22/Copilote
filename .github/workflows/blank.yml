@@ -149,6 +149,25 @@ jobs:
             fi
           done
 
+      - name: 🛠️ Correction propre de symbol_resolver pour éviter les redéfinitions
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
+            cat << 'EOF' > drivers/kernelsu/kernel/infra/symbol_resolver.h
+          #ifndef __SYMBOL_RESOLVER_H__
+          #define __SYMBOL_RESOLVER_H__
+
+          #include <linux/types.h>
+
+          unsigned long __nocfi find_kernel_symbol_exact(const char *symbol_name);
+          void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name);
+          void __init ksu_init_symbol_resolver(void);
+
+          #endif
+          EOF
+            echo "✅ symbol_resolver.h nettoyé et corrigé !"
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
