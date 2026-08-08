@@ -107,8 +107,8 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-          source "drivers/kernelsu/Kconfig"
-          }' drivers/Kconfig
+            source "drivers/kernelsu/Kconfig"
+            }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -212,7 +212,9 @@ jobs:
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
 
           echo "🔧 Patchs modules & Tactile Motorola..."
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          # Le bypass global de check_version() a été retiré : il désactivait la
+          # vérification de version pour TOUS les modules du système (pas seulement
+          # tactile), suspect principal d'un plantage précoce au démarrage.
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
