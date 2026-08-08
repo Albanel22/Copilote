@@ -12,11 +12,11 @@
  }
  
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-@@ -324,6 +328,7 @@
+@@ -318,6 +322,7 @@
      return orig->f_op->copy_file_range(file_in, pos_in, orig, pos_out, len, flags);
  }
  
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
  static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
                                             struct file *file_out, loff_t pos_out,
                                             u64 len, unsigned int remap_flags)
@@ -41,7 +41,7 @@
      p->ops.setlease = fp->f_op->setlease ? ksu_wrapper_setlease : NULL;
      p->ops.fallocate = fp->f_op->fallocate ? ksu_wrapper_fallocate : NULL;
      p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
      p->ops.remap_file_range =
          fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
 +#endif
