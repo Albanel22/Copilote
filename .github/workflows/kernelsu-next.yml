@@ -79,6 +79,22 @@ jobs:
           echo "📥 Téléchargement et installation de KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
 
+      - name: Fix file_wrapper.c for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Correction des incompatibilités de file_wrapper.c pour le noyau 4.19..."
+          FILE="drivers/kernelsu/infra/file_wrapper.c"
+          
+          if [ -f "$FILE" ]; then
+            # Neutraliser ou adapter les appels iopoll et remap_file_range absents en 4.19
+            sed -i 's/return orig->f_op->iopoll(/return -EINVAL; \/\//g' "$FILE"
+            sed -i 's/p->ops.iopoll =/p->ops.iopoll = NULL; \/\//g' "$FILE"
+            sed -i 's/p->ops.remap_file_range =/p->ops.remap_file_range = NULL; \/\//g' "$FILE"
+            echo "✅ Corrections appliquées sur file_wrapper.c"
+          else
+            echo "⚠️ Fichier file_wrapper.c introuvable."
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
