@@ -12,22 +12,21 @@
  }
  
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-@@ -334,6 +338,7 @@
- 
-     loff_t res = -EINVAL;
+@@ -324,6 +328,7 @@
+     return orig->f_op->copy_file_range(file_in, pos_in, orig, pos_out, len, flags);
+ }
  
 +#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
-     if (remap_flags & REMAP_FILE_DEDUP) {
-         res = orig->f_op->remap_file_range(file_in, pos_in, orig, pos_out, len,
-                                              remap_flags);
-@@ -345,6 +350,7 @@
-                                              orig, pos_out, len, remap_flags);
-         }
+ static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
+                                            struct file *file_out, loff_t pos_out,
+                                            u64 len, unsigned int remap_flags)
+@@ -349,6 +354,7 @@
      }
-+#endif
      return res;
  }
++#endif
  #endif
+ 
 @@ -389,7 +395,9 @@
      p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
      p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
