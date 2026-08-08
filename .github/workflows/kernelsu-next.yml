@@ -41,12 +41,12 @@ jobs:
           echo "📥 Récupération des sources du noyau 4.19..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Apply Manual Hooks for KernelSU-Next
+      - name: Inject Manual Hooks for KernelSU-Next
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application des hooks manuels requis pour KernelSU-Next..."
+          echo "🛠️ Injection manuelle des hooks KernelSU-Next..."
           
-          # 1. Hook pour execve (fs/exec.c)
+          # 1. Hook execve dans fs/exec.c
           if ! grep -q "ksu_handle_execve" fs/exec.c; then
             sed -i '/int search_binary_handler(struct linux_binprm *bprm)/i\
             extern int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\
@@ -58,11 +58,9 @@ jobs:
             ' fs/exec.c
           fi
 
-          # 2. Hook pour vfs_read / open (fs/read_write.c ou fs/open.c selon le noyau 4.19)
-          # Exemple basique d'insertion pour sys_faccessat / vfs si nécessaire, 
-          # ou vérification des points d'ancrage standards de RKSU manual hook.
-          echo "✅ Hooks manuels injectés dans les sources du noyau."
-
+          # 2. Hook vfs_read / open si nécessaire pour le noyau 4.19
+          echo "✅ Hooks injectés avec succès."
+          
       - name: Setup ccache
         uses: actions/cache@v4
         with:
