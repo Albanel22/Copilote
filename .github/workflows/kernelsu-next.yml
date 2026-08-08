@@ -111,7 +111,8 @@ jobs:
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
-          make O=${{ env.BUILD_DIR }} LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image
+          # CORRECTION ICI : Ajout des variables CC/LD explicites pour éviter le crash netfilter/built-in
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image modules
           
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
             echo "❌ Erreur : Image du noyau non trouvée"
@@ -119,6 +120,7 @@ jobs:
           fi
           echo "✅ Compilation du noyau réussie"
 
+      
       - name: Repack & Finalize (AnyKernel3)
         working-directory: ${{ github.workspace }}
         run: |
