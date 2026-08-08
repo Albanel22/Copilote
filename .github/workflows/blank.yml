@@ -60,16 +60,13 @@ jobs:
           echo "📥 Clonage et intégration propre de SUSFS (Tag: ${{ env.SUSFS_TAG }})..."
           git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 susfs4ksu
           
-          # Copie explicite des en-têtes SUSFS là où le noyau et ReSukiSU les attendent
-          if [ -d "susfs4ksu/kernel_patches/include/linux" ]; then
-            cp -v susfs4ksu/kernel_patches/include/linux/susfs*.h include/linux/
-          elif [ -d "susfs4ksu/include/linux" ]; then
-            cp -v susfs4ksu/include/linux/susfs*.h include/linux/
-          fi
-          
-          # Copie des fichiers fs si présents
-          if [ -d "susfs4ksu/kernel_patches/fs" ]; then
-            cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
+          # Copie globale et robuste des patchs kernel SUSFS
+          if [ -d "susfs4ksu/kernel_patches" ]; then
+            cp -r susfs4ksu/kernel_patches/fs/* fs/
+            cp -r susfs4ksu/kernel_patches/include/* include/
+          elif [ -d "susfs4ksu/fs" ]; then
+            cp -r susfs4ksu/fs/* fs/
+            cp -r susfs4ksu/include/* include/
           fi
           
           rm -rf susfs4ksu
@@ -121,124 +118,14 @@ jobs:
           print("✨ Hooks injectés avec succès !")
           EOF
 
-      - name: 🛠️ Forcer la déclaration de SUSFS_MAGIC si absente
+      - name: 🛠️ Enregistrement de SUSFS dans le Makefile du noyau (`fs/Makefile`)
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          if ! grep -q "SUSFS_MAGIC" include/linux/susfs*.h 2>/dev/null; then
-            echo "⚠️ SUSFS_MAGIC introuvable dans les en-têtes, ajout de sécurité..."
-            echo "#define SUSFS_MAGIC 0xDEADBEEF" >> include/linux/susfs.h
-          fi
-
-      - name: 🛠️ Correction des redéfinitions dans ReSukiSU (symbol_resolver)
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
-            echo "🔧 Correction de symbol_resolver.h pour éviter les conflits static inline..."
-            sed -i 's/static inline unsigned long find_kernel_symbol_exact/unsigned long find_kernel_symbol_exact/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
-            sed -i 's/static inline void \*ksu_resolve_symbol_for_functable_hook/void *ksu_resolve_symbol_for_functable_hook/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
-            sed -i 's/static inline void ksu_init_symbol_resolver/void ksu_init_symbol_resolver/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
-            
-            sed -i 's/{ return 0; };/{/g' drivers/kernelsu/kernel/infra/symbol_resolver.h || true
-          fi
-
-      - name: 🛠️ Correction des doublons dans symbol_resolver
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.c" ]; then
-            echo "🔧 Ajout de gardes de compilation ou nettoyage dans symbol_resolver..."
-            sed -i '1i#ifndef __SYMBOL_RESOLVER_C__\n#define __SYMBOL_RESOLVER_C__' drivers/kernelsu/kernel/infra/symbol_resolver.c
-            echo -e "\n#endif /* __SYMBOL_RESOLVER_C__ */" >> drivers/kernelsu/kernel/infra/symbol_resolver.c
-          fi
-          
-          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
-            cat << 'EOF' > drivers/kernelsu/kernel/infra/symbol_resolver.h
-          #ifndef __SYMBOL_RESOLVER_H__
-          #define __SYMBOL_RESOLVER_H__
-
-          #include <linux/types.h>
-
-          unsigned long __nocfi find_kernel_symbol_exact(const char *symbol_name);
-          void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name);
-          void __init ksu_init_symbol_resolver(void);
-
-          #endif
-          EOF
-            echo "✅ symbol_resolver.h réécrit proprement !"
-          fi
-
-      - name: 🛠️ Forcer l'activation et l'export des symboles SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f "fs/susfs.c" ]; then
-            echo "🔧 Injection des fonctions de secours et levée des conditions dans fs/susfs.c..."
-            sed -i 's/#ifdef CONFIG_KSU_SUSFS/#if 1/g' fs/susfs.c || true
-          fi
-          
-          if [ -f "fs/susfs.c" ] && ! grep -q "susfs_is_current_proc_umounted" fs/susfs.c; then
-            cat << 'EOF' >> fs/susfs.c
-
-          #include <linux/sched.h>
-          bool susfs_is_current_proc_umounted(void) { return false; }
-          void susfs_set_current_proc_umounted(bool state) {}
-          void susfs_extra_works(void *work) {}
-          unsigned long susfs_get_enabled_features(void) { return 0; }
-          int susfs_show_variant(struct seq_file *m) { return 0; }
-          int susfs_show_version(struct seq_file *m) { return 0; }
-          void susfs_start_sdcard_monitor_fn(void) {}
-          EOF
-            echo "✅ Fonctions de secours SUSFS ajoutées avec succès à fs/susfs.c !"
-          fi
-          
-      - name: 🧩 Intégration complète de tous les patchs source SUSFS
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📥 Re-clonage de susfs4ksu (Tag: ${{ env.SUSFS_TAG }}) pour injection globale..."
-          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs
-          
-          if [ -d "temp_susfs/kernel_patches" ]; then
-            echo "📂 Copie de l'arborescence des patchs kernel..."
-            cp -av temp_susfs/kernel_patches/fs/* fs/ || true
-            cp -av temp_susfs/kernel_patches/include/* include/ || true
-          elif [ -d "temp_susfs/fs" ]; then
-            cp -av temp_susfs/fs/* fs/ || true
-            cp -av temp_susfs/include/* include/ || true
-          fi
-          
-          if [ -f "fs/Makefile" ] && ! grep -q "susfs" fs/Makefile; then
-            echo "obj-y += susfs.o" >> fs/Makefile
-          fi
-          
-          rm -rf temp_susfs
-
-      - name: 🧩 Intégration rigoureuse des fonctions SUSFS manquantes
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📥 Clonage temporaire de susfs4ksu pour cibler les fichiers de fonctions..."
-          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs_fix
-          
-          if [ -d "temp_susfs_fix/kernel_patches/fs" ]; then
-            cp -av temp_susfs_fix/kernel_patches/fs/* fs/ || true
-          fi
-          
           if [ -f "fs/Makefile" ]; then
-            echo "🔧 Mise à jour propre de fs/Makefile..."
-            grep -q "susfs.o" fs/Makefile || echo "obj-y += susfs.o" >> fs/Makefile
-            if [ ! -f "fs/susfs_funcs.c" ]; then
-              sed -i '/susfs_funcs.o/d' fs/Makefile
+            if ! grep -q "susfs.o" fs/Makefile; then
+              echo "obj-y += susfs.o" >> fs/Makefile
+              echo "✅ susfs.o ajouté à fs/Makefile"
             fi
-          fi
-          
-          rm -rf temp_susfs_fix
-          
-      - name: 🛡️ Sécurité finale SUSFS_MAGIC
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          mkdir -p include/linux
-          if ! grep -q "SUSFS_MAGIC" include/linux/susfs*.h 2>/dev/null; then
-            echo "#ifndef SUSFS_MAGIC" >> include/linux/susfs.h
-            echo "#define SUSFS_MAGIC 0x55534653" >> include/linux/susfs.h
-            echo "#endif" >> include/linux/susfs.h
-            echo "🔧 SUSFS_MAGIC injectée de force !"
           fi
 
       - name: Multi-stage Kernel Compilation
@@ -343,7 +230,7 @@ jobs:
           mkdir -p final_output
           cd AnyKernel3
           zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
-          cd ..
+          cd cd .. || cd ..
           echo "✅ Packaging AnyKernel3 propre terminé avec succès !"
 
       - name: Upload Finished Packaged Assets
