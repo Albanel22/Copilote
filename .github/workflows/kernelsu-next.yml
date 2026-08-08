@@ -41,34 +41,27 @@ jobs:
           echo "📥 Récupération des sources du noyau 4.19..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Apply Manual Hooks for KernelSU-Next
+      - name: Apply Local SuSFS Patches and Hooks
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Injection robuste des hooks KernelSU-Next dans fs/exec.c..."
-          
-          python3 -c '
-          with open("fs/exec.c", "r") as f:
-              lines = f.readlines()
-
-          new_lines = []
-          injected = False
-
-          for line in lines:
-              if "search_binary_handler" in line and not injected:
-                  new_lines.append("extern int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\n")
-                  new_lines.append("int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\n")
-                  injected = True
-              
-              if "retval = search_binary_handler(bprm);" in line and "ksu_handle_execve" not in "".join(new_lines[-5:]):
-                  new_lines.append("    ksu_handle_execve(&bprm->filename, bprm, NULL);\n")
-
-              new_lines.append(line)
-
-          with open("fs/exec.c", "w") as f:
-              f.writelines(new_lines)
-          
-          print("✅ Injection des hooks terminée.")
-          '
+          echo "🛠️ Application des patches et hooks depuis le dossier patches/..."
+          if [ -d "../patches" ]; then
+            for patch_file in ../patches/*.patch; do
+              if [ -f "$patch_file" ]; then
+                echo "📄 Application du patch : $patch_file"
+                patch -p1 --forward < "$patch_file" || echo "⚠️ Patch déjà appliqué ou conflit mineur."
+              fi
+            done
+            
+            if [ -f "../patches/susfs_inline_hook_patches.sh" ]; then
+              echo "🐚 Exécution du script de hooks..."
+              chmod +x ../patches/susfs_inline_hook_patches.sh
+              ../patches/susfs_inline_hook_patches.sh
+            fi
+          else
+            echo "❌ Dossier patches introuvable !"
+            exit 1
+          fi
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -85,7 +78,7 @@ jobs:
           echo "🧼 Nettoyage des anciens dossiers ksu..."
           rm -rf drivers/kernelsu kernelSU susfs4ksu || true
           
-          echo "📥 Clonage de KernelSU-Next (branche legacy avec SUSFS intégré)..."
+          echo "📥 Clonage de KernelSU-Next officiel..."
           git clone "${{ env.KSU_NEXT_REPO }}" --branch "${{ env.KSU_NEXT_BRANCH }}" --depth=1 drivers/kernelsu
 
           echo "🔗 Liaison de KernelSU-Next dans les drivers du noyau..."
