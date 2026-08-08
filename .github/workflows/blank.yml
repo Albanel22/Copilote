@@ -128,6 +128,27 @@ jobs:
             fi
           fi
 
+      - name: 🛡️ Correction et injection forcée de SUSFS_MAGIC pour ReSukiSU
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          mkdir -p include/linux
+          # S'assurer que susfs.h existe et contient la macro
+          if [ ! -f "include/linux/susfs.h" ]; then
+            echo '#ifndef __SUSFS_H__' > include/linux/susfs.h
+            echo '#define __SUSFS_H__' >> include/linux/susfs.h
+            echo '#define SUSFS_MAGIC 0x55534653' >> include/linux/susfs.h
+            echo '#endif' >> include/linux/susfs.h
+          elif ! grep -q "SUSFS_MAGIC" include/linux/susfs.h; then
+            echo '#define SUSFS_MAGIC 0x55534653' >> include/linux/susfs.h
+          fi
+
+          # Forcer aussi l'inclusion dans le dossier source de ReSukiSU si nécessaire
+          for f in drivers/kernelsu/kernel/supercall/*.c; do
+            if [ -f "$f" ] && ! grep -q "susfs.h" "$f"; then
+              sed -i '1i#include <linux/susfs.h>' "$f"
+            fi
+          done
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
