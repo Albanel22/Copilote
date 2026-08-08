@@ -41,32 +41,35 @@ jobs:
           echo "📥 Récupération des sources du noyau 4.19..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Apply Manual Hooks Automatically
+      - name: Apply Manual Hooks for KernelSU-Next
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application automatique des hooks pour KernelSU-Next..."
+          echo "🛠️ Injection robuste des hooks KernelSU-Next dans fs/exec.c..."
           
-          # Utilisation d'un patch automatisé ou d'une insertion ciblée sécurisée
-          # On cherche la fonction d'exécution pour y inclure le hook requis par Kbuild
           python3 -c '
           with open("fs/exec.c", "r") as f:
-              content = f.read()
+              lines = f.readlines()
 
-          target = "int search_binary_handler(struct linux_binprm *bprm)"
-          hook_code = "extern int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\n"
+          new_lines = []
+          injected = False
 
-          if "ksu_handle_execve" not in content:
-              # Insertion de la déclaration et de l appel du hook
-              content = content.replace(target, hook_code + "\n" + target)
-              content = content.replace("retval = search_binary_handler(bprm);", "ksu_handle_execve(&bprm->filename, bprm, NULL);\n\tretval = search_binary_handler(bprm);")
+          for line in lines:
+              if "search_binary_handler" in line and not injected:
+                  new_lines.append("extern int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\n")
+                  new_lines.append("int ksu_handle_execve(struct filename **filename_ptr, struct linux_binprm *bprm, int *old_fd);\n")
+                  injected = True
               
-              with open("fs/exec.c", "w") as f:
-                  f.write(content)
-              print("✅ Hooks injectés avec succès via script Python.")
-          else:
-              print("ℹ️ Les hooks sont déjà présents.")
-          '
+              if "retval = search_binary_handler(bprm);" in line and "ksu_handle_execve" not in "".join(new_lines[-5:]):
+                  new_lines.append("    ksu_handle_execve(&bprm->filename, bprm, NULL);\n")
+
+              new_lines.append(line)
+
+          with open("fs/exec.c", "w") as f:
+              f.writelines(new_lines)
           
+          print("✅ Injection des hooks terminée.")
+          '
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -137,7 +140,6 @@ jobs:
           sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
           
-          # CORRECTION ICI : Ajout des variables CC/LD explicites pour éviter le crash netfilter/built-in
           make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image modules
           
           if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
@@ -146,7 +148,6 @@ jobs:
           fi
           echo "✅ Compilation du noyau réussie"
 
-      
       - name: Repack & Finalize (AnyKernel3)
         working-directory: ${{ github.workspace }}
         run: |
@@ -194,5 +195,3 @@ jobs:
           path: final_output/AnyKernel3_KSU_Next_SUSFS_kiev.zip
           retention-days: 30
           if-no-files-found: error
-
-          
