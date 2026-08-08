@@ -168,6 +168,37 @@ jobs:
             echo "✅ symbol_resolver.h nettoyé et corrigé !"
           fi
 
+      - name: 🧩 Injection et activation rigoureuse des sources SUSFS dans fs/
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "📥 Clonage temporaire de SUSFS pour extraction des fichiers sources C..."
+          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs_src
+          
+          # Copie des fichiers sources .c et headers .h de SUSFS directement dans fs/
+          if [ -d "temp_susfs_src/kernel_patches/fs" ]; then
+            cp -av temp_susfs_src/kernel_patches/fs/* fs/
+          elif [ -d "temp_susfs_src/fs" ]; then
+            cp -av temp_susfs_src/fs/* fs/
+          fi
+          
+          # Copie des headers globaux nécessaires
+          if [ -d "temp_susfs_src/kernel_patches/include" ]; then
+            cp -av temp_susfs_src/kernel_patches/include/* include/
+          elif [ -d "temp_susfs_src/include" ]; then
+            cp -av temp_susfs_src/include/* include/
+          fi
+          
+          rm -rf temp_susfs_src
+
+          # Forcer l'enregistrement de susfs.o dans fs/Makefile si ce n'est pas déjà fait
+          if [ -f "fs/Makefile" ]; then
+            if ! grep -q "susfs.o" fs/Makefile; then
+              echo "obj-y += susfs.o" >> fs/Makefile
+            fi
+          fi
+
+          echo "✅ Fichiers sources SUSFS injectés dans fs/ avec succès !"
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
