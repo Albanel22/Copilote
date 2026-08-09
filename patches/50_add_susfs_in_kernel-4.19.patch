@@ -468,13 +468,6 @@ diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
 index 0e06632c4e3a..d21c25756e60 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
-@@ -28,6 +28,10 @@
- #include <asm/tlbflush.h>
- #include "internal.h"
- 
-+#ifdef CONFIG_KSU_SUSFS
-+#include <linux/susfs.h>
-+#endif
 +
  #ifdef CONFIG_ZRAM_LRU_WRITEBACK
  #include <linux/delay.h>
