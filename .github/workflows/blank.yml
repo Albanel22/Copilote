@@ -1,0 +1,201 @@
+name: KernelSU-Next & SUSFS CI — Build & Package
+
+on:
+  workflow_dispatch:
+    
+env:
+  KERNEL_PATH: kernel_src
+  BUILD_DIR: out
+  ARCH: arm64
+  DEFCONFIG: vendor/lito-perf_defconfig
+  CCACHE_SIZE: 5G
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
+  KSU_NEXT_REPO: 'https://github.com/KernelSU-Next/KernelSU-Next.git'
+  KSU_NEXT_BRANCH: 'legacy'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+
+      - name: Download Stock Boot Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📥 Téléchargement du boot.img d'origine..."
+          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur de téléchargement"; exit 1; }
+
+      - name: Clone Motorola Kernel Source
+        run: |
+          echo "📥 Récupération des sources du noyau 4.19..."
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+
+      - name: Apply Local SuSFS Patches and Hooks
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Application des patches et hooks depuis le dossier patches/..."
+          if [ -d "../patches" ]; then
+            for patch_file in ../patches/*.patch; do
+              if [ -f "$patch_file" ]; then
+                echo "📄 Application du patch : $patch_file"
+                patch -p1 --forward < "$patch_file" || echo "⚠️ Patch déjà appliqué ou conflit mineur."
+              fi
+            done
+            
+            if [ -f "../patches/susfs_inline_hook_patches.sh" ]; then
+              echo "🐚 Exécution du script de hooks..."
+              chmod +x ../patches/susfs_inline_hook_patches.sh
+              ../patches/susfs_inline_hook_patches.sh
+            fi
+          else
+            echo "❌ Dossier patches introuvable !"
+            exit 1
+          fi
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-kernelsu-next
+          restore-keys: ${{ runner.os }}-ccache-
+
+      - name: 📂 Intégration de KernelSU-Next & SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -e
+          
+          echo "🧼 Nettoyage des anciens dossiers ksu..."
+          rm -rf drivers/kernelsu kernelSU susfs4ksu || true
+          
+          echo "📥 Clonage de la branche legacy de KernelSU-Next..."
+          git clone "${{ env.KSU_NEXT_REPO }}" --branch "${{ env.KSU_NEXT_BRANCH }}" --depth=1 drivers/kernelsu
+
+          echo "🔗 Liaison de KernelSU-Next dans les drivers du noyau..."
+          if ! grep -q "kernelsu" drivers/Kconfig; then
+            sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
+          fi
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
+          fi
+
+      - name: Fix file_wrapper.c for Kernel 4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Correction des incompatibilités de file_wrapper.c pour le noyau 4.19..."
+          FILE="drivers/kernelsu/infra/file_wrapper.c"
+          
+          if [ -f "$FILE" ]; then
+            sed -i 's/return orig->f_op->iopoll(/return -EINVAL; \/\//g' "$FILE"
+            sed -i 's/p->ops.iopoll =/p->ops.iopoll = NULL; \/\//g' "$FILE"
+            sed -i 's/p->ops.remap_file_range =/p->ops.remap_file_range = NULL; \/\//g' "$FILE"
+            echo "✅ Corrections appliquées sur file_wrapper.c"
+          else
+            echo "⚠️ Fichier file_wrapper.c introuvable."
+          fi
+
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -uo pipefail
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
+          ccache -M ${{ env.CCACHE_SIZE }}
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
+          
+          mkdir -p ${{ env.BUILD_DIR }}
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_MANUAL_HOOK=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
+          } >> ${{ env.BUILD_DIR }}/.config
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
+          
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
+          
+          make O=${{ env.BUILD_DIR }} LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image modules
+          
+          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            echo "❌ Erreur : Image du noyau non trouvée"
+            exit 1
+          fi
+          echo "✅ Compilation du noyau réussie"
+
+      - name: Repack & Finalize (AnyKernel3)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          
+          rm -rf AnyKernel3
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
+          
+          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
+          
+          cat << 'EOF' > AnyKernel3/anykernel.sh
+          properties() { '
+          kernel.string=Custom Kernel KernelSU-Next + SUSFS pour Motorola One 5G Ace
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=1
+          device.name1=kiev
+          device.name2=XT2113-2
+          '; } # end properties
+          
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          
+          . tools/ak3-core.sh;
+          split_boot;
+          flash_boot;
+          EOF
+          sed -i 's/\r$//' AnyKernel3/anykernel.sh
+          
+          mkdir -p final_output
+          cd AnyKernel3
+          zip -r9 ../final_output/AnyKernel3_KSU_Next_SUSFS_kiev.zip .
+          cd ..
+          echo "✅ Packaging AnyKernel3 terminé !"
+
+      - name: Upload Finished Packaged Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-ksunext-anykernel3
+          path: final_output/AnyKernel3_KSU_Next_SUSFS_kiev.zip
+          retention-days: 30
+          if-no-files-found: error
