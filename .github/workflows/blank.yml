@@ -42,7 +42,7 @@ jobs:
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           echo "🛠️ Application unique du patch SUSFS..."
-          PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
+          PATCH_FILE="${{ github.workspace }}/patches/50_add_susfs_in_kernel-4.19.patch"
           
           if [ -f "$PATCH_FILE" ]; then
             echo "📄 Application du patch : $PATCH_FILE"
@@ -58,12 +58,13 @@ jobs:
             exit 1
           fi
           
-          if [ -f "../patches/susfs_inline_hook_patches.sh" ]; then
+          HOOK_SCRIPT="${{ github.workspace }}/patches/susfs_inline_hook_patches.sh"
+          if [ -f "$HOOK_SCRIPT" ]; then
             echo "🐚 Exécution du script de hooks..."
-            chmod +x ../patches/susfs_inline_hook_patches.sh
-            ../patches/susfs_inline_hook_patches.sh
+            chmod +x "$HOOK_SCRIPT"
+            "$HOOK_SCRIPT"
           fi
-          
+
       - name: Setup ccache
         uses: actions/cache@v4
         with:
