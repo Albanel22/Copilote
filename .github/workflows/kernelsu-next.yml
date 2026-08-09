@@ -9,5 +9,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
       - name: Run Test
-        run: echo "Le workflow fonctionne !"
+        run: echo "Le workflow s'exécute sur la branche ${{ github.ref_name }}"
