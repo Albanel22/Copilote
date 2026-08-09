@@ -55,6 +55,17 @@ jobs:
           echo "--- CONTENU DE fs/open.c.rej ---"
           [ -f fs/open.c.rej ] && cat fs/open.c.rej || echo "Fichier fs/open.c.rej introuvable"
           sed -n '370,400p' fs/open.c || true
+
+      - name: 📦 Collect SUSFS patch rejects
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: susfs-patch-rejects
+          path: |
+            ${{ env.KERNEL_PATH }}/**/*.rej
+          if-no-files-found: ignore   
+
+      
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
