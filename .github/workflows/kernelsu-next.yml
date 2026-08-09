@@ -1,0 +1,15 @@
+name: Kernel CI — build & package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Run Test
+        run: echo "Le workflow s'exécute sur la branche ${{ github.ref_name }}"
