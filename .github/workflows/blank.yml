@@ -38,35 +38,39 @@ jobs:
           echo "📥 Récupération des sources du noyau 4.19..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Apply Local SuSFS Patches and Hooks
+      - name: Apply Only SUSFS Patch
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application exclusive des patchs locaux depuis le dossier patches/..."
-          if [ -d "../patches" ]; then
-            for patch_file in ../patches/*.patch; do
-              if [ -f "$patch_file" ]; then
-                echo "📄 Application du patch : $patch_file"
-                patch -p1 --forward --reject-file=.rej < "$patch_file" || {
-                  echo "❌ Erreur : Le patch $patch_file a généré des rejets !"
-                  if [ -f "$(basename "$patch_file" .patch).rej" ] || find . -name "*.rej" | grep -q .; then
-                    echo "--- Affichage des fichiers .rej ---"
-                    cat *.rej **/*.rej 2>/dev/null || true
-                  fi
-                  exit 1
-                }
-              fi
-            done
-            
-            if [ -f "../patches/susfs_inline_hook_patches.sh" ]; then
-              echo "🐚 Exécution du script de hooks..."
-              chmod +x ../patches/susfs_inline_hook_patches.sh
-              ../patches/susfs_inline_hook_patches.sh
-            fi
+          echo "🛠️ Application unique et exclusive du patch SUSFS..."
+          
+          # On cherche le fichier de patch SUSFS (qu'il finisse par .patch ou .back si tu l'as renommé)
+          PATCH_FILE=""
+          if [ -f "../patches/50_add_susfs_in_kernel-4.19.patch" ]; then
+            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
+          elif [ -f "../patches/50_add_susfs_in_kernel-4.19.back" ]; then
+            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.back"
+          fi
+          
+          if [ -n "$PATCH_FILE" ]; then
+            echo "📄 Application du patch : $PATCH_FILE"
+            patch -p1 --forward --reject-file=.rej < "$PATCH_FILE" || {
+              echo "❌ Erreur : Le patch SUSFS a généré des rejets !"
+              echo "--- Recherche des fichiers .rej générés ---"
+              find . -name "*.rej" -exec echo "Fichier rejeté : {}" \; -exec cat {} \;
+              exit 1
+            }
+            echo "✅ Patch SUSFS appliqué avec succès !"
           else
-            echo "❌ Dossier patches introuvable !"
+            echo "❌ Aucun fichier de patch SUSFS trouvé dans le dossier patches/ !"
             exit 1
           fi
-
+          
+          if [ -f "../patches/susfs_inline_hook_patches.sh" ]; then
+            echo "🐚 Exécution du script de hooks..."
+            chmod +x ../patches/susfs_inline_hook_patches.sh
+            ../patches/susfs_inline_hook_patches.sh
+          fi
+          
       - name: Setup ccache
         uses: actions/cache@v4
         with:
