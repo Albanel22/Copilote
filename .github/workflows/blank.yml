@@ -41,17 +41,10 @@ jobs:
       - name: Apply Only SUSFS Patch
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application unique et exclusive du patch SUSFS..."
+          echo "🛠️ Application unique du patch SUSFS..."
+          PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
           
-          # On cherche le fichier de patch SUSFS (qu'il finisse par .patch ou .back si tu l'as renommé)
-          PATCH_FILE=""
-          if [ -f "../patches/50_add_susfs_in_kernel-4.19.patch" ]; then
-            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
-          elif [ -f "../patches/50_add_susfs_in_kernel-4.19.patch" ]; then
-            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
-          fi
-          
-          if [ -n "$PATCH_FILE" ]; then
+          if [ -f "$PATCH_FILE" ]; then
             echo "📄 Application du patch : $PATCH_FILE"
             patch -p1 --forward --reject-file=.rej < "$PATCH_FILE" || {
               echo "❌ Erreur : Le patch SUSFS a généré des rejets !"
@@ -61,7 +54,7 @@ jobs:
             }
             echo "✅ Patch SUSFS appliqué avec succès !"
           else
-            echo "❌ Aucun fichier de patch SUSFS trouvé dans le dossier patches/ !"
+            echo "❌ Fichier $PATCH_FILE introuvable !"
             exit 1
           fi
           
