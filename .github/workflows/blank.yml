@@ -212,17 +212,23 @@ jobs:
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
 
           echo "🔧 Patchs modules & Tactile Motorola..."
-          # Le bypass global de check_version() a été retiré : il désactivait la
+          # Le bypass global de check_version() reste retiré : il désactivait la
           # vérification de version pour TOUS les modules du système (pas seulement
-          # tactile), suspect principal d'un plantage précoce au démarrage.
+          # tactile). Confirmé non-responsable du bootloop (test diagnostic OK),
+          # mais toujours trop risqué à garder sans raison précise de le remettre.
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
 
           cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
-          # 🔬 BUILD DIAGNOSTIC : CONFIG_KSU=n temporairement pour isoler la cause
-          # du bootloop. Remettre à y une fois le test concluant.
-          CONFIG_KSU=n
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_EXT4_FS=y
@@ -237,12 +243,13 @@ jobs:
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
 
-          echo "🔍 Vérification immédiate (mode diagnostic) : CONFIG_KSU est-il bien désactivé ?"
-          if grep -q '^CONFIG_KSU=n\|^# CONFIG_KSU is not set' ${{ env.BUILD_DIR }}/.config; then
-            echo "✅ CONFIG_KSU désactivé — build diagnostic sans KSU"
+          echo "🔍 Vérification immédiate : CONFIG_KSU a-t-il survécu à oldconfig ?"
+          if grep -q '^CONFIG_KSU=y' ${{ env.BUILD_DIR }}/.config; then
+            echo "✅ CONFIG_KSU=y confirmé dans le .config final"
           else
-            echo "⚠️  CONFIG_KSU semble toujours actif malgré la demande :"
+            echo "❌ CONFIG_KSU absent ou désactivé après oldconfig !"
             grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne trouvée)"
+            exit 1
           fi
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
