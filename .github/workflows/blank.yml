@@ -113,19 +113,19 @@ jobs:
             echo "⚠️ Fichier file_wrapper.c introuvable."
           fi
 
-      - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
+      - name: Fix UAPI and Static Key for SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Création d'un module de correction dédié..."
-          # On crée un fichier source C autonome dans un dossier standard du noyau
-          FIX_FILE="kernel/ksu_fix_symbol.c"
-          if [ -d "kernel" ]; then
-            echo '#include <linux/module.h>' > "$FIX_FILE"
-            echo 'bool ksu_is_init_rc_hook_enabled(void) { return true; }' >> "$FIX_FILE"
-            echo 'EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);' >> "$FIX_FILE"
-            echo "✅ Fichier de correction créé avec succès."
+          echo "🛠️ Ajout de la déclaration de la clé statique dans uapi/ksu.h..."
+          UAPI_FILE="drivers/kernelsu/uapi/ksu.h"
+          if [ -f "$UAPI_FILE" ]; then
+            # On s'assure d'inclure jump_label.h et de déclarer extern le symbole
+            echo "" >> "$UAPI_FILE"
+            echo "#include <linux/jump_label.h>" >> "$UAPI_FILE"
+            echo "DECLARE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" >> "$UAPI_FILE"
+            echo "✅ Déclaration ajoutée dans $UAPI_FILE"
           else
-            echo "⚠️ Dossier kernel introuvable."
+            echo "⚠️ Fichier uapi/ksu.h non trouvé au chemin standard."
           fi
 
 
