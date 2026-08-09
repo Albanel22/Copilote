@@ -47,8 +47,8 @@ jobs:
           PATCH_FILE=""
           if [ -f "../patches/50_add_susfs_in_kernel-4.19.patch" ]; then
             PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
-          elif [ -f "../patches/50_add_susfs_in_kernel-4.19.back" ]; then
-            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.back"
+          elif [ -f "../patches/50_add_susfs_in_kernel-4.19.patch" ]; then
+            PATCH_FILE="../patches/50_add_susfs_in_kernel-4.19.patch"
           fi
           
           if [ -n "$PATCH_FILE" ]; then
