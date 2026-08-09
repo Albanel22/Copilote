@@ -116,17 +116,16 @@ jobs:
       - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Définition du symbole statique pour ksu_is_init_rc_hook_enabled..."
-          TARGET_FILE=$(find drivers/kernelsu fs/kernelsu -name "ksu.c" -o -name "core_hook.c" 2>/dev/null | head -n 1)
-          if [ -n "$TARGET_FILE" ]; then
-            echo "DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
-            echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
-            echo "✅ Définition statique injectée dans $TARGET_FILE"
+          echo "🛠️ Création d'un module de correction dédié..."
+          # On crée un fichier source C autonome dans un dossier standard du noyau
+          FIX_FILE="kernel/ksu_fix_symbol.c"
+          if [ -d "kernel" ]; then
+            echo '#include <linux/module.h>' > "$FIX_FILE"
+            echo 'bool ksu_is_init_rc_hook_enabled(void) { return true; }' >> "$FIX_FILE"
+            echo 'EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);' >> "$FIX_FILE"
+            echo "✅ Fichier de correction créé avec succès."
           else
-            echo "⚠️ Fichier cible non trouvé, injection alternative..."
-            # Solution de repli si aucun fichier n'est trouvé dans les dossiers standards
-            echo "DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/ksu.c || true
-            echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/ksu.c || true
+            echo "⚠️ Dossier kernel introuvable."
           fi
 
 
