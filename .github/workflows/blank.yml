@@ -41,12 +41,19 @@ jobs:
       - name: Apply Local SuSFS Patches and Hooks
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application des patches et hooks depuis le dossier patches/..."
+          echo "🛠️ Application exclusive des patchs locaux depuis le dossier patches/..."
           if [ -d "../patches" ]; then
             for patch_file in ../patches/*.patch; do
               if [ -f "$patch_file" ]; then
                 echo "📄 Application du patch : $patch_file"
-                patch -p1 --forward < "$patch_file" || echo "⚠️ Patch déjà appliqué ou conflit mineur."
+                patch -p1 --forward --reject-file=.rej < "$patch_file" || {
+                  echo "❌ Erreur : Le patch $patch_file a généré des rejets !"
+                  if [ -f "$(basename "$patch_file" .patch).rej" ] || find . -name "*.rej" | grep -q .; then
+                    echo "--- Affichage des fichiers .rej ---"
+                    cat *.rej **/*.rej 2>/dev/null || true
+                  fi
+                  exit 1
+                }
               fi
             done
             
