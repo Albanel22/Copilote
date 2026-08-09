@@ -33,11 +33,11 @@ jobs:
           echo "📥 Téléchargement du boot.img d'origine..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur de téléchargement"; exit 1; }
 
-      - name: Clone Motorola Kernel Source
+      - name: Clone Motorola Kernel Source from Fork
         run: |
-          echo "📥 Récupération des sources du noyau 4.19..."
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
-
+          echo "📥 Récupération des sources du noyau depuis ton fork personnel..."
+          git clone https://github.com/Albanel22/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          
       - name: Apply Only SUSFS Patch from Main
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
