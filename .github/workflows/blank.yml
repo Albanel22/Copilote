@@ -38,27 +38,34 @@ jobs:
           echo "📥 Récupération des sources du noyau 4.19..."
           git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
 
-      - name: Apply Only SUSFS Patch
+      - name: Apply Only SUSFS Patch from Main
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Application unique du patch SUSFS..."
-          PATCH_FILE="${{ github.workspace }}/patches/50_add_susfs_in_kernel-4.19.patch"
+          echo "🛠️ Récupération et application du patch SUSFS depuis la branche main..."
+          
+          mkdir -p ../temp_patches_repo
+          git clone --branch main --depth 1 --no-checkout https://github.com/${{ github.repository }}.git ../temp_patches_repo
+          cd ../temp_patches_repo
+          git sparse-checkout set patches
+          git checkout main
+          cd -
+          
+          PATCH_FILE="../temp_patches_repo/patches/50_add_susfs_in_kernel-4.19.patch"
           
           if [ -f "$PATCH_FILE" ]; then
             echo "📄 Application du patch : $PATCH_FILE"
             patch -p1 --forward --reject-file=.rej < "$PATCH_FILE" || {
               echo "❌ Erreur : Le patch SUSFS a généré des rejets !"
-              echo "--- Recherche des fichiers .rej générés ---"
               find . -name "*.rej" -exec echo "Fichier rejeté : {}" \; -exec cat {} \;
               exit 1
             }
             echo "✅ Patch SUSFS appliqué avec succès !"
           else
-            echo "❌ Fichier $PATCH_FILE introuvable !"
+            echo "❌ Fichier patch introuvable même sur main !"
             exit 1
           fi
           
-          HOOK_SCRIPT="${{ github.workspace }}/patches/susfs_inline_hook_patches.sh"
+          HOOK_SCRIPT="../temp_patches_repo/patches/susfs_inline_hook_patches.sh"
           if [ -f "$HOOK_SCRIPT" ]; then
             echo "🐚 Exécution du script de hooks..."
             chmod +x "$HOOK_SCRIPT"
