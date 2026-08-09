@@ -113,19 +113,35 @@ jobs:
             echo "⚠️ Fichier file_wrapper.c introuvable."
           fi
 
-      - name: Fix UAPI and Static Key for SUSFS
+      - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Ajout de la déclaration de la clé statique dans uapi/ksu.h..."
+          echo "🛠️ Ajout complet du symbole ksu_is_init_rc_hook_enabled..."
+          
+          # 1. Déclaration dans l'en-tête uapi
           UAPI_FILE="drivers/kernelsu/uapi/ksu.h"
           if [ -f "$UAPI_FILE" ]; then
-            # On s'assure d'inclure jump_label.h et de déclarer extern le symbole
-            echo "" >> "$UAPI_FILE"
-            echo "#include <linux/jump_label.h>" >> "$UAPI_FILE"
-            echo "DECLARE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" >> "$UAPI_FILE"
-            echo "✅ Déclaration ajoutée dans $UAPI_FILE"
+            if ! grep -q "ksu_is_init_rc_hook_enabled" "$UAPI_FILE"; then
+              echo "" >> "$UAPI_FILE"
+              echo "#include <linux/jump_label.h>" >> "$UAPI_FILE"
+              echo "DECLARE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" >> "$UAPI_FILE"
+              echo "✅ Déclaration ajoutée dans $UAPI_FILE"
+            fi
+          fi
+          
+          # 2. Définition et export dans un fichier source C du gestionnaire
+          TARGET_SRC=$(find drivers/kernelsu -name "ksu.c" -o -name "core_hook.c" -o -name "feature.c" | head -n 1)
+          if [ -n "$TARGET_SRC" ]; then
+            if ! grep -q "ksu_is_init_rc_hook_enabled" "$TARGET_SRC"; then
+              echo "" >> "$TARGET_SRC"
+              echo "DEFINE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" >> "$TARGET_SRC"
+              echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> "$TARGET_SRC"
+              echo "✅ Définition et export injectés dans $TARGET_SRC"
+            fi
           else
-            echo "⚠️ Fichier uapi/ksu.h non trouvé au chemin standard."
+            # Solution de secours si aucun fichier standard n'est trouvé
+            echo "DEFINE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/kernel/core_hook.c || true
+            echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/kernel/core_hook.c || true
           fi
 
 
