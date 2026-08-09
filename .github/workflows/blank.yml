@@ -116,14 +116,16 @@ jobs:
       - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Ajout du symbole manquant pour SUSFS..."
-          KSU_HEADER="drivers/kernelsu/kernel/ksu.h"
-          # Si le fichier ksu.h ou un équivalent existe, on s'assure que la macro/fonction est définie
-          if [ -d "drivers/kernelsu" ]; then
-            # On cherche où injecter une fonction stub si elle n'existe pas
-            echo "bool ksu_is_init_rc_hook_enabled(void) { return true; }" >> drivers/kernelsu/kernel/core_hook.c || true
-            echo "✅ Symbole de contournement injecté."
+          echo "🛠️ Correction du symbole jump_table pour ksu_is_init_rc_hook_enabled..."
+          TARGET_FILE=$(find drivers/kernelsu fs/kernelsu -name "ksu.c" -o -name "core_hook.c" 2>/dev/null | head -n 1)
+          if [ -n "$TARGET_FILE" ]; then
+            echo "DECLARE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
+            echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
+            echo "✅ Clé statique injectée dans $TARGET_FILE"
+          else
+            echo "⚠️ Fichier cible non trouvé, injection alternative..."
           fi
+
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
