@@ -116,14 +116,17 @@ jobs:
       - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
-          echo "🛠️ Correction du symbole jump_table pour ksu_is_init_rc_hook_enabled..."
+          echo "🛠️ Définition du symbole statique pour ksu_is_init_rc_hook_enabled..."
           TARGET_FILE=$(find drivers/kernelsu fs/kernelsu -name "ksu.c" -o -name "core_hook.c" 2>/dev/null | head -n 1)
           if [ -n "$TARGET_FILE" ]; then
-            echo "DECLARE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
+            echo "DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
             echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> "$TARGET_FILE"
-            echo "✅ Clé statique injectée dans $TARGET_FILE"
+            echo "✅ Définition statique injectée dans $TARGET_FILE"
           else
             echo "⚠️ Fichier cible non trouvé, injection alternative..."
+            # Solution de repli si aucun fichier n'est trouvé dans les dossiers standards
+            echo "DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/ksu.c || true
+            echo "EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);" >> drivers/kernelsu/ksu.c || true
           fi
 
 
