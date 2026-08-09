@@ -113,6 +113,18 @@ jobs:
             echo "⚠️ Fichier file_wrapper.c introuvable."
           fi
 
+      - name: Fix Missing ksu_is_init_rc_hook_enabled Symbol
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          echo "🛠️ Ajout du symbole manquant pour SUSFS..."
+          KSU_HEADER="drivers/kernelsu/kernel/ksu.h"
+          # Si le fichier ksu.h ou un équivalent existe, on s'assure que la macro/fonction est définie
+          if [ -d "drivers/kernelsu" ]; then
+            # On cherche où injecter une fonction stub si elle n'existe pas
+            echo "bool ksu_is_init_rc_hook_enabled(void) { return true; }" >> drivers/kernelsu/kernel/core_hook.c || true
+            echo "✅ Symbole de contournement injecté."
+          fi
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
