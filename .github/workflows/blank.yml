@@ -236,10 +236,41 @@ jobs:
           cd ..
           echo "✅ Packaging AnyKernel3 terminé !"
 
+      - name: Pack boot.img for Fastboot Boot
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "📦 Création d'un boot.img testable directement via fastboot boot..."
+          
+          # On crée un dossier de travail pour repacké
+          mkdir -p test_boot
+          cp boot-stock.img test_boot/boot.img
+          cd test_boot
+          
+          # On extrait le boot.img d'origine avec AnyKernel3/tools/magiskboot
+          ../AnyKernel3/tools/magiskboot unpack boot.img
+          
+          # On remplace le kernel d'origine par notre nouveau kernel compilé
+          cp ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
+          
+          # On réemballe le tout
+          ../AnyKernel3/tools/magiskboot repack boot.img
+          
+          # Le nouveau fichier s'appelle new-boot.img
+          if [ -f "new-boot.img" ]; then
+            cp new-boot.img ../final_output/boot-test-ksunext.img
+            echo "✅ boot.img de test généré avec succès dans final_output !"
+          else
+            echo "❌ Erreur lors du repackage du boot.img"
+            exit 1
+          fi
+          cd ..
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-ksunext-anykernel3
-          path: final_output/AnyKernel3_KSU_Next_SUSFS_kiev.zip
+          path: |
+            final_output/AnyKernel3_KSU_Next_SUSFS_kiev.zip
+            final_output/ksunext.img
           retention-days: 30
           if-no-files-found: error
