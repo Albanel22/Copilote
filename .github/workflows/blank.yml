@@ -250,6 +250,12 @@ jobs:
             echo "=== Recherche path_umount dans le kernel ==="
             grep -Rns "path_umount" . --include='*.c' --include='*.h' --exclude-dir=.git || true
 
+            echo "=== VERIFICATION path_umount AVANT COMPILATION ==="
+            grep -n -A20 -B5 "int path_umount" fs/namespace.c || true
+
+            echo "=== VERIFICATION KSU_UMOUNT ==="
+            grep -n "KSU_UMOUNT" kernel/Makefile || true
+
       # ============================================================
       # Compilation
       # ============================================================
