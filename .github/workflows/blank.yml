@@ -83,6 +83,9 @@ jobs:
           echo "=== Application du patch KernelSU/SUSFS ==="
           cd KernelSU
           patch -p1 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          
+          echo "=== Vérification CONFIG_KSU_SUSFS dans KernelSU ==="
+          grep -n "CONFIG_KSU_SUSFS\|KSU_SUSFS" kernel/Kconfig || true
           cd ..
 
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
