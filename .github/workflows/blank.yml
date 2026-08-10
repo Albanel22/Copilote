@@ -82,6 +82,16 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
+      - name: Inspecter Kconfig SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+         echo "=== Kconfig dans susfs4ksu ==="
+         find susfs4ksu -type f \( -name 'Kconfig' -o -name '*Kconfig*' \) -print
+
+         echo "=== Symboles SUSFS dans susfs4ksu ==="
+         grep -Rns "config KSU_SUSFS" susfs4ksu 2>/dev/null || true
+         grep -Rns "KSU_SUSFS" susfs4ksu 2>/dev/null | head -200 || true
+
           echo "=== Application du patch SUSFS personnalisé ==="
 
           patch -p1 -f \
