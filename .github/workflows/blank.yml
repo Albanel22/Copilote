@@ -241,12 +241,14 @@ jobs:
         run: |
           echo "📦 Création d'un boot.img testable directement via fastboot boot..."
           
-          # On crée un dossier de travail pour repacké
           mkdir -p test_boot
           cp boot-stock.img test_boot/boot.img
           cd test_boot
           
-          # On extrait le boot.img d'origine avec AnyKernel3/tools/magiskboot
+          # S'assurer que magiskboot est exécutable
+          chmod +x ../AnyKernel3/tools/magiskboot
+          
+          # On extrait le boot.img d'origine
           ../AnyKernel3/tools/magiskboot unpack boot.img
           
           # On remplace le kernel d'origine par notre nouveau kernel compilé
@@ -255,7 +257,6 @@ jobs:
           # On réemballe le tout
           ../AnyKernel3/tools/magiskboot repack boot.img
           
-          # Le nouveau fichier s'appelle new-boot.img
           if [ -f "new-boot.img" ]; then
             cp new-boot.img ../final_output/boot-test-ksunext.img
             echo "✅ boot.img de test généré avec succès dans final_output !"
