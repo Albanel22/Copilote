@@ -15,6 +15,12 @@ env:
   SUKISU_BRANCH: 'main'
   SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
   SUSFS_BRANCH: 'kernel-4.19'
+  # Boot.img de référence LineageOS pour générer boot_test.img (fastboot boot).
+  # Change juste la date dans l'URL à chaque mise à jour LineageOS.
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img'
+  # Désactive temporairement le packaging AnyKernel3 : on veut juste boot_test.img
+  # pour l'instant. Repasse à 'true' pour réactiver le zip flashable.
+  BUILD_ANYKERNEL: 'false'
 
 jobs:
   build:
@@ -107,8 +113,8 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-          source "drivers/kernelsu/Kconfig"
-          }' drivers/Kconfig
+            source "drivers/kernelsu/Kconfig"
+            }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -277,6 +283,7 @@ jobs:
           fi
 
       - name: Repack & Finalize (AnyKernel3)
+        if: ${{ env.BUILD_ANYKERNEL == 'true' }}
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -349,10 +356,88 @@ jobs:
           cd ..
           echo "✅ Packaging terminé avec succès"
 
+      - name: 🥾 Génération d'un boot.img autonome pour "fastboot boot"
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          if [ -f boot_stock.img ]; then
+            echo "ℹ️  boot_stock.img déjà présent localement, on l'utilise tel quel."
+          else
+            echo "📥 Téléchargement du boot.img de référence LineageOS..."
+            if ! curl -fLo boot_stock.img "${{ env.BOOT_URL }}"; then
+              echo "⚠️  Échec du téléchargement depuis ${{ env.BOOT_URL }} — étape sautée."
+              echo "💡 Vérifie que la date dans BOOT_URL correspond à une build LineageOS existante."
+              exit 0
+            fi
+          fi
+
+          echo "📥 Récupération de magiskboot (extrait de l'APK Magisk officiel)..."
+          RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/topjohnwu/Magisk/releases/latest)
+          APK_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":[[:space:]]*"[^"]*\.apk"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')
+          if [ -z "$APK_URL" ]; then
+            echo "❌ Impossible de trouver l'APK Magisk dans la dernière release"
+            exit 1
+          fi
+          curl -fLo magisk.apk "$APK_URL"
+          unzip -o -q magisk.apk -d magisk_extract
+          MAGISKBOOT_SO=$(find magisk_extract -name "libmagiskboot.so" -path "*x86_64*" | head -1)
+          if [ -z "$MAGISKBOOT_SO" ]; then
+            echo "❌ libmagiskboot.so (x86_64) introuvable dans l'APK"
+            exit 1
+          fi
+          cp "$MAGISKBOOT_SO" magiskboot
+          chmod +x magiskboot
+          ./magiskboot -v
+
+          echo "📦 Déballage du boot.img d'origine..."
+          mkdir -p boot_work
+          cp boot_stock.img boot_work/boot_stock.img
+          cd boot_work
+          ../magiskboot unpack boot_stock.img
+          ls -la
+
+          echo "🔁 Remplacement du noyau par notre build..."
+          cp "../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" kernel
+
+          echo "🔧 Repackaging en boot_test.img..."
+          ../magiskboot repack boot_stock.img boot_test.img
+
+          if [ ! -f boot_test.img ]; then
+            echo "❌ Échec de la génération de boot_test.img"
+            exit 1
+          fi
+
+          cd ..
+          cp boot_work/boot_test.img final_output/boot_test.img
+
+          echo "🔍 Vérification de taille : boot_test.img vs boot_stock.img..."
+          STOCK_SIZE=$(stat -c%s boot_stock.img)
+          TEST_SIZE=$(stat -c%s final_output/boot_test.img)
+          echo "ℹ️  boot_stock.img : $STOCK_SIZE octets ($(numfmt --to=iec $STOCK_SIZE 2>/dev/null || echo "$STOCK_SIZE"))"
+          echo "ℹ️  boot_test.img  : $TEST_SIZE octets ($(numfmt --to=iec $TEST_SIZE 2>/dev/null || echo "$TEST_SIZE"))"
+          # Tolérance de 15% : le nouveau noyau peut légèrement différer en taille,
+          # mais un écart plus important signale probablement un composant manquant
+          # (ramdisk, dtb...) lors du repack.
+          DIFF_PCT=$(awk -v a="$STOCK_SIZE" -v b="$TEST_SIZE" 'BEGIN { d = (a-b); if (d<0) d=-d; printf "%.1f", (d/a)*100 }')
+          echo "ℹ️  Écart : ${DIFF_PCT}%"
+          if awk -v d="$DIFF_PCT" 'BEGIN { exit !(d > 15) }'; then
+            echo "⚠️  ALERTE : écart de taille supérieur à 15% — un composant (ramdisk/dtb) a peut-être été perdu au repack !"
+            echo "💡 Inspecte le contenu de boot_work/ (kernel, ramdisk.cpio, dtb, extra...) pour comparer."
+          else
+            echo "✅ Taille cohérente avec le boot.img d'origine"
+          fi
+
+          echo "✅ boot_test.img généré — utilisable directement avec :"
+          echo "   fastboot boot boot_test.img"
+          ls -lh final_output/boot_test.img
+
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola_anykernel3
-          path: final_output/AnyKernel3_SukiSUUltra_kiev.zip
+          path: |
+            final_output/AnyKernel3_SukiSUUltra_kiev.zip
+            final_output/boot_test.img
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
