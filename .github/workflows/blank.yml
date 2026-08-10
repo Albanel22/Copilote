@@ -1,3 +1,4 @@
+```yaml
 name: Kernel CI — KernelSU modern test
 
 on:
@@ -16,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -27,18 +29,20 @@ jobs:
             libelf-dev libssl-dev libncurses-dev \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             clang llvm lld device-tree-compiler \
-            zip unzip curl git
+            zip unzip curl git python3
 
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
+
           echo "📥 Téléchargement du boot.img..."
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}"
 
       - name: Clone Kernel Source
         run: |
           set -euo pipefail
+
           git clone \
             https://github.com/Albanel22/android_kernel_motorola_sm8250.git \
             -b lineage-23.2 \
@@ -54,7 +58,11 @@ jobs:
             ${{ runner.os }}-ccache-kernel-
             ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU & SUSFS
+      # ============================================================
+      # KernelSU
+      # ============================================================
+
+      - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
@@ -62,47 +70,93 @@ jobs:
 
           echo "=== KernelSU ==="
 
-          # TEST : version KernelSU à définir ici
-          # NE PAS mettre 32525 : ce numéro correspond au Manager.
           KSU_VERSION="v0.9.5"
 
           curl -LSs \
             "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" \
             | bash -s "$KSU_VERSION"
 
+          echo "=== Vérification KernelSU ==="
+
+          test -d drivers/kernelsu
+          test -f drivers/kernelsu/Kconfig
+
           if ! grep -q 'drivers/kernelsu/Kconfig' init/Kconfig; then
             echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
           fi
 
-          echo "=== SUSFS ==="
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
+          echo "=== Intégration KernelSU ==="
+          grep -n "drivers/kernelsu/Kconfig" init/Kconfig
 
-          echo "=== Vérification patch KernelSU/SUSFS ==="
+      # ============================================================
+      # SUSFS
+      # ============================================================
+
+      - name: Integrate SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== SUSFS ==="
+
+          git clone \
+            https://gitlab.com/simonpunk/susfs4ksu.git
+
+          echo "=== Vérification dépôt SUSFS ==="
+
+          test -d susfs4ksu
+          test -f susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+
           ls -l susfs4ksu/kernel_patches/KernelSU/
 
+          # ----------------------------------------------------------
+          # Patch KernelSU pour ajouter les options CONFIG_KSU_SUSFS
+          # ----------------------------------------------------------
+
           echo "=== Application du patch KernelSU/SUSFS ==="
+
           cd KernelSU
-          patch -p1 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
-          
-          echo "=== Vérification CONFIG_KSU_SUSFS dans KernelSU ==="
-          grep -nE "CONFIG_KSU_SUSFS\|KSU_SUSFS" kernel/Kconfig || true
+
+          patch -p1 \
+            < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+
           cd ..
 
-          echo "=== Vérification intégration KernelSU dans init/Kconfig ==="
-          grep -n "drivers/kernelsu/Kconfig" init/Kconfig || true
+          echo "=== Vérification Kconfig KernelSU/SUSFS ==="
 
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-      
-      - name: Inspecter Kconfig SUSFS
+          grep -n -A100 -B5 \
+            "config KSU_SUSFS" \
+            KernelSU/kernel/Kconfig || true
+
+          # ----------------------------------------------------------
+          # Intégration SUSFS dans le kernel
+          # ----------------------------------------------------------
+
+          echo "=== Copie des sources SUSFS ==="
+
+          cp \
+            susfs4ksu/kernel_patches/fs/susfs.c \
+            fs/susfs.c
+
+          cp \
+            susfs4ksu/kernel_patches/include/linux/susfs.h \
+            include/linux/susfs.h
+
+          echo "=== Vérification sources SUSFS ==="
+
+          test -f fs/susfs.c
+          test -f include/linux/susfs.h
+
+      # ============================================================
+      # Patch SUSFS adapté au kernel 4.19
+      # ============================================================
+
+      - name: Apply Custom SUSFS Kernel 4.19 Patch
         working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
         run: |
-         echo "=== Kconfig dans susfs4ksu ==="
-         find susfs4ksu -type f \( -name 'Kconfig' -o -name '*Kconfig*' \) -print
-
-         echo "=== Symboles SUSFS dans susfs4ksu ==="
-         grep -Rns "config KSU_SUSFS" susfs4ksu 2>/dev/null || true
-         grep -Rns "KSU_SUSFS" susfs4ksu 2>/dev/null | head -200 || true
+          set -euo pipefail
 
           echo "=== Application du patch SUSFS personnalisé ==="
 
@@ -119,36 +173,73 @@ jobs:
 
           echo "✅ SUSFS appliqué sans aucun .rej"
 
-      - name: Vérifier Kconfig SUSFS
+      # ============================================================
+      # Vérifications avant Kconfig
+      # ============================================================
+
+      - name: Verify SUSFS Integration
         working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
         run: |
-         echo "=== Recherche CONFIG_KSU_SUSFS ==="
-         grep -Rns "config KSU_SUSFS" drivers include init 2>/dev/null || true
+          set -euo pipefail
 
-         echo "=== Recherche KSU_SUSFS dans tout le kernel ==="
-         grep -Rns "KSU_SUSFS" drivers init fs include 2>/dev/null | head -100 || true
+          echo "=== Recherche CONFIG_KSU_SUSFS ==="
 
-         echo "=== Kconfig KernelSU ==="
-         grep -n -A20 -B5 "KSU" drivers/kernelsu/Kconfig || true
+          grep -Rns \
+            "config KSU_SUSFS" \
+            drivers/kernelsu \
+            2>/dev/null || true
 
-         echo "=== Kconfig SUSFS ==="
-         find . -iname "*susfs*Kconfig*" -o -iname "*Kconfig*" | grep -i susfs || true
+          echo "=== Recherche KSU_SUSFS dans le kernel ==="
 
-      - name: Debug SUSFS
+          grep -Rns \
+            "KSU_SUSFS" \
+            drivers/kernelsu \
+            fs \
+            include \
+            init \
+            2>/dev/null | head -200 || true
+
+          echo "=== Vérification KernelSU dans init/Kconfig ==="
+
+          grep -n \
+            "drivers/kernelsu/Kconfig" \
+            init/Kconfig
+
+          echo "=== Vérification fs/Makefile ==="
+
+          grep -n \
+            "KSU_SUSFS" \
+            fs/Makefile || true
+
+          echo "=== Vérification fs/open.c ==="
+
+          grep -n \
+            "CONFIG_KSU_SUSFS" \
+            fs/open.c || true
+
+          echo "=== Vérification task_mmu.c ==="
+
+          grep -n \
+            "susfs.h" \
+            fs/proc/task_mmu.c || true
+
+      - name: Check SUSFS Rejects
         if: always()
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           echo "=== Recherche des .rej ==="
-          find . -name '*.rej' -print || true
 
-          echo "=== Vérification fs/open.c ==="
-          grep -n "CONFIG_KSU_SUSFS_SUS_PATH" fs/open.c || true
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            echo "❌ Rejects trouvés :"
+            find . -name '*.rej' -print
+            exit 1
+          fi
 
-          echo "=== Vérification task_mmu.c ==="
-          grep -n "linux/susfs.h" fs/proc/task_mmu.c || true
+          echo "✅ Aucun .rej"
 
-      - name: Collect SUSFS patch rejects
+      - name: Collect SUSFS Patch Rejects
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -157,20 +248,25 @@ jobs:
             ${{ env.KERNEL_PATH }}/**/*.rej
           if-no-files-found: ignore
 
+      # ============================================================
+      # Compilation
+      # ============================================================
+
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ccache -C
+          export ARCH="${{ env.ARCH }}"
+          export SUBARCH="${{ env.ARCH }}"
 
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
           export CCACHE_EXEC="$(which ccache)"
+
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
           export KCFLAGS="-Wno-error"
 
           echo "📂 Préparation du defconfig..."
@@ -188,69 +284,92 @@ jobs:
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             "${{ env.DEFCONFIG }}"
 
+          # --------------------------------------------------------
+          # Activation KSU / SUSFS / KPROBES
+          # --------------------------------------------------------
+
           echo "🔧 Activation KSU/SUSFS/KPROBES..."
 
-          ./scripts/config --file "out/.config" \
-          -e CONFIG_KSU \
-          -e CONFIG_KSU_SUSFS \
-          -e CONFIG_KSU_SUSFS_SUS_PATH \
-          -e CONFIG_KPROBES \
-          -e CONFIG_KRETPROBES
+          ./scripts/config \
+            --file "${{ env.BUILD_DIR }}/.config" \
+            -e CONFIG_KSU \
+            -e CONFIG_KSU_SUSFS \
+            -e CONFIG_KSU_SUSFS_SUS_PATH \
+            -e CONFIG_KSU_SUSFS_SUS_MOUNT \
+            -e CONFIG_KSU_SUSFS_SUS_KSTAT \
+            -e CONFIG_KSU_SUSFS_SUS_MAPS \
+            -e CONFIG_KSU_SUSFS_TRY_UMOUNT \
+            -e CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            -e CONFIG_KSU_SUSFS_ENABLE_LOG \
+            -e CONFIG_KPROBES \
+            -e CONFIG_KRETPROBES
 
           echo "⚡ olddefconfig..."
+
           make \
-          O="$BUILD_DIR" \
-          LLVM=1 \
-          CROSS_COMPILE="$CROSS_COMPILE" \
-          CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-          olddefconfig
+            O="${{ env.BUILD_DIR }}" \
+            LLVM=1 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            olddefconfig
+
+          # --------------------------------------------------------
+          # Vérification configuration finale
+          # --------------------------------------------------------
 
           echo "🔍 Vérification configuration finale..."
 
           echo "=== KernelSU ==="
-          grep -E '^CONFIG_KSU(=|_)' "out/.config" || true
+
+          grep -E \
+            '^CONFIG_KSU(=|_)' \
+            "${{ env.BUILD_DIR }}/.config" || true
 
           echo "=== SUSFS ==="
-          grep -E '^CONFIG_KSU_SUSFS(=|_)' "out/.config" || true
+
+          grep -E \
+            '^CONFIG_KSU_SUSFS(=|_)' \
+            "${{ env.BUILD_DIR }}/.config" || true
 
           echo "=== KPROBES ==="
-          grep -E '^CONFIG_(KPROBES|KRETPROBES)(=|_)' "out/.config" || true
 
-          grep -q '^CONFIG_KSU=y$' "out/.config" || {
-          echo "❌ CONFIG_KSU n'est pas activé"
-          exit 1
-          }
+          grep -E \
+            '^CONFIG_(KPROBES|HAVE_KPROBES|KRETPROBES)(=|_)' \
+            "${{ env.BUILD_DIR }}/.config" || true
 
-          grep -q '^CONFIG_KSU_SUSFS=y$' "out/.config" || {
-          echo "❌ CONFIG_KSU_SUSFS n'est pas activé"
-          exit 1
-          }
+          # --------------------------------------------------------
+          # Contrôles obligatoires
+          # --------------------------------------------------------
 
-          grep -q '^CONFIG_KSU_SUSFS_SUS_PATH=y$' "out/.config" || {
-          echo "❌ CONFIG_KSU_SUSFS_SUS_PATH n'est pas activé"
-          exit 1
-          }
+          grep -q \
+            '^CONFIG_KSU=y$' \
+            "${{ env.BUILD_DIR }}/.config" || {
+              echo "❌ CONFIG_KSU n'est pas activé"
+              exit 1
+            }
 
-          grep -q '^CONFIG_KPROBES=y$' "out/.config" || {
-          echo "❌ CONFIG_KPROBES n'est pas activé"
-          exit 1
-          }
+          grep -q \
+            '^CONFIG_KSU_SUSFS=y$' \
+            "${{ env.BUILD_DIR }}/.config" || {
+              echo "❌ CONFIG_KSU_SUSFS n'est pas activé"
+              exit 1
+            }
+
+          grep -q \
+            '^CONFIG_KSU_SUSFS_SUS_PATH=y$' \
+            "${{ env.BUILD_DIR }}/.config" || {
+              echo "❌ CONFIG_KSU_SUSFS_SUS_PATH n'est pas activé"
+              exit 1
+            }
+
+          grep -q \
+            '^CONFIG_KPROBES=y$' \
+            "${{ env.BUILD_DIR }}/.config" || {
+              echo "❌ CONFIG_KPROBES n'est pas activé"
+              exit 1
+            }
 
           echo "✅ KSU + SUSFS + SUS_PATH + KPROBES correctement activés"
-
-          echo "🔍 Vérification détaillée de la configuration..."
-
-          echo "=== KSU ==="
-          grep -E '^CONFIG_KSU(=|_)|^# CONFIG_KSU' \
-          "${{ env.BUILD_DIR }}/.config" || true
-
-          echo "=== SUSFS ==="
-          grep -E '^CONFIG_KSU_SUSFS(=|_)|^# CONFIG_KSU_SUSFS' \
-          "${{ env.BUILD_DIR }}/.config" || true
-
-          echo "=== KPROBES ==="
-          grep -E '^CONFIG_(KPROBES|HAVE_KPROBES|KRETPROBES)(=|_)|^# CONFIG_(KPROBES|HAVE_KPROBES|KRETPROBES)' \
-          "${{ env.BUILD_DIR }}/.config" || true
 
           echo "🚀 Compilation..."
 
@@ -263,6 +382,10 @@ jobs:
             -j"$(nproc)" \
             Image
 
+      # ============================================================
+      # Repack boot.img
+      # ============================================================
+
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -271,7 +394,9 @@ jobs:
 
           mkdir -p repack
 
-          cp boot-stock.img repack/boot.img
+          cp \
+            boot-stock.img \
+            repack/boot.img
 
           wget -q \
             https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk \
@@ -281,7 +406,10 @@ jobs:
             Magisk-v27.0.apk \
             lib/x86_64/libmagiskboot.so
 
-          mv lib/x86_64/libmagiskboot.so repack/magiskboot
+          mv \
+            lib/x86_64/libmagiskboot.so \
+            repack/magiskboot
+
           chmod +x repack/magiskboot
 
           cd repack
@@ -292,18 +420,29 @@ jobs:
             "${GITHUB_WORKSPACE}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" \
             kernel
 
-          ./magiskboot repack boot.img new-boot.img
+          ./magiskboot repack \
+            boot.img \
+            new-boot.img
 
-          mv new-boot.img ../final_boot.img
+          mv \
+            new-boot.img \
+            ../final_boot.img
 
           cd ..
 
           mkdir -p final_output
 
-          mv final_boot.img final_output/boot.img
+          mv \
+            final_boot.img \
+            final_output/boot.img
+
+      # ============================================================
+      # Artifact
+      # ============================================================
 
       - name: Upload Finished Packaged Assets
         uses: actions/upload-artifact@v4
         with:
           name: kernel-motorola-modern-test
           path: final_output/boot.img
+```
