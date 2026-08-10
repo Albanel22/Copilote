@@ -212,10 +212,10 @@ jobs:
           cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
 
           echo "🔧 Patchs modules & Tactile Motorola..."
-          # Le bypass global de check_version() reste retiré : il désactivait la
-          # vérification de version pour TOUS les modules du système (pas seulement
-          # tactile). Confirmé non-responsable du bootloop (test diagnostic OK),
-          # mais toujours trop risqué à garder sans raison précise de le remettre.
+          # Bypass check_version() restauré : confirmé non-responsable du bootloop
+          # (deux boots réussis sans lui), et le tactile reste cassé même sans —
+          # signe qu'il est probablement nécessaire au chargement du module tactile.
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
           printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
@@ -251,6 +251,10 @@ jobs:
             grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne trouvée)"
             exit 1
           fi
+
+          # Fixs signatures modules & Dalle tactile Motorola
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
 
           make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
 
