@@ -153,23 +153,53 @@ jobs:
 
           echo "🔧 Activation KSU/SUSFS/KPROBES..."
 
-          {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
-          } >> "${{ env.BUILD_DIR }}/.config"
+          ./scripts/config --file "out/.config" \
+          -e CONFIG_KSU \
+          -e CONFIG_KSU_SUSFS \
+          -e CONFIG_KSU_SUSFS_SUS_PATH \
+          -e CONFIG_KPROBES \
+          -e CONFIG_KRETPROBES
 
           echo "⚡ olddefconfig..."
-
           make \
-            O="${{ env.BUILD_DIR }}" \
-            LLVM=1 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            olddefconfig
+          O="$BUILD_DIR" \
+          LLVM=1 \
+          CROSS_COMPILE="$CROSS_COMPILE" \
+          CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+          olddefconfig
+
+          echo "🔍 Vérification configuration finale..."
+
+          echo "=== KernelSU ==="
+          grep -E '^CONFIG_KSU(=|_)' "out/.config" || true
+
+          echo "=== SUSFS ==="
+          grep -E '^CONFIG_KSU_SUSFS(=|_)' "out/.config" || true
+
+          echo "=== KPROBES ==="
+          grep -E '^CONFIG_(KPROBES|KRETPROBES)(=|_)' "out/.config" || true
+
+          grep -q '^CONFIG_KSU=y$' "out/.config" || {
+          echo "❌ CONFIG_KSU n'est pas activé"
+          exit 1
+          }
+
+          grep -q '^CONFIG_KSU_SUSFS=y$' "out/.config" || {
+          echo "❌ CONFIG_KSU_SUSFS n'est pas activé"
+          exit 1
+          }
+
+          grep -q '^CONFIG_KSU_SUSFS_SUS_PATH=y$' "out/.config" || {
+          echo "❌ CONFIG_KSU_SUSFS_SUS_PATH n'est pas activé"
+          exit 1
+          }
+
+          grep -q '^CONFIG_KPROBES=y$' "out/.config" || {
+          echo "❌ CONFIG_KPROBES n'est pas activé"
+          exit 1
+          }
+
+          echo "✅ KSU + SUSFS + SUS_PATH + KPROBES correctement activés"
 
           echo "🔍 Vérification détaillée de la configuration..."
 
