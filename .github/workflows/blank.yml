@@ -247,6 +247,13 @@ jobs:
             ${{ env.KERNEL_PATH }}/**/*.rej
           if-no-files-found: ignore
 
+           echo "=== Recherche path_umount dans le kernel ==="
+           grep -Rns "path_umount" . \
+           --include='*.c' \
+           --include='*.h' \
+           --exclude-dir=.git \
+           | head -100 || true
+
       # ============================================================
       # Compilation
       # ============================================================
