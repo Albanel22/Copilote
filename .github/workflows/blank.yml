@@ -289,19 +289,18 @@ jobs:
 
           echo "🔧 Activation KSU/SUSFS/KPROBES..."
 
-          ./scripts/config \
-            --file "${{ env.BUILD_DIR }}/.config" \
-            -e CONFIG_KSU \
-            -e CONFIG_KSU_SUSFS \
-            -e CONFIG_KSU_SUSFS_SUS_PATH \
-            -e CONFIG_KSU_SUSFS_SUS_MOUNT \
-            -e CONFIG_KSU_SUSFS_SUS_KSTAT \
-            -e CONFIG_KSU_SUSFS_SUS_MAPS \
-            -e CONFIG_KSU_SUSFS_TRY_UMOUNT \
-            -e CONFIG_KSU_SUSFS_SPOOF_UNAME \
-            -e CONFIG_KSU_SUSFS_ENABLE_LOG \
-            -e CONFIG_KPROBES \
-            -e CONFIG_KRETPROBES
+          ./scripts/config --file "out/.config" \
+          -e CONFIG_KSU \
+          -e CONFIG_KSU_SUSFS \
+          -e CONFIG_KSU_SUSFS_SUS_PATH \
+          -e CONFIG_KSU_SUSFS_SUS_MOUNT \
+          -e CONFIG_KSU_SUSFS_SUS_KSTAT \
+          -e CONFIG_KPROBES \
+          -e CONFIG_KRETPROBES \
+          -d CONFIG_KSU_SUSFS_SUS_MAPS \
+          -d CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK \
+          -d CONFIG_KSU_SUSFS_SUS_MEMFD \
+          -d CONFIG_KSU_SUSFS_SUS_MOUNT_MNT_ID_REORDER
 
           echo "⚡ olddefconfig..."
 
