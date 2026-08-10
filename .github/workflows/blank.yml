@@ -97,6 +97,21 @@ jobs:
 
           echo "✅ SUSFS appliqué sans aucun .rej"
 
+      - name: Vérifier Kconfig SUSFS
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+         echo "=== Recherche CONFIG_KSU_SUSFS ==="
+         grep -Rns "config KSU_SUSFS" drivers include init 2>/dev/null || true
+
+         echo "=== Recherche KSU_SUSFS dans tout le kernel ==="
+         grep -Rns "KSU_SUSFS" drivers init fs include 2>/dev/null | head -100 || true
+
+         echo "=== Kconfig KernelSU ==="
+         grep -n -A20 -B5 "KSU" drivers/kernelsu/Kconfig || true
+
+         echo "=== Kconfig SUSFS ==="
+         find . -iname "*susfs*Kconfig*" -o -iname "*Kconfig*" | grep -i susfs || true
+
       - name: Debug SUSFS
         if: always()
         working-directory: ${{ env.KERNEL_PATH }}
