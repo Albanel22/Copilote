@@ -1,4 +1,4 @@
-name: Kernel CI — KernelSU
+name: Kernel CI — KSU 3.2.5 + SUSFS 4.19 TEST
 
 on:
   workflow_dispatch:
@@ -10,6 +10,8 @@ env:
   DEFCONFIG: lito-perf_defconfig
   CCACHE_SIZE: 5G
   BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img
+  KSU_VERSION: v3.2.5
+  SUSFS_REF: kernel-4.19
 
 jobs:
   build:
@@ -17,8 +19,16 @@ jobs:
 
     steps:
 
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
 
       - name: Install Build Dependencies
         run: |
@@ -44,20 +54,28 @@ jobs:
             curl \
             git
 
+      # ============================================================
+      # STOCK BOOT
+      # ============================================================
+
       - name: Download Stock Boot Image
         shell: bash
         run: |
           set -euo pipefail
 
           echo "📥 Téléchargement du boot.img..."
+
           curl -fLo boot-stock.img "${{ env.BOOT_URL }}"
 
           test -s boot-stock.img
 
           echo "✅ boot-stock.img téléchargé"
 
+      # ============================================================
+      # KERNEL SOURCE
+      # ============================================================
+
       - name: Clone Kernel Source
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -69,229 +87,338 @@ jobs:
 
           cd "${{ env.KERNEL_PATH }}"
 
-          echo "=== Kernel source ==="
+          echo "=== KERNEL COMMIT ==="
           git rev-parse HEAD
-          git branch --show-current
+
+          echo "=== KERNEL BRANCH ==="
+          git branch --show-current || true
+
+      # ============================================================
+      # CCACHE
+      # ============================================================
 
       - name: Setup ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel-modern
+          key: ${{ runner.os }}-ccache-kernel
           restore-keys: |
-            ${{ runner.os }}-ccache-kernel-
             ${{ runner.os }}-ccache-
 
-      - name: Integrate KernelSU 3.2.5 & SUSFS 1.4.2
+      # ============================================================
+      # KERNELSU 3.2.5
+      # ============================================================
+
+      - name: Install KernelSU 3.2.5
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euo pipefail
 
           echo "========================================"
-          echo "=== KernelSU v3.2.5 ==="
+          echo "     INSTALLATION KERNELSU 3.2.5"
           echo "========================================"
-
-          KSU_VERSION="v3.2.5"
 
           curl -LSs \
             "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" \
-            | bash -s "$KSU_VERSION"
+            | bash -s "${KSU_VERSION}"
 
+          echo ""
           echo "=== Vérification KernelSU ==="
 
           test -d KernelSU
           test -f KernelSU/kernel/Kconfig
-          test -f KernelSU/kernel/Makefile
 
-          if ! grep -q "drivers/kernelsu/Kconfig" init/Kconfig; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
-          fi
+          echo "=== KernelSU HEAD ==="
 
-          echo "=== KernelSU Kconfig ==="
-          grep -n "config KSU" KernelSU/kernel/Kconfig | head -20 || true
-
-          echo "========================================"
-          echo "=== SUSFS 1.4.2-kernel-4.19 ==="
-          echo "========================================"
-
-          git clone \
-            --branch 1.4.2-kernel-4.19 \
-            --depth=1 \
-            https://gitlab.com/simonpunk/susfs4ksu.git
-
-          cd susfs4ksu
-
-          echo "=== Version SUSFS ==="
-          git describe --tags --always
+          cd KernelSU
           git rev-parse HEAD
+          git describe --tags --always || true
 
-          test "$(git describe --tags --always)" = "1.4.2-kernel-4.19"
+          echo ""
+          echo "=== KernelSU Kconfig ==="
+
+          grep -n \
+            "^config KSU" \
+            kernel/Kconfig \
+            || true
 
           cd ..
 
-          echo "=== Vérification 10_enable_susfs_for_ksu.patch ==="
+          if ! grep -q 'drivers/kernelsu/Kconfig' init/Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> init/Kconfig
+          fi
 
-          test -f \
-            susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          echo "✅ KernelSU 3.2.5 installé"
+
+      # ============================================================
+      # SUSFS KERNEL 4.19
+      # ============================================================
+
+      - name: Clone SUSFS kernel-4.19
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "       CLONE SUSFS KERNEL 4.19"
+          echo "========================================"
+
+          git clone \
+            --branch "${SUSFS_REF}" \
+            --depth=1 \
+            https://gitlab.com/simonpunk/susfs4ksu.git \
+            susfs4ksu
+
+          cd susfs4ksu
+
+          echo ""
+          echo "=== SUSFS REF ==="
+          git describe --tags --always || true
+
+          echo ""
+          echo "=== SUSFS COMMIT ==="
+          git rev-parse HEAD
+
+          echo ""
+          echo "=== FICHIERS SUSFS ==="
+
+          test -f kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          test -f kernel_patches/50_add_susfs_in_kernel-4.19.patch
+          test -f kernel_patches/fs/susfs.c
+          test -f kernel_patches/include/linux/susfs.h
 
           ls -lh \
-            susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+            kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch \
+            kernel_patches/50_add_susfs_in_kernel-4.19.patch \
+            kernel_patches/fs/susfs.c \
+            kernel_patches/include/linux/susfs.h
 
-          echo "=== Vérification path_umount dans le patch 10 ==="
+          echo ""
+          echo "✅ Fichiers SUSFS présents"
 
-          grep -n -E \
-            "path_umount|PATH_UMOUNT|namespace.c" \
-            susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch \
-            || true
+      # ============================================================
+      # TEST PATCH 10
+      # IMPORTANT :
+      # On ne modifie PAS encore KernelSU.
+      # ============================================================
+
+      - name: TEST 10_enable_susfs_for_ksu.patch
+        working-directory: ${{ env.KERNEL_PATH }}/KernelSU
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PATCH="../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
 
           echo "========================================"
-          echo "=== Application patch KernelSU/SUSFS ==="
+          echo " TEST 10_enable_susfs_for_ksu.patch"
           echo "========================================"
 
-          cd KernelSU
+          test -f "$PATCH"
+
+          echo ""
+          echo "=== Taille du patch ==="
+          wc -l "$PATCH"
+
+          echo ""
+          echo "=== Recherche path_umount dans le patch ==="
+          grep -n "path_umount" "$PATCH" || true
+
+          echo ""
+          echo "=== DRY RUN PATCH 10 ==="
+
+          if patch --dry-run -p1 < "$PATCH"; then
+            echo ""
+            echo "========================================"
+            echo "✅ PATCH 10 COMPATIBLE"
+            echo "========================================"
+          else
+            echo ""
+            echo "========================================"
+            echo "❌ PATCH 10 INCOMPATIBLE"
+            echo "========================================"
+            echo ""
+            echo "Le workflow s'arrête volontairement."
+            echo "Aucune compilation du kernel ne sera lancée."
+            exit 1
+          fi
+
+      # ============================================================
+      # APPLICATION PATCH 10
+      # ============================================================
+
+      - name: Apply SUSFS KernelSU patch
+        working-directory: ${{ env.KERNEL_PATH }}/KernelSU
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Application patch 10 ==="
 
           patch -p1 \
             < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
 
-          cd ..
+          echo ""
+          echo "✅ Patch 10 appliqué"
 
-          echo "=== Vérification application patch ==="
+      # ============================================================
+      # COPIE SUSFS
+      # ============================================================
 
-          if find KernelSU -name '*.rej' -print -quit | grep -q .; then
-            echo "❌ Le patch 10_enable_susfs_for_ksu.patch a généré un .rej"
-            find KernelSU -name '*.rej' -print
-            exit 1
-          fi
+      - name: Copy SUSFS Sources
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          echo "✅ Patch 10 appliqué sans .rej"
-
-          echo "========================================"
-          echo "=== Installation des fichiers SUSFS ==="
-          echo "========================================"
+          echo "=== Copie susfs.c ==="
 
           cp \
             susfs4ksu/kernel_patches/fs/susfs.c \
-            fs/
+            fs/susfs.c
+
+          echo "=== Copie susfs.h ==="
 
           cp \
             susfs4ksu/kernel_patches/include/linux/susfs.h \
-            include/linux/
+            include/linux/susfs.h
 
-          echo "=== Vérification susfs.c ==="
           test -f fs/susfs.c
           test -f include/linux/susfs.h
 
+          echo "✅ Sources SUSFS copiées"
+
+      # ============================================================
+      # TEST PATCH 50
+      # ============================================================
+
+      - name: TEST 50_add_susfs_in_kernel-4.19.patch
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PATCH="susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch"
+
           echo "========================================"
-          echo "=== Patch kernel 4.19 ==="
+          echo " TEST PATCH SUSFS KERNEL 4.19"
           echo "========================================"
 
-          patch -p1 -f \
-            < "${GITHUB_WORKSPACE}/patches/50_add_susfs_in_kernel-4.19.patch"
+          test -f "$PATCH"
 
-          echo "=== Vérification rejects ==="
+          echo ""
+          echo "=== DRY RUN PATCH 50 ==="
 
-          if find . -name '*.rej' -print -quit | grep -q .; then
-            echo "❌ Des .rej ont été générés"
-            find . -name '*.rej' -print
+          if patch --dry-run -p1 < "$PATCH"; then
+            echo ""
+            echo "========================================"
+            echo "✅ PATCH 50 COMPATIBLE"
+            echo "========================================"
+          else
+            echo ""
+            echo "========================================"
+            echo "❌ PATCH 50 INCOMPATIBLE"
+            echo "========================================"
+            echo ""
+            echo "Le workflow s'arrête."
             exit 1
           fi
 
-          echo "✅ Patch 50 appliqué sans .rej"
+      # ============================================================
+      # APPLICATION PATCH 50
+      # ============================================================
 
-      - name: Verify Modern KernelSU / SUSFS Integration
+      - name: Apply SUSFS Kernel 4.19 patch
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          patch -p1 \
+            < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch
+
+          echo "✅ Patch 50 appliqué"
+
+      # ============================================================
+      # VERIFICATION path_umount
+      # ============================================================
+
+      - name: Verify SUSFS Integration
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euo pipefail
 
           echo "========================================"
-          echo "=== Vérification KernelSU ==="
+          echo "       VERIFICATION SUSFS"
           echo "========================================"
 
-          grep -Rns \
-            "KSU" \
-            KernelSU/kernel/Kconfig \
-            KernelSU/kernel/Makefile \
-            | head -100 || true
-
-          echo "========================================"
-          echo "=== Vérification SUSFS ==="
-          echo "========================================"
-
-          grep -Rns \
-            "KSU_SUSFS" \
-            KernelSU/kernel/Kconfig \
-            KernelSU/kernel/Makefile \
-            | head -150 || true
-
-          echo "========================================"
-          echo "=== Vérification path_umount ==="
-          echo "========================================"
+          echo ""
+          echo "=== Recherche path_umount ==="
 
           grep -Rns \
             "path_umount" \
-            . \
+            fs \
+            include \
+            kernel \
+            KernelSU \
             --include='*.c' \
             --include='*.h' \
-            --exclude-dir=.git \
-            | head -100 || true
-
-          echo "========================================"
-          echo "=== Vérification kernel/Makefile ==="
-          echo "========================================"
-
-          grep -n -A40 -B10 \
-            "PATH_UMOUNT" \
-            KernelSU/kernel/Makefile \
+            --include='Makefile' \
             || true
 
-      - name: Debug and Print Patch Failures
-        if: always()
-        working-directory: ${{ env.KERNEL_PATH }}
-        shell: bash
-        run: |
-          echo "=== Recherche des .rej ==="
-          find . -name '*.rej' -print || true
+          echo ""
+          echo "=== fs/namespace.c ==="
 
-          echo "=== fs/open.c ==="
-          [ -f fs/open.c.rej ] && cat fs/open.c.rej || true
-
-          echo "=== fs/namespace.c path_umount ==="
-          grep -n -A25 -B10 \
+          grep -n \
+            -A25 \
+            -B10 \
             "int path_umount" \
             fs/namespace.c \
             || true
 
-          echo "=== KernelSU Makefile PATH_UMOUNT ==="
-          grep -n -A50 -B10 \
-            "PATH_UMOUNT" \
-            KernelSU/kernel/Makefile \
+          echo ""
+          echo "=== fs/internal.h ==="
+
+          grep -n \
+            "path_umount" \
+            fs/internal.h \
             || true
 
-      - name: Collect SUSFS patch rejects
+          echo ""
+          echo "=== SUSFS Kconfig ==="
+
+          grep -Rns \
+            "CONFIG_KSU_SUSFS" \
+            KernelSU \
+            --include='Kconfig*' \
+            || true
+
+          echo ""
+          echo "=== Reject files ==="
+
+          find . \
+            -name "*.rej" \
+            -print
+
+      # ============================================================
+      # COLLECT REJECTS
+      # ============================================================
+
+      - name: Collect Patch Rejects
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: susfs-modern-test-rejects
+          name: susfs-patch-rejects
           path: |
             ${{ env.KERNEL_PATH }}/**/*.rej
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
-      - name: Download Manager 3.2.5
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "📱 Téléchargement KernelSU Manager v3.2.5..."
-
-          curl -fL \
-            "https://github.com/tiann/KernelSU/releases/download/v3.2.5/KernelSU_v3.2.5_32525-release.apk" \
-            -o KernelSU_v3.2.5_32525-release.apk
-
-          test -s KernelSU_v3.2.5_32525-release.apk
-
-          echo "✅ Manager 3.2.5 téléchargé"
+      # ============================================================
+      # COMPILATION
+      # ============================================================
 
       - name: Multi-stage Kernel Compilation
         working-directory: ${{ env.KERNEL_PATH }}
@@ -304,114 +431,122 @@ jobs:
           export ARCH=${{ env.ARCH }}
           export SUBARCH=${{ env.ARCH }}
           export USE_CCACHE=1
-          export CCACHE_EXEC="$(which ccache)"
+          export CCACHE_EXEC=$(which ccache)
+
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
           export KCFLAGS="-Wno-error"
 
-          echo "📂 Préparation du defconfig..."
+          echo "========================================"
+          echo "       PREPARATION DEFCONFIG"
+          echo "========================================"
 
           cp \
-            "arch/arm64/configs/vendor/${{ env.DEFCONFIG }}" \
-            "arch/arm64/configs/${{ env.DEFCONFIG }}"
+            arch/arm64/configs/vendor/${{ env.DEFCONFIG }} \
+            arch/arm64/configs/${{ env.DEFCONFIG }}
 
-          echo "📂 Génération de la configuration..."
-
-          make \
-            O="${{ env.BUILD_DIR }}" \
-            LLVM=1 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            "${{ env.DEFCONFIG }}"
-
-          echo "🔧 Activation KSU/SUSFS/KPROBES..."
-
-          ./scripts/config \
-            --file "${{ env.BUILD_DIR }}/.config" \
-            -e CONFIG_KSU \
-            -e CONFIG_KSU_SUSFS \
-            -e CONFIG_KSU_SUSFS_SUS_PATH \
-            -e CONFIG_KPROBES \
-            -e CONFIG_KRETPROBES
-
-          echo "⚡ olddefconfig..."
+          echo "========================================"
+          echo "       GENERATION CONFIG"
+          echo "========================================"
 
           make \
-            O="${{ env.BUILD_DIR }}" \
+            O=${{ env.BUILD_DIR }} \
             LLVM=1 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
+            ${{ env.DEFCONFIG }}
+
+          echo "========================================"
+          echo "       ACTIVATION KSU / SUSFS"
+          echo "========================================"
+
+          {
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KPROBES=y"
+            echo "CONFIG_HAVE_KPROBES=y"
+            echo "CONFIG_KRETPROBES=y"
+          } >> "${{ env.BUILD_DIR }}/.config"
+
+          make \
+            O=${{ env.BUILD_DIR }} \
+            LLVM=1 \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
             olddefconfig
 
-          echo "========================================"
-          echo "=== CONFIGURATION FINALE ==="
-          echo "========================================"
+          echo ""
+          echo "=== CONFIG FINALE ==="
 
           grep -E \
-            '^CONFIG_KSU(=|_)' \
+            'CONFIG_KSU=|CONFIG_KSU_SUSFS=|CONFIG_KSU_SUSFS_SUS_PATH=|CONFIG_KPROBES=|CONFIG_HAVE_KPROBES=|CONFIG_KRETPROBES=' \
             "${{ env.BUILD_DIR }}/.config" \
             || true
 
-          grep -E \
-            '^CONFIG_KSU_SUSFS(=|_)' \
-            "${{ env.BUILD_DIR }}/.config" \
-            || true
-
-          grep -E \
-            '^CONFIG_KPROBES(=|_)|^CONFIG_KRETPROBES(=|_)' \
-            "${{ env.BUILD_DIR }}/.config" \
-            || true
-
-          grep -q '^CONFIG_KSU=y$' \
+          grep -q \
+            "CONFIG_KSU=y" \
             "${{ env.BUILD_DIR }}/.config" \
             || {
               echo "❌ CONFIG_KSU absent"
               exit 1
             }
 
-          grep -q '^CONFIG_KSU_SUSFS=y$' \
+          grep -q \
+            "CONFIG_KSU_SUSFS=y" \
             "${{ env.BUILD_DIR }}/.config" \
             || {
               echo "❌ CONFIG_KSU_SUSFS absent"
               exit 1
             }
 
-          grep -q '^CONFIG_KSU_SUSFS_SUS_PATH=y$' \
-            "${{ env.BUILD_DIR }}/.config" \
-            || {
-              echo "❌ CONFIG_KSU_SUSFS_SUS_PATH absent"
-              exit 1
-            }
-
-          grep -q '^CONFIG_KPROBES=y$' \
-            "${{ env.BUILD_DIR }}/.config" \
-            || {
-              echo "❌ CONFIG_KPROBES absent"
-              exit 1
-            }
-
-          echo "✅ KSU + SUSFS + SUS_PATH + KPROBES activés"
-
-          echo "🔓 Force-pass des signatures..."
+          echo "========================================"
+          echo "       FORCE SIGNATURE"
+          echo "========================================"
 
           sed -i \
             's/if (!check_version(/if (0 \&\& !check_version(/g' \
             kernel/module.c
 
-          echo "💉 Injection patch tactile..."
+          echo "========================================"
+          echo "       PATCH TACTILE"
+          echo "========================================"
 
-          printf "\n/* --- Début Patch Tactile --- */\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n/* --- Fin Patch Tactile --- */\n" >> techpack/display/msm/msm_drv.c
+          printf "\n\
+          /* --- Début Patch Tactile --- */\n\
+          #include <linux/notifier.h>\n\
+          #include <linux/module.h>\n\
+          static BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\n\
+          int panel_register_notifier(struct notifier_block *nb) {\n\
+          return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n\
+          }\n\
+          EXPORT_SYMBOL(panel_register_notifier);\n\
+          int panel_unregister_notifier(struct notifier_block *nb) {\n\
+          return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n\
+          }\n\
+          EXPORT_SYMBOL(panel_unregister_notifier);\n\
+          void touch_set_state(int state) { return; }\n\
+          EXPORT_SYMBOL(touch_set_state);\n\
+          /* --- Fin Patch Tactile --- */\n\
+          " >> techpack/display/msm/msm_drv.c
 
-          echo "🚀 Compilation finale du noyau..."
+          echo "========================================"
+          echo "       COMPILATION KERNEL"
+          echo "========================================"
 
           make \
-            O="${{ env.BUILD_DIR }}" \
+            O=${{ env.BUILD_DIR }} \
             LLVM=1 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
             KCFLAGS="$KCFLAGS" \
-            -j"$(nproc)" \
+            -j$(nproc) \
             Image
+
+      # ============================================================
+      # REPACK
+      # ============================================================
 
       - name: Repack & Finalize
         working-directory: ${{ github.workspace }}
@@ -442,27 +577,58 @@ jobs:
           ./magiskboot unpack boot.img
 
           cp \
-            "${GITHUB_WORKSPACE}/${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" \
+            ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image \
             kernel
 
           ./magiskboot repack boot.img new-boot.img
 
-          mv new-boot.img ../final_boot.img
+          mv \
+            new-boot.img \
+            ../final_boot.img
 
           cd ..
 
           mkdir -p final_output
 
-          mv final_boot.img final_output/boot.img
+          mv \
+            final_boot.img \
+            final_output/boot.img
 
-      - name: Upload Finished Packaged Assets
+      # ============================================================
+      # KERNELSU MANAGER 3.2.5
+      # ============================================================
+
+      - name: Download KernelSU Manager 3.2.5
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fL \
+            -o KernelSU_v3.2.5_32525-release.apk \
+            https://github.com/tiann/KernelSU/releases/download/v3.2.5/KernelSU_v3.2.5_32525-release.apk
+
+          test -s KernelSU_v3.2.5_32525-release.apk
+
+          echo "✅ Manager 3.2.5 téléchargé"
+
+      # ============================================================
+      # ARTIFACT BOOT
+      # ============================================================
+
+      - name: Upload Finished Boot Image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola-modern-ksu325
+          name: kernel-motorola-final-ksu325-susfs
           path: final_output/boot.img
+          if-no-files-found: error
+
+      # ============================================================
+      # ARTIFACT MANAGER
+      # ============================================================
 
       - name: Upload KernelSU Manager 3.2.5
         uses: actions/upload-artifact@v4
         with:
           name: KernelSU-Manager-v3.2.5
           path: KernelSU_v3.2.5_32525-release.apk
+          if-no-files-found: error
