@@ -1,4 +1,3 @@
-```yaml
 name: Kernel CI — KernelSU modern test
 
 on:
