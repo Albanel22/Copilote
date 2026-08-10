@@ -248,11 +248,7 @@ jobs:
         
 
             echo "=== Recherche path_umount dans le kernel ==="
-            grep -Rns "path_umount" . \
-            --include='*.c' \
-            --include='*.h' \
-            --exclude-dir=.git \
-            | head -100 || true
+            grep -Rns "path_umount" . --include='*.c' --include='*.h' --exclude-dir=.git || true
 
       # ============================================================
       # Compilation
