@@ -1,4 +1,4 @@
-name: Kernel CI — KernelSU 3.2.5 modern test
+name: Kernel CI — KernelSU
 
 on:
   workflow_dispatch:
