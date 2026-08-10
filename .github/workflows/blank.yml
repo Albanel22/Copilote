@@ -75,16 +75,19 @@ jobs:
           fi
 
           echo "=== SUSFS ==="
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git
 
-          git clone \
-            https://gitlab.com/simonpunk/susfs4ksu.git
-            
           echo "=== Vérification patch KernelSU/SUSFS ==="
           ls -l susfs4ksu/kernel_patches/KernelSU/
 
+          echo "=== Application du patch KernelSU/SUSFS ==="
+          cd KernelSU
+          patch -p1 < ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          cd ..
+
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-
+      
       - name: Inspecter Kconfig SUSFS
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
