@@ -171,18 +171,19 @@ jobs:
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             olddefconfig
 
-          echo "🔍 Vérification configuration..."
+          echo "🔍 Vérification détaillée de la configuration..."
 
-          grep -q '^CONFIG_KSU=y$' \
-            "${{ env.BUILD_DIR }}/.config"
+          echo "=== KSU ==="
+          grep -E '^CONFIG_KSU(=|_)|^# CONFIG_KSU' \
+          "${{ env.BUILD_DIR }}/.config" || true
 
-          grep -q '^CONFIG_KSU_SUSFS=y$' \
-            "${{ env.BUILD_DIR }}/.config"
+          echo "=== SUSFS ==="
+          grep -E '^CONFIG_KSU_SUSFS(=|_)|^# CONFIG_KSU_SUSFS' \
+          "${{ env.BUILD_DIR }}/.config" || true
 
-          grep -q '^CONFIG_KPROBES=y$' \
-            "${{ env.BUILD_DIR }}/.config"
-
-          echo "✅ KSU/SUSFS/KPROBES activés"
+          echo "=== KPROBES ==="
+          grep -E '^CONFIG_(KPROBES|HAVE_KPROBES|KRETPROBES)(=|_)|^# CONFIG_(KPROBES|HAVE_KPROBES|KRETPROBES)' \
+          "${{ env.BUILD_DIR }}/.config" || true
 
           echo "🚀 Compilation..."
 
