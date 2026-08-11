@@ -239,29 +239,30 @@ jobs:
       - name: Pack boot.img for Fastboot Boot
         working-directory: ${{ github.workspace }}
         run: |
-          echo "📦 Création d'un boot.img testable directement via fastboot boot..."
+          echo "📦 Création d'un boot.img testable..."
+          
+          # Télécharger la version x86_64 de magiskboot pour l'hôte Ubuntu
+          curl -LO https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-x86_64
+          mv magiskboot-x86_64 magiskboot
+          chmod +x magiskboot
           
           mkdir -p test_boot
           cp boot-stock.img test_boot/boot.img
           cd test_boot
           
-          # S'assurer que magiskboot est exécutable
-          chmod +x ../AnyKernel3/tools/magiskboot
+          # Utiliser le binaire x86_64 fraîchement téléchargé
+          ../magiskboot unpack boot.img
           
-          # On extrait le boot.img d'origine
-          ../AnyKernel3/tools/magiskboot unpack boot.img
-          
-          # On remplace le kernel d'origine par notre nouveau kernel compilé
+          # Remplacer le kernel
           cp ../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image kernel
           
-          # On réemballe le tout
-          ../AnyKernel3/tools/magiskboot repack boot.img
+          # Repack
+          ../magiskboot repack boot.img
           
           if [ -f "new-boot.img" ]; then
             cp new-boot.img ../final_output/boot-test-ksunext.img
-            echo "✅ boot.img de test généré avec succès dans final_output !"
+            echo "✅ boot.img généré !"
           else
-            echo "❌ Erreur lors du repackage du boot.img"
             exit 1
           fi
           cd ..
