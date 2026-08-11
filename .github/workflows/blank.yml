@@ -9,7 +9,7 @@ env:
   ARCH: arm64
   DEFCONFIG: vendor/lito-perf_defconfig
   CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img'
   KSU_NEXT_REPO: 'https://github.com/KernelSU-Next/KernelSU-Next.git'
   KSU_NEXT_BRANCH: 'legacy'
 
