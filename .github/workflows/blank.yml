@@ -1,4 +1,4 @@
-name: Kernel CI — KSU 3.2.5 + SUSFS 4.19 TEST
+name: Kernel CI — KSU+SUSFS
 
 on:
   workflow_dispatch:
