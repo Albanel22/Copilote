@@ -113,7 +113,7 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
           # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-           source "drivers/kernelsu/Kconfig"
+          source "drivers/kernelsu/Kconfig"
           }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
@@ -409,6 +409,7 @@ jobs:
           fi
 
           cd ..
+          mkdir -p final_output
           cp boot_work/boot_test.img final_output/boot_test.img
 
           echo "🔍 Vérification de taille : boot_test.img vs boot_stock.img..."
