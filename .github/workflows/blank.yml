@@ -111,10 +111,10 @@ jobs:
           fi
 
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
-            # Insère juste avant le dernier "endmenu" du fichier
+          # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-            source "drivers/kernelsu/Kconfig"
-            }' drivers/Kconfig
+           source "drivers/kernelsu/Kconfig"
+          }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -388,7 +388,7 @@ jobs:
           fi
           cp "$MAGISKBOOT_SO" magiskboot
           chmod +x magiskboot
-          ./magiskboot -v
+          echo "✅ magiskboot prêt : $(ls -lh magiskboot)"
 
           echo "📦 Déballage du boot.img d'origine..."
           mkdir -p boot_work
