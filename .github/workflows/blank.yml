@@ -20,7 +20,7 @@ env:
   BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img'
   # Désactive temporairement le packaging AnyKernel3 : on veut juste boot_test.img
   # pour l'instant. Repasse à 'true' pour réactiver le zip flashable.
-  BUILD_ANYKERNEL: 'false'
+  BUILD_ANYKERNEL: 'true'
 
 jobs:
   build:
@@ -113,8 +113,8 @@ jobs:
           if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
             # Insère juste avant le dernier "endmenu" du fichier
             sed -i '0,/^endmenu/{/^endmenu/i\
-          source "drivers/kernelsu/Kconfig"
-          }' drivers/Kconfig
+            source "drivers/kernelsu/Kconfig"
+            }' drivers/Kconfig
             echo "✅ drivers/Kconfig mis à jour"
           else
             echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
@@ -291,15 +291,18 @@ jobs:
           rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
 
           mkdir -p AnyKernel3/patch/system/bin
-          echo "📂 Copie de ksud depuis le dépôt local..."
+          echo "📂 Copie de ksud depuis le dépôt local (extrait de l'APK manager v4.1.3)..."
           if [ ! -f ksud ]; then
             echo "❌ ksud introuvable à la racine de ${{ github.workspace }}"
-            echo "💡 Vérifie que le workflow a bien été lancé sur la branche 'test-sukisu' (sélecteur 'Use workflow from')"
+            echo "💡 Extrait libksud.so (lib/arm64-v8a/) de l'APK manager SukiSU-Ultra"
+            echo "   installé sur le téléphone, renomme-le en 'ksud', et committe-le"
+            echo "   à la racine de la branche."
             ls -la .
             exit 1
           fi
           cp ksud AnyKernel3/patch/system/bin/ksud
           chmod +x AnyKernel3/patch/system/bin/ksud
+          echo "✅ ksud extrait : $(ls -lh AnyKernel3/patch/system/bin/ksud)"
 
           echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
           cat << 'EOF' > AnyKernel3/anykernel.sh
