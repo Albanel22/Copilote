@@ -1,313 +1,598 @@
-name: Kernel CI — build & package
+```yaml
+name: Copilote - ReSukiSU Root Test
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 env:
-  KERNEL_PATH: kernel_src
-  BUILD_DIR: out
   ARCH: arm64
-  DEFCONFIG: lito-perf_defconfig
-  CCACHE_SIZE: 5G
-  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img'
-  SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
-  SUSFS_TAG: 'kernel-4.19'
+  SUBARCH: arm64
+
+  # ------------------------------------------------------------------
+  # KERNEL
+  # Ces valeurs seront adaptées à Copilote après validation du ZIP.
+  # ------------------------------------------------------------------
+  KERNEL_DIR: kernel_src
+  OUT_DIR: out
+
+  # ------------------------------------------------------------------
+  # ReSukiSU
+  #
+  # IMPORTANT :
+  # Aucun tag/version/commit n'est imposé.
+  # setup.sh est toujours récupéré depuis main.
+  # ------------------------------------------------------------------
+  RESUKISU_REPO: https://github.com/ReSukiSU/ReSukiSU.git
+  RESUKISU_BRANCH: main
+
+  # ------------------------------------------------------------------
+  # ROOT
+  # ------------------------------------------------------------------
+  KSU_MANUAL_HOOK: y
+
+  # SUSFS volontairement désactivé pour cette phase.
+  ENABLE_SUSFS: false
+
+  # ------------------------------------------------------------------
+  # BOOT IMAGE DE TEST
+  #
+  # Le résultat est destiné à :
+  #
+  #     fastboot boot boot.img
+  #
+  # et non à un flash permanent.
+  # ------------------------------------------------------------------
+  BUILD_TEST_BOOT: true
+
+  # ------------------------------------------------------------------
+  # ReSukiSU Manager
+  # ------------------------------------------------------------------
+  RESUKISU_MANAGER_REPO: ReSukiSU/ReSukiSU
 
 jobs:
   build:
+    name: Build ReSukiSU Root Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+
+      # ================================================================
+      # CHECKOUT
+      # ================================================================
+
+      - name: Checkout Copilote
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache flex glibc-source libelf-dev libssl-dev libncurses-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang llvm lld device-tree-compiler zip unzip curl git python3
+      # ================================================================
+      # DEPENDENCIES
+      # ================================================================
 
-      - name: Download Stock Boot Image
+      - name: Install build dependencies
         shell: bash
         run: |
           set -euo pipefail
-          echo "📥 Téléchargement du boot.img d'origine (version 20260726)..."
-          curl -fLo boot-stock.img "${{ env.BOOT_URL }}" || { echo "❌ Erreur de téléchargement du boot.img"; exit 1; }
 
-      - name: Clone Motorola Kernel Source
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            curl \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            python3 \
+            unzip \
+            zip \
+            device-tree-compiler \
+            jq \
+            rsync
+
+      # ================================================================
+      # KERNEL SOURCE
+      #
+      # Cette partie sera alignée exactement sur Copilote après audit.
+      # ================================================================
+
+      - name: Prepare kernel source
+        shell: bash
         run: |
-          echo "📥 Récupération des sources du noyau..."
-          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+          set -euo pipefail
 
-      - name: Setup ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-kernel
-          restore-keys: ${{ runner.os }}-ccache-
-
-      - name: 📂 Intégration de ton fork ReSukiSU & SUSFS v2.2.0
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -e
-          cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
-          
-          echo "🧼 Nettoyage des dossiers temporaires ou obsolètes..."
-          rm -rf drivers/kernelsu kernelSU susfs4ksu temp_susfs temp_susfs_fix || true
-          
-          echo "📥 Clonage de ton fork personnel ReSukiSU..."
-          git clone https://github.com/Albanel22/ReSukiSU.git drivers/kernelsu
-
-          echo "📥 Clonage et intégration propre de SUSFS (Tag: ${{ env.SUSFS_TAG }})..."
-          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 susfs4ksu
-          
-          # Copie globale et robuste des patchs kernel SUSFS
-          if [ -d "susfs4ksu/kernel_patches" ]; then
-            cp -r susfs4ksu/kernel_patches/fs/* fs/
-            cp -r susfs4ksu/kernel_patches/include/* include/
-          elif [ -d "susfs4ksu/fs" ]; then
-            cp -r susfs4ksu/fs/* fs/
-            cp -r susfs4ksu/include/* include/
-          fi
-          
-          rm -rf susfs4ksu
-
-          # Vérification de sécurité absolue pour forcer l'arrêt si les fichiers manquent
-          if [ -f "include/linux/susfs.h" ]; then
-            echo "✅ Succès : susfs.h est bien en place !"
-          else
-            echo "❌ ERREUR : susfs.h introuvable dans include/linux/ !"
+          test -d "${KERNEL_DIR}" || {
+            echo "::error::Kernel source directory '${KERNEL_DIR}' not found."
             exit 1
-          fi
+          }
 
-          echo "🔗 Liaison officielle de ReSukiSU dans les drivers du noyau......"
-          if ! grep -q "kernelsu" drivers/Kconfig; then
-            sed -i '/endmenu/i source "drivers/kernelsu/kernel/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
-          fi
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-y += kernelsu/kernel/' >> drivers/Makefile
-          fi
+          cd "${KERNEL_DIR}"
 
-          echo "🔨 Neutralisation des scripts de vérification des hooks..."
-          find . -type f -name "*hook_check.mk" -exec sh -c 'echo "" > "$1"' _ {} \;
+          echo "Kernel source:"
+          git remote -v || true
+          git branch --show-current || true
+          git log -1 --oneline || true
 
-      - name: 💉 Injection complète des hooks via Python
+      # ================================================================
+      # RESUKISU
+      #
+      # Aucun numéro de version.
+      # Aucun SHA imposé.
+      #
+      # On utilise toujours le setup.sh du main actuel.
+      # ================================================================
+
+      - name: Integrate latest ReSukiSU
+        shell: bash
         run: |
-          cd ${{ env.KERNEL_PATH }}
-          git checkout drivers/input/input.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c kernel/sys.c || true
-          python3 - << 'EOF'
-          import os
-          def inject_hook(path, target_func_header, declaration, call_body):
-              if not os.path.exists(path): return
-              with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                  content = f.read()
-              if call_body in content: return
-              if target_func_header in content:
-                  content = content.replace(target_func_header, declaration + "\n" + target_func_header, 1)
-                  idx = content.find(target_func_header)
-                  brace_idx = content.find('{', idx)
-                  if brace_idx != -1:
-                      content = content[:brace_idx + 1] + "\n" + call_body + "\n" + content[brace_idx + 1:]
-                      with open(path, 'w', encoding='utf-8') as f: f.write(content)
-          inject_hook("drivers/input/input.c", "void input_event(struct input_dev *dev,\n\t\t unsigned int type, unsigned int code, int value)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_input_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_input_hook))\n\t\tksu_handle_input_handle_event(&type, &code, &value);\n#endif")
-          inject_hook("fs/exec.c", "int do_execve(struct filename *filename,\n\tconst char __user *const __user *__argv,\n\tconst char __user *const __user *__envp)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_execve(struct filename **filename_ptr, const char __user *const __user **argv_ptr, const char __user *const __user **envp_ptr);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execve(&filename, &__argv, &__envp);\n#endif")
-          inject_hook("fs/open.c", "SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif")
-          inject_hook("fs/read_write.c", "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern bool ksu_init_rc_hook __read_mostly;\nextern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tif (unlikely(ksu_init_rc_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif")
-          inject_hook("fs/stat.c", "SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,\n\t\tstruct stat __user *, statbuf, int, flag)", "#ifdef CONFIG_KSU_MANUAL_HOOK\n__attribute__((hot))\nextern int ksu_handle_stat(int *dfd, struct filename **filename_ptr, int *flags);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tstruct filename *name = getname(filename);\n\tksu_handle_stat(&dfd, &name, &flag);\n#endif")
-          inject_hook("kernel/reboot.c", "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif")
-          inject_hook("kernel/sys.c", "long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)", "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif", "#ifdef CONFIG_KSU_MANUAL_HOOK\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif")
-          print("✨ Hooks injectés avec succès !")
-          EOF
+          set -euo pipefail
 
-      - name: 🛠️ Enregistrement de SUSFS dans le Makefile du noyau (`fs/Makefile`)
-        working-directory: ${{ env.KERNEL_PATH }}
+          cd "${KERNEL_DIR}"
+
+          echo "=============================================="
+          echo " Integrating ReSukiSU"
+          echo " Repository: ${RESUKISU_REPO}"
+          echo " Branch:     ${RESUKISU_BRANCH}"
+          echo "=============================================="
+
+          curl -LSsf \
+            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${RESUKISU_BRANCH}/kernel/setup.sh" \
+            -o /tmp/resukisu-setup.sh
+
+          chmod +x /tmp/resukisu-setup.sh
+
+          bash /tmp/resukisu-setup.sh
+
+          echo
+          echo "ReSukiSU integration completed."
+
+          test -d drivers/kernelsu || \
+            test -d drivers/ksu || \
+            test -d KernelSU || \
+            test -d kernel/ || {
+              echo "::warning::ReSukiSU directory could not be identified automatically."
+              echo "Inspecting possible KernelSU paths:"
+              find . -maxdepth 4 \
+                \( -iname '*ksu*' -o -iname '*resuki*' \) \
+                -print | head -100
+            }
+
+      # ================================================================
+      # ROOT CONFIGURATION
+      #
+      # Aucun SUSFS.
+      # Manual Hook pour les kernels anciens/non-GKI.
+      #
+      # Les symboles exacts seront validés contre le kernel Copilote
+      # avant d'être figés.
+      # ================================================================
+
+      - name: Configure ReSukiSU root
+        shell: bash
         run: |
-          if [ -f "fs/Makefile" ]; then
-            if ! grep -q "susfs.o" fs/Makefile; then
-              echo "obj-y += susfs.o" >> fs/Makefile
-              echo "✅ susfs.o ajouté à fs/Makefile"
-            fi
-          fi
+          set -euo pipefail
 
-      - name: 🛡️ Correction et injection forcée de SUSFS_MAGIC pour ReSukiSU
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          mkdir -p include/linux
-          # S'assurer que susfs.h existe et contient la macro
-          if [ ! -f "include/linux/susfs.h" ]; then
-            echo '#ifndef __SUSFS_H__' > include/linux/susfs.h
-            echo '#define __SUSFS_H__' >> include/linux/susfs.h
-            echo '#define SUSFS_MAGIC 0x55534653' >> include/linux/susfs.h
-            echo '#endif' >> include/linux/susfs.h
-          elif ! grep -q "SUSFS_MAGIC" include/linux/susfs.h; then
-            echo '#define SUSFS_MAGIC 0x55534653' >> include/linux/susfs.h
-          fi
+          cd "${KERNEL_DIR}"
 
-          # Forcer aussi l'inclusion dans le dossier source de ReSukiSU si nécessaire
-          for f in drivers/kernelsu/kernel/supercall/*.c; do
-            if [ -f "$f" ] && ! grep -q "susfs.h" "$f"; then
-              sed -i '1i#include <linux/susfs.h>' "$f"
+          echo "Searching kernel configuration..."
+
+          CONFIG_FILE=""
+
+          for candidate in \
+            "arch/arm64/configs/defconfig" \
+            "arch/arm64/configs/vendor/defconfig" \
+            "arch/arm64/configs/${DEFCONFIG:-}" \
+            ".config"
+          do
+            if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+              CONFIG_FILE="$candidate"
+              break
             fi
           done
 
-      - name: 🛠️ Correction propre de symbol_resolver pour éviter les redéfinitions
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          if [ -f "drivers/kernelsu/kernel/infra/symbol_resolver.h" ]; then
-            cat << 'EOF' > drivers/kernelsu/kernel/infra/symbol_resolver.h
-          #ifndef __SYMBOL_RESOLVER_H__
-          #define __SYMBOL_RESOLVER_H__
-
-          #include <linux/types.h>
-
-          unsigned long __nocfi find_kernel_symbol_exact(const char *symbol_name);
-          void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name);
-          void __init ksu_init_symbol_resolver(void);
-
-          #endif
-          EOF
-            echo "✅ symbol_resolver.h nettoyé et corrigé !"
-          fi
-
-      - name: 🧩 Injection et activation rigoureuse des sources SUSFS dans fs/
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          echo "📥 Clonage temporaire de SUSFS pour extraction des fichiers sources C..."
-          git clone "${{ env.SUSFS_REPO }}" --branch "${{ env.SUSFS_TAG }}" --depth=1 temp_susfs_src
-          
-          # Copie des fichiers sources .c et headers .h de SUSFS directement dans fs/
-          if [ -d "temp_susfs_src/kernel_patches/fs" ]; then
-            cp -av temp_susfs_src/kernel_patches/fs/* fs/
-          elif [ -d "temp_susfs_src/fs" ]; then
-            cp -av temp_susfs_src/fs/* fs/
-          fi
-          
-          # Copie des headers globaux nécessaires
-          if [ -d "temp_susfs_src/kernel_patches/include" ]; then
-            cp -av temp_susfs_src/kernel_patches/include/* include/
-          elif [ -d "temp_susfs_src/include" ]; then
-            cp -av temp_susfs_src/include/* include/
-          fi
-          
-          rm -rf temp_susfs_src
-
-          # Forcer l'enregistrement de susfs.o dans fs/Makefile si ce n'est pas déjà fait
-          if [ -f "fs/Makefile" ]; then
-            if ! grep -q "susfs.o" fs/Makefile; then
-              echo "obj-y += susfs.o" >> fs/Makefile
-            fi
-          fi
-
-          echo "✅ Fichiers sources SUSFS injectés dans fs/ avec succès !"
-
-      - name: Multi-stage Kernel Compilation
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -uo pipefail
-          export ARCH=${{ env.ARCH }}
-          export SUBARCH=${{ env.ARCH }}
-          export USE_CCACHE=1
-          export CCACHE_EXEC=$(which ccache)
-          ccache -M ${{ env.CCACHE_SIZE }}
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KCFLAGS="-Wno-error"
-          
-          mkdir -p ${{ env.BUILD_DIR }}
-          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }}
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
-          
-          {
-            echo "CONFIG_KSU=y"
-            echo "CONFIG_KSU_MANUAL_HOOK=y"
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_HAS_CALLBACK=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y"
-            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-            echo "CONFIG_KPROBES=y"
-            echo "CONFIG_HAVE_KPROBES=y"
-            echo "CONFIG_KRETPROBES=y"
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y"
-          } >> ${{ env.BUILD_DIR }}/.config
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 olddefconfig
-          
-          # Patchs modules & Tactile Motorola
-          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
-          printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
-          
-          make O=${{ env.BUILD_DIR }} LLVM=1 CC="ccache clang" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" KSUD_VERSION=35005 KSU_VERSION=35005 -j$(nproc) Image
-          
-          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
-            echo "❌ Erreur : Image du noyau non trouvée"
+          if [ -z "$CONFIG_FILE" ]; then
+            echo "::error::Unable to identify kernel configuration file."
             exit 1
           fi
-          echo "✅ Compilation du noyau réussie"
 
-      - name: Repack & Finalize (AnyKernel3 with Official ReSukiSU Setup)
-        working-directory: ${{ github.workspace }}
+          echo "Configuration candidate: $CONFIG_FILE"
+
+          # ------------------------------------------------------------
+          # ReSukiSU root
+          # ------------------------------------------------------------
+
+          if grep -q '^CONFIG_KSU=' "$CONFIG_FILE"; then
+            sed -i 's/^CONFIG_KSU=.*/CONFIG_KSU=y/' "$CONFIG_FILE"
+          else
+            printf '\nCONFIG_KSU=y\n' >> "$CONFIG_FILE"
+          fi
+
+          if grep -q '^CONFIG_KSU_MANUAL_HOOK=' "$CONFIG_FILE"; then
+            sed -i 's/^CONFIG_KSU_MANUAL_HOOK=.*/CONFIG_KSU_MANUAL_HOOK=y/' "$CONFIG_FILE"
+          else
+            printf 'CONFIG_KSU_MANUAL_HOOK=y\n' >> "$CONFIG_FILE"
+          fi
+
+          # ------------------------------------------------------------
+          # SUSFS volontairement absent.
+          # ------------------------------------------------------------
+
+          echo
+          echo "ReSukiSU root configuration:"
+          grep -E '^CONFIG_KSU' "$CONFIG_FILE" || true
+
+          echo
+          echo "SUSFS:"
+          echo "DISABLED"
+
+      # ================================================================
+      # PREPARE CONFIG
+      # ================================================================
+
+      - name: Prepare kernel config
+        shell: bash
         run: |
           set -euo pipefail
-          
-          rm -rf AnyKernel3
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
-          rm -rf AnyKernel3/.git AnyKernel3/README.md AnyKernel3/.gitignore
-          
-          cp ${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image AnyKernel3/Image
-          
-          cat << 'EOF' > AnyKernel3/anykernel.sh
-          ### AnyKernel3 Ramdisk Mod Script
-          ## osm0sis @ xda-developers
-          ### AnyKernel setup
-          properties() { '
-          kernel.string=Custom Kernel ReSukiSU pour Motorola One 5G Ace
-          do.devicecheck=1
-          do.modules=1
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=1
-          device.name1=kiev
-          device.name2=XT2113-2
-          device.name3=kiev_retde
-          device.name4=kiev_t
-          '; } # end properties
-          
-          ### AnyKernel install
-          boot_attributes() {
-          set_perm_recursive 0 0 755 644 $RAMDISK/*;
-          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
-          } # end attributes
-          
-          BLOCK=/dev/block/by-name/boot;
-          IS_SLOT_DEVICE=1;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
-          
-          . tools/ak3-core.sh;
-          
-          split_boot;
-          
-          if [ -f /data/adb/ksu/bin/ksud ]; then
-            /data/adb/ksu/bin/ksud kernel setup-script || true
-          fi
-          
-          flash_boot;
-          EOF
-          sed -i 's/\r$//' AnyKernel3/anykernel.sh
-          
-          mkdir -p final_output
-          cd AnyKernel3
-          zip -r9 ../final_output/AnyKernel3_ReSukiSU_kiev.zip .
-          cd cd .. || cd ..
-          echo "✅ Packaging AnyKernel3 propre terminé avec succès !"
 
-      - name: Upload Finished Packaged Assets
+          cd "${KERNEL_DIR}"
+
+          make O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            olddefconfig
+
+          echo
+          echo "Final ReSukiSU configuration:"
+          grep -E '^CONFIG_KSU' \
+            "${GITHUB_WORKSPACE}/${OUT_DIR}/.config" || true
+
+          if grep -q '^CONFIG_KSU=y' \
+              "${GITHUB_WORKSPACE}/${OUT_DIR}/.config"; then
+            echo "CONFIG_KSU=y"
+          else
+            echo "::error::CONFIG_KSU was not enabled."
+            exit 1
+          fi
+
+      # ================================================================
+      # BUILD KERNEL
+      # ================================================================
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          make \
+            -j"$(nproc)" \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+      # ================================================================
+      # FIND KERNEL IMAGE
+      # ================================================================
+
+      - name: Locate kernel image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOOT_DIR="${GITHUB_WORKSPACE}/${OUT_DIR}/arch/${ARCH}/boot"
+
+          echo "Boot directory:"
+          ls -lah "$BOOT_DIR"
+
+          KERNEL_IMAGE=""
+
+          for candidate in \
+            Image \
+            Image.gz \
+            Image.lz4 \
+            Image.gz-dtb \
+            Image.lz4-dtb
+          do
+            if [ -f "${BOOT_DIR}/${candidate}" ]; then
+              KERNEL_IMAGE="${BOOT_DIR}/${candidate}"
+              break
+            fi
+          done
+
+          if [ -z "$KERNEL_IMAGE" ]; then
+            echo "::error::No supported ARM64 kernel image found."
+            find "${GITHUB_WORKSPACE}/${OUT_DIR}" \
+              -type f \
+              \( -name 'Image*' -o -name '*.dtb' \) \
+              -print | head -100
+            exit 1
+          fi
+
+          echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> "$GITHUB_ENV"
+
+          echo "Selected kernel image:"
+          ls -lh "$KERNEL_IMAGE"
+
+      # ================================================================
+      # DOWNLOAD LATEST RESUKISU MANAGER
+      #
+      # ReSukiSU ne publie actuellement pas son Manager comme une
+      # release classique. Il est distribué via GitHub Actions/nightly.
+      #
+      # On interroge donc automatiquement l'API GitHub pour trouver
+      # le dernier workflow réussi et ses artefacts.
+      # ================================================================
+
+      - name: Download latest ReSukiSU Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${GITHUB_WORKSPACE}/resukisu-manager"
+
+          API="https://api.github.com/repos/${RESUKISU_MANAGER_REPO}"
+
+          echo "Searching latest successful ReSukiSU workflow..."
+
+          RUNS_JSON="$(
+            curl -LSsf \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/actions/runs?branch=main&status=success&per_page=20"
+          )"
+
+          RUN_ID="$(
+            echo "$RUNS_JSON" |
+              jq -r '.workflow_runs[0].id // empty'
+          )"
+
+          if [ -z "$RUN_ID" ]; then
+            echo "::warning::No successful ReSukiSU workflow found."
+            echo "Manager will not be packaged in this run."
+            exit 0
+          fi
+
+          echo "Selected ReSukiSU workflow run: ${RUN_ID}"
+
+          ARTIFACTS_JSON="$(
+            curl -LSsf \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/actions/runs/${RUN_ID}/artifacts"
+          )"
+
+          echo "$ARTIFACTS_JSON" |
+            jq -r '.artifacts[] | "\(.id) \(.name) \(.size_in_bytes)"'
+
+          ARTIFACT_ID="$(
+            echo "$ARTIFACTS_JSON" |
+              jq -r '
+                .artifacts[]
+                | select(.expired == false)
+                | select(
+                    (.name | ascii_downcase | contains("manager"))
+                    or
+                    (.name | ascii_downcase | contains("app"))
+                  )
+                | .id
+              ' |
+              head -n 1
+          )"
+
+          if [ -z "$ARTIFACT_ID" ]; then
+            echo "::warning::No Manager artifact identified automatically."
+            exit 0
+          fi
+
+          echo "Downloading Manager artifact ${ARTIFACT_ID}..."
+
+          curl -LSsfL \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o "${GITHUB_WORKSPACE}/resukisu-manager/manager.zip"
+
+          unzip -o \
+            "${GITHUB_WORKSPACE}/resukisu-manager/manager.zip" \
+            -d "${GITHUB_WORKSPACE}/resukisu-manager/extracted"
+
+          find "${GITHUB_WORKSPACE}/resukisu-manager" \
+            -type f \
+            -print
+
+      # ================================================================
+      # BOOT IMAGE TEST
+      #
+      # Le workflow doit utiliser une image boot de référence du projet.
+      #
+      # Elle sera reconstruite avec le nouveau kernel.
+      #
+      # Le résultat est destiné à :
+      #
+      #     fastboot boot boot.img
+      #
+      # donc aucun flash permanent dans cette phase.
+      # ================================================================
+
+      - name: Prepare test boot image
+        if: env.BUILD_TEST_BOOT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "${SOURCE_BOOT_IMAGE_URL:-}" || {
+            echo "::error::SOURCE_BOOT_IMAGE_URL must be defined for test boot generation."
+            exit 1
+          }
+
+          mkdir -p "${GITHUB_WORKSPACE}/boot-work"
+
+          echo "Downloading reference boot image..."
+
+          curl -LSsfL \
+            "${SOURCE_BOOT_IMAGE_URL}" \
+            -o "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
+
+          test -s "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
+
+          echo "Reference boot image:"
+          ls -lh "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
+
+      # ================================================================
+      # MAGISKBOOT
+      #
+      # Le binaire sera récupéré automatiquement.
+      # Il servira uniquement à remplacer le kernel dans le boot.img.
+      # ================================================================
+
+      - name: Prepare magiskboot
+        if: env.BUILD_TEST_BOOT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${GITHUB_WORKSPACE}/magiskboot"
+
+          # Recherche automatique du dernier artefact public Magisk
+          # contenant magiskboot.
+          RELEASE_JSON="$(
+            curl -LSsf \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/topjohnwu/Magisk/releases/latest
+          )"
+
+          APK_URL="$(
+            echo "$RELEASE_JSON" |
+              jq -r '
+                .assets[]
+                | select(.name | endswith(".apk"))
+                | .browser_download_url
+              ' |
+              head -n 1
+          )"
+
+          test -n "$APK_URL"
+
+          curl -LSsfL \
+            "$APK_URL" \
+            -o "${GITHUB_WORKSPACE}/magiskboot/magisk.apk"
+
+          unzip -j \
+            "${GITHUB_WORKSPACE}/magiskboot/magisk.apk" \
+            'lib/arm64-v8a/libmagiskboot.so' \
+            -d "${GITHUB_WORKSPACE}/magiskboot"
+
+          mv \
+            "${GITHUB_WORKSPACE}/magiskboot/libmagiskboot.so" \
+            "${GITHUB_WORKSPACE}/magiskboot/magiskboot"
+
+          chmod +x \
+            "${GITHUB_WORKSPACE}/magiskboot/magiskboot"
+
+          "${GITHUB_WORKSPACE}/magiskboot/magiskboot" --help >/dev/null 2>&1 || true
+
+      # ================================================================
+      # REPACK TEST BOOT
+      # ================================================================
+
+      - name: Repack test boot image
+        if: env.BUILD_TEST_BOOT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORK="${GITHUB_WORKSPACE}/boot-work"
+          MAGISKBOOT="${GITHUB_WORKSPACE}/magiskboot/magiskboot"
+
+          cd "$WORK"
+
+          rm -rf unpacked
+          mkdir -p unpacked
+
+          cp source-boot.img unpacked/boot.img
+
+          cd unpacked
+
+          echo "Unpacking boot image..."
+
+          "$MAGISKBOOT" unpack boot.img
+
+          test -f kernel || {
+            echo "::error::magiskboot did not produce a kernel file."
+            find . -maxdepth 2 -type f -print
+            exit 1
+          }
+
+          echo "Replacing boot kernel..."
+
+          cp "${KERNEL_IMAGE}" kernel
+
+          echo "Repacking boot image..."
+
+          "$MAGISKBOOT" repack boot.img
+
+          test -f new-boot.img
+
+          cp new-boot.img "${GITHUB_WORKSPACE}/boot.img"
+
+          echo
+          echo "TEST boot image generated:"
+          ls -lh "${GITHUB_WORKSPACE}/boot.img"
+
+      # ================================================================
+      # VERIFY ROOT CONFIGURATION
+      # ================================================================
+
+      - name: Verify ReSukiSU kernel integration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${GITHUB_WORKSPACE}/${OUT_DIR}/.config"
+
+          echo "=============================================="
+          echo " ReSukiSU verification"
+          echo "=============================================="
+
+          grep -E '^CONFIG_KSU' "$CONFIG" || true
+
+          grep -q '^CONFIG_KSU=y' "$CONFIG" || {
+            echo "::error::ReSukiSU/KernelSU is not enabled."
+            exit 1
+          }
+
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG" || {
+            echo "::error::Manual Hook is not enabled."
+            exit 1
+          }
+
+          echo
+          echo "SUSFS must remain disabled in Phase 1."
+
+      # ================================================================
+      # ARTIFACTS
+      # ================================================================
+
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-motorola_anykernel3
-          path: final_output/AnyKernel3_ReSukiSU_kiev.zip
-          retention-days: 30
+          name: Copilote-ReSukiSU-root-test
           if-no-files-found: error
+          path: |
+            ${{ env.OUT_DIR }}/arch/arm64/boot/Image*
+            boot.img
+            resukisu-manager/**
+```
