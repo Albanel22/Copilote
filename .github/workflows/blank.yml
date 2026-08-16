@@ -1,4 +1,4 @@
-name: Kernel CI - ReSukiSU + SuSFS 4.19
+name: Kernel CI - SM8250 4.19 ReSukiSU + SuSFS
 
 on:
   workflow_dispatch:
@@ -7,49 +7,54 @@ permissions:
   contents: read
 
 env:
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm8250.git
+  KERNEL_BRANCH: lineage-23.2
   KERNEL_PATH: kernel_src
   BUILD_DIR: out
+
   ARCH: arm64
   SUBARCH: arm64
-  DEFCONFIG: lito-perf_defconfig
+
+  # IMPORTANT:
+  # The file is located at:
+  # arch/arm64/configs/vendor/lito-perf_defconfig
+  DEFCONFIG: vendor/lito-perf_defconfig
+
+  KERNEL_VERSION: "4.19"
 
   # ReSukiSU
+  RESUKISU_REPO: https://github.com/ReSukiSU/ReSukiSU.git
   RESUKISU_BRANCH: main
 
-  # JackA1ltman NonGKI_Kernel_Build_2nd
+  # JackA1ltman
   NONGKI_REPO: https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd.git
   NONGKI_BRANCH: mainline
 
-  # Kernel
-  KERNEL_VERSION: "4.19"
-
-  # Build
+  # Build cache
   CCACHE_SIZE: 5G
 
-  # Stock boot image
-  BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260726/boot.img
+  # Latest boot image supplied for Kiev
+  BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img
 
 jobs:
   build:
-    name: Kernel 4.19 - ReSukiSU + SuSFS
+    name: SM8250 4.19 - ReSukiSU + SuSFS
     runs-on: ubuntu-24.04
 
     steps:
 
-      # ==========================================================
-      # 1. CHECKOUT
-      # ==========================================================
+      # ============================================================
+      # 1. CHECKOUT COPILOTE
+      # ============================================================
 
-      - name: Checkout kernel source
+      - name: Checkout build repository
         uses: actions/checkout@v4
         with:
-          ref: test-sukisu
           fetch-depth: 1
-          submodules: recursive
 
-      # ==========================================================
-      # 2. DEPENDENCIES
-      # ==========================================================
+      # ============================================================
+      # 2. INSTALL DEPENDENCIES
+      # ============================================================
 
       - name: Install build dependencies
         shell: bash
@@ -83,38 +88,71 @@ jobs:
             patch \
             perl
 
-      # ==========================================================
+      # ============================================================
       # 3. CCACHE
-      # ==========================================================
+      # ============================================================
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-kernel-4.19-resukisu-susfs-${{ github.ref_name }}
+          key: ${{ runner.os }}-sm8250-4.19-resukisu-susfs-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-kernel-4.19-resukisu-susfs-
-            ${{ runner.os }}-kernel-4.19-
+            ${{ runner.os }}-sm8250-4.19-resukisu-susfs-
+            ${{ runner.os }}-sm8250-4.19-
 
       - name: Configure ccache
         shell: bash
         run: |
           set -euxo pipefail
 
-          mkdir -p ~/.cache/ccache
+          mkdir -p "${HOME}/.cache/ccache"
 
-          ccache --set-config=cache_dir=$HOME/.cache/ccache
-          ccache --set-config=max_size=${CCACHE_SIZE}
+          ccache --set-config=cache_dir="${HOME}/.cache/ccache"
+          ccache --set-config=max_size="${CCACHE_SIZE}"
           ccache --set-config=compression=true
           ccache --set-config=compiler_check=content
 
           ccache --show-config
 
-      # ==========================================================
-      # 4. VERIFY KERNEL VERSION
-      # ==========================================================
+      # ============================================================
+      # 4. CLONE EXACT LINEAGEOS KERNEL
+      # ============================================================
 
-      - name: Verify kernel source and version
+      - name: Clone LineageOS SM8250 kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf "${KERNEL_PATH}"
+
+          git clone \
+            --depth=1 \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            "${KERNEL_PATH}"
+
+          cd "${KERNEL_PATH}"
+
+          echo "=========================================="
+          echo "Kernel repository"
+          echo "=========================================="
+
+          git remote -v
+
+          echo
+          echo "Branch:"
+          git branch --show-current
+
+          echo
+          echo "Commit:"
+          git rev-parse HEAD
+
+      # ============================================================
+      # 5. VERIFY KERNEL VERSION
+      # ============================================================
+
+      - name: Verify kernel 4.19
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
@@ -122,24 +160,52 @@ jobs:
 
           test -f Makefile
 
-          echo "Kernel Makefile:"
-          head -n 10 Makefile
+          VERSION=$(awk -F'= ' '/^VERSION = / {print $2; exit}' Makefile)
+          PATCHLEVEL=$(awk -F'= ' '/^PATCHLEVEL = / {print $2; exit}' Makefile)
+          SUBLEVEL=$(awk -F'= ' '/^SUBLEVEL = / {print $2; exit}' Makefile)
 
-          VERSION=$(grep '^VERSION = ' Makefile | awk '{print $3}')
-          PATCHLEVEL=$(grep '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          KERNEL="${VERSION}.${PATCHLEVEL}"
 
-          DETECTED="${VERSION}.${PATCHLEVEL}"
+          echo "Detected kernel: ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
-          echo "Detected kernel version: ${DETECTED}"
-
-          if [ "${DETECTED}" != "${KERNEL_VERSION}" ]; then
-            echo "::error::Expected kernel ${KERNEL_VERSION}, detected ${DETECTED}"
+          if [ "${KERNEL}" != "${KERNEL_VERSION}" ]; then
+            echo "::error::Expected ${KERNEL_VERSION}, detected ${KERNEL}"
             exit 1
           fi
 
-      # ==========================================================
-      # 5. CLONE JACKA1LTMAN REPOSITORY
-      # ==========================================================
+          echo "Kernel version verified."
+
+      # ============================================================
+      # 6. VERIFY DEFCONFIG
+      # ============================================================
+
+      - name: Verify lito-perf defconfig
+        working-directory: ${{ env.KERNEL_PATH }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          DEFCONFIG_FILE="arch/arm64/configs/${DEFCONFIG}"
+
+          echo "Checking:"
+          echo "${DEFCONFIG_FILE}"
+
+          if [ ! -f "${DEFCONFIG_FILE}" ]; then
+            echo "::error::Defconfig not found."
+
+            find arch/arm64/configs \
+              -type f \
+              -name '*lito*' \
+              | sort
+
+            exit 1
+          fi
+
+          echo "Defconfig found."
+
+      # ============================================================
+      # 7. CLONE JACKA1LTMAN TOOLKIT
+      # ============================================================
 
       - name: Clone NonGKI_Kernel_Build_2nd
         shell: bash
@@ -154,27 +220,47 @@ jobs:
             "${NONGKI_REPO}" \
             NonGKI_Kernel_Build_2nd
 
-          echo "Repository:"
+          echo "Available patch files:"
+
           find NonGKI_Kernel_Build_2nd/Patches \
             -maxdepth 2 \
             -type f \
             | sort
 
-      # ==========================================================
-      # 6. CHECK EXISTING KERNELSU
-      # ==========================================================
+      # ============================================================
+      # 8. CLEAN EXISTING KERNELSU
+      # ============================================================
 
-      - name: Check existing KernelSU installation
+      - name: Check and clean existing KernelSU
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euxo pipefail
 
-          if [ -d KernelSU ]; then
-            echo "Existing KernelSU directory detected."
-            echo "Cleaning it according to JackA1ltman wiki."
+          NEED_CLEAN=0
 
-            test -f ../NonGKI_Kernel_Build_2nd/bin/clean_hook.sh
+          if [ -d KernelSU ]; then
+            NEED_CLEAN=1
+            echo "KernelSU directory detected."
+          fi
+
+          if grep -Rqs \
+            --exclude-dir=.git \
+            --exclude='*.o' \
+            --exclude='*.cmd' \
+            'CONFIG_KSU' \
+            fs/exec.c 2>/dev/null; then
+
+            NEED_CLEAN=1
+            echo "CONFIG_KSU references detected in fs/exec.c."
+          fi
+
+          if [ "${NEED_CLEAN}" = "1" ]; then
+
+            echo "Cleaning existing KernelSU installation."
+
+            test -f \
+              ../NonGKI_Kernel_Build_2nd/bin/clean_hook.sh
 
             cp \
               ../NonGKI_Kernel_Build_2nd/bin/clean_hook.sh \
@@ -185,23 +271,14 @@ jobs:
             bash ./clean_hook.sh
 
             rm -f ./clean_hook.sh
+
           else
-            echo "No existing KernelSU directory."
+            echo "No existing KernelSU installation detected."
           fi
 
-          if grep -Rqs \
-            --exclude-dir=.git \
-            --exclude='*.o' \
-            --exclude='*.cmd' \
-            'CONFIG_KSU' \
-            fs/exec.c 2>/dev/null; then
-
-            echo "::warning::CONFIG_KSU references already exist in fs/exec.c"
-          fi
-
-      # ==========================================================
-      # 7. EMBED RESUKISU
-      # ==========================================================
+      # ============================================================
+      # 9. EMBED RESUKISU
+      # ============================================================
 
       - name: Embed ReSukiSU
         working-directory: ${{ env.KERNEL_PATH }}
@@ -209,51 +286,19 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "Embedding ReSukiSU according to JackA1ltman wiki."
+          echo "Embedding ReSukiSU."
 
           curl -LSs \
             https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh \
-            -o setup.sh
-
-          test -s setup.sh
-
-          chmod +x setup.sh
-
-          bash setup.sh "${RESUKISU_BRANCH}"
+            | bash -s "${RESUKISU_BRANCH}"
 
           test -d KernelSU
 
-          rm -f setup.sh
+          echo "ReSukiSU successfully embedded."
 
-      # ==========================================================
-      # 8. VERIFY DEFCONFIG
-      # ==========================================================
-
-      - name: Verify defconfig
-        working-directory: ${{ env.KERNEL_PATH }}
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          DEFCONFIG_FILE="arch/arm64/configs/${DEFCONFIG}"
-
-          if [ ! -f "${DEFCONFIG_FILE}" ]; then
-            echo "::error::Defconfig not found: ${DEFCONFIG_FILE}"
-
-            find arch/arm64/configs \
-              -type f \
-              | sort \
-              | head -100
-
-            exit 1
-          fi
-
-          echo "Using:"
-          echo "${DEFCONFIG_FILE}"
-
-      # ==========================================================
-      # 9. ADD KSU CONFIGURATION
-      # ==========================================================
+      # ============================================================
+      # 10. UPDATE DEFCONFIG FOR RESUKISU
+      # ============================================================
 
       - name: Configure ReSukiSU
         working-directory: ${{ env.KERNEL_PATH }}
@@ -263,7 +308,6 @@ jobs:
 
           DEFCONFIG_FILE="arch/arm64/configs/${DEFCONFIG}"
 
-          # Remove previous definitions to avoid duplicates.
           sed -i '/^CONFIG_KSU=/d' "${DEFCONFIG_FILE}"
           sed -i '/^CONFIG_KSU_MANUAL_HOOK=/d' "${DEFCONFIG_FILE}"
           sed -i '/^CONFIG_KALLSYMS=/d' "${DEFCONFIG_FILE}"
@@ -282,18 +326,18 @@ jobs:
             '^(CONFIG_KSU|CONFIG_KALLSYMS)' \
             "${DEFCONFIG_FILE}"
 
-      # ==========================================================
-      # 10. APPLY SUSFS INLINE HOOK
-      # ==========================================================
+      # ============================================================
+      # 11. APPLY SUSFS INLINE HOOK
+      # ============================================================
 
-      - name: Apply SuSFS inline hook patch
+      - name: Apply SuSFS inline hook patches
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "Using the script specified by JackA1ltman wiki:"
-          echo "susfs_inline_hook_patches.sh"
+          echo "Using JackA1ltman:"
+          echo "Patches/susfs_inline_hook_patches.sh"
 
           cp \
             ../NonGKI_Kernel_Build_2nd/Patches/susfs_inline_hook_patches.sh \
@@ -305,9 +349,9 @@ jobs:
 
           rm -f ./susfs_inline_hook_patches.sh
 
-      # ==========================================================
-      # 11. LOCATE VERSION-SPECIFIC SUSFS PATCH
-      # ==========================================================
+      # ============================================================
+      # 12. LOCATE SUSFS 4.19 PATCH
+      # ============================================================
 
       - name: Locate SuSFS 4.19 patch
         working-directory: ${{ env.KERNEL_PATH }}
@@ -317,12 +361,14 @@ jobs:
 
           PATCH_FILE="../NonGKI_Kernel_Build_2nd/Patches/Patch/susfs_patch_to_${KERNEL_VERSION}.patch"
 
+          echo "Expected patch:"
+          echo "${PATCH_FILE}"
+
           if [ ! -f "${PATCH_FILE}" ]; then
-            echo "::error::SuSFS patch not found:"
-            echo "${PATCH_FILE}"
+            echo "::error::SuSFS 4.19 patch not found."
 
             echo
-            echo "Available SuSFS patches:"
+            echo "Available patches:"
 
             find ../NonGKI_Kernel_Build_2nd/Patches/Patch \
               -maxdepth 1 \
@@ -337,12 +383,12 @@ jobs:
             "${PATCH_FILE}" \
             "./susfs_patch_to_${KERNEL_VERSION}.patch"
 
-          echo "Selected:"
-          echo "./susfs_patch_to_${KERNEL_VERSION}.patch"
+          ls -lh \
+            "./susfs_patch_to_${KERNEL_VERSION}.patch"
 
-      # ==========================================================
-      # 12. BACKUP BEFORE SUSFS PATCH
-      # ==========================================================
+      # ============================================================
+      # 13. BACKUP BEFORE SUSFS PATCH
+      # ============================================================
 
       - name: Backup kernel before SuSFS patch
         shell: bash
@@ -355,11 +401,11 @@ jobs:
             "${KERNEL_PATH}" \
             kernel_before_susfs
 
-          echo "Backup created."
+          echo "Kernel backup created."
 
-      # ==========================================================
-      # 13. APPLY SUSFS PATCH
-      # ==========================================================
+      # ============================================================
+      # 14. APPLY SUSFS 4.19 PATCH
+      # ============================================================
 
       - name: Apply SuSFS 4.19 patch
         working-directory: ${{ env.KERNEL_PATH }}
@@ -373,51 +419,61 @@ jobs:
           echo "${PATCH_FILE}"
 
           patch \
-            --batch \
-            --forward \
             -p1 \
-            < "${PATCH_FILE}"
+            < "${PATCH_FILE}" \
+            || true
 
           echo
-          echo "Checking rejected hunks..."
+          echo "=========================================="
+          echo "Checking rejected hunks"
+          echo "=========================================="
 
-          REJECTS=$(find . \
+          REJECT_COUNT=$(find . \
             -type f \
             -name '*.rej' \
-            -print)
+            | wc -l)
 
-          if [ -n "${REJECTS}" ]; then
+          echo "Reject count: ${REJECT_COUNT}"
+
+          if [ "${REJECT_COUNT}" -gt 0 ]; then
+
             echo
             echo "=========================================="
-            echo "SUSFS PATCH REJECTS DETECTED"
+            echo "MANUAL SUSFS PATCHING REQUIRED"
             echo "=========================================="
 
-            echo "${REJECTS}"
+            find . \
+              -type f \
+              -name '*.rej' \
+              -print
 
             echo
-            echo "The JackA1ltman wiki requires manual"
-            echo "patching of these hunks."
-            echo
+            echo "Reject contents:"
 
-            while IFS= read -r file; do
+            while IFS= read -r REJ; do
               echo
-              echo "========== ${file} =========="
-              cat "${file}"
-            done <<< "${REJECTS}"
+              echo "========== ${REJ} =========="
+              cat "${REJ}"
+            done < <(
+              find . \
+                -type f \
+                -name '*.rej' \
+                -print
+            )
 
             echo
-            echo "::error::SuSFS patch did not apply cleanly."
-            echo "::error::Build intentionally stopped before compilation."
+            echo "::error::SuSFS patch generated rejected hunks."
+            echo "::error::Build stopped intentionally."
 
             exit 1
           fi
 
           echo
-          echo "SuSFS patch applied cleanly."
+          echo "SuSFS 4.19 patch applied cleanly."
 
-      # ==========================================================
-      # 14. ADD SUSFS CONFIGURATION
-      # ==========================================================
+      # ============================================================
+      # 15. CONFIGURE SUSFS
+      # ============================================================
 
       - name: Configure SuSFS
         working-directory: ${{ env.KERNEL_PATH }}
@@ -427,17 +483,21 @@ jobs:
 
           DEFCONFIG_FILE="arch/arm64/configs/${DEFCONFIG}"
 
-          # Remove previous definitions.
-          sed -i '/^CONFIG_KSU_SUSFS=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SUS_PATH=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SUS_MOUNT=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SUS_KSTAT=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SPOOF_UNAME=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_ENABLE_LOG=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_OPEN_REDIRECT=/d' "${DEFCONFIG_FILE}"
-          sed -i '/^CONFIG_KSU_SUSFS_SUS_MAP=/d' "${DEFCONFIG_FILE}"
+          for CONFIG in \
+            CONFIG_KSU_SUSFS \
+            CONFIG_KSU_SUSFS_SUS_PATH \
+            CONFIG_KSU_SUSFS_SUS_MOUNT \
+            CONFIG_KSU_SUSFS_SUS_KSTAT \
+            CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            CONFIG_KSU_SUSFS_ENABLE_LOG \
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+            CONFIG_KSU_SUSFS_SUS_MAP
+          do
+            sed -i "/^${CONFIG}=.*/d" "${DEFCONFIG_FILE}"
+            sed -i "/^# ${CONFIG} is not set$/d" "${DEFCONFIG_FILE}"
+          done
 
           cat >> "${DEFCONFIG_FILE}" <<'EOF'
 
@@ -453,35 +513,23 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
 
-          echo "SuSFS configuration:"
-          grep '^CONFIG_KSU_SUSFS' "${DEFCONFIG_FILE}"
+          echo "Final ReSukiSU/SuSFS defconfig:"
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_KSU_SUSFS)' \
+            "${DEFCONFIG_FILE}" \
+            | sort
 
-      # ==========================================================
-      # 15. SAVE PATCHED SOURCE
-      # ==========================================================
-
-      - name: Generate patched source diff
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "${KERNEL_PATH}"
-
-          git diff --no-ext-diff > ../susfs_applied.diff || true
-
-          echo "Generated:"
-          ls -lh ../susfs_applied.diff || true
-
-      # ==========================================================
+      # ============================================================
       # 16. CONFIGURE KERNEL
-      # ==========================================================
+      # ============================================================
 
-      - name: Run defconfig
+      - name: Run lito-perf defconfig
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
           set -euxo pipefail
 
+          rm -rf "../${BUILD_DIR}"
           mkdir -p "../${BUILD_DIR}"
 
           export ARCH="${ARCH}"
@@ -494,22 +542,33 @@ jobs:
           test -f "../${BUILD_DIR}/.config"
 
           echo
-          echo "Final KSU/SuSFS configuration:"
+          echo "Generated configuration:"
           grep -E \
             '^(CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_KSU_SUSFS)' \
             "../${BUILD_DIR}/.config" \
             | sort
 
-      # ==========================================================
-      # 17. BUILD
-      # ==========================================================
+      # ============================================================
+      # 17. PREPARE LLVM BUILD
+      # ============================================================
+
+      - name: Prepare LLVM toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          clang --version
+          ld.lld --version
+          llvm-ar --version
+          aarch64-linux-gnu-gcc --version
+
+      # ============================================================
+      # 18. BUILD KERNEL
+      # ============================================================
 
       - name: Build kernel
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
-        env:
-          CROSS_COMPILE: aarch64-linux-gnu-
-          CROSS_COMPILE_ARM32: arm-linux-gnueabi-
         run: |
           set -euxo pipefail
 
@@ -519,6 +578,9 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
 
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
           export CC="ccache clang"
           export LD=ld.lld
           export AR=llvm-ar
@@ -527,11 +589,17 @@ jobs:
           export OBJDUMP=llvm-objdump
           export STRIP=llvm-strip
 
+          echo "=========================================="
+          echo "Building Linux ${KERNEL_VERSION}"
+          echo "=========================================="
+
           make \
             -j"$(nproc)" \
             O="../${BUILD_DIR}" \
             LLVM=1 \
             LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
             CC="ccache clang" \
             LD=ld.lld \
             AR=llvm-ar \
@@ -541,13 +609,13 @@ jobs:
             STRIP=llvm-strip
 
           echo
-          echo "Build completed."
+          echo "Kernel build completed."
 
           ccache --show-stats
 
-      # ==========================================================
-      # 18. VERIFY IMAGE
-      # ==========================================================
+      # ============================================================
+      # 19. VERIFY IMAGE
+      # ============================================================
 
       - name: Verify kernel Image
         shell: bash
@@ -556,15 +624,25 @@ jobs:
 
           IMAGE="${KERNEL_PATH}/${BUILD_DIR}/arch/arm64/boot/Image"
 
-          test -f "${IMAGE}"
+          if [ ! -f "${IMAGE}" ]; then
+            echo "::error::Kernel Image not found."
+
+            find "${KERNEL_PATH}/${BUILD_DIR}/arch/arm64/boot" \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' \
+              | sort
+
+            exit 1
+          fi
 
           ls -lh "${IMAGE}"
 
-      # ==========================================================
-      # 19. DOWNLOAD STOCK BOOT
-      # ==========================================================
+      # ============================================================
+      # 20. DOWNLOAD KIEV BOOT 20260809
+      # ============================================================
 
-      - name: Download stock boot image
+      - name: Download Kiev boot image
         shell: bash
         run: |
           set -euxo pipefail
@@ -583,11 +661,11 @@ jobs:
 
           ls -lh boot/stock_boot.img
 
-      # ==========================================================
-      # 20. PREPARE ARTIFACTS
-      # ==========================================================
+      # ============================================================
+      # 21. PREPARE ARTIFACTS
+      # ============================================================
 
-      - name: Prepare artifacts
+      - name: Prepare release artifacts
         shell: bash
         run: |
           set -euxo pipefail
@@ -609,18 +687,12 @@ jobs:
 
           cp \
             "${KERNEL_PATH}/arch/arm64/configs/${DEFCONFIG}" \
-            release/${DEFCONFIG}
-
-          cp \
-            susfs_applied.diff \
-            release/susfs_applied.diff
+            release/lito-perf_defconfig
 
           cat > release/BUILD_INFO.txt <<EOF
-          Kernel CI
-          ================================
-
-          Kernel version: ${KERNEL_VERSION}
-          Architecture: ${ARCH}
+          Kernel: Linux ${KERNEL_VERSION}.325
+          Device: Motorola Kiev / SM8250
+          Branch: ${KERNEL_BRANCH}
           Defconfig: ${DEFCONFIG}
 
           Root:
@@ -628,11 +700,12 @@ jobs:
 
           SuSFS:
           JackA1ltman NonGKI_Kernel_Build_2nd
-          susfs_inline_hook_patches.sh
+
+          SuSFS patch:
           susfs_patch_to_4.19.patch
 
-          Git ref:
-          ${GITHUB_REF_NAME}
+          Boot image:
+          ${BOOT_URL}
 
           Commit:
           ${GITHUB_SHA}
@@ -643,9 +716,9 @@ jobs:
 
           ls -lah release
 
-      # ==========================================================
-      # 21. PACKAGE
-      # ==========================================================
+      # ============================================================
+      # 22. PACKAGE
+      # ============================================================
 
       - name: Package kernel
         shell: bash
@@ -655,37 +728,35 @@ jobs:
           cd release
 
           zip -9 \
-            "../ReSukiSU-SuSFS-4.19-${GITHUB_RUN_NUMBER}.zip" \
+            "../ReSukiSU-SuSFS-Kiev-4.19-${GITHUB_RUN_NUMBER}.zip" \
             Image \
             stock_boot.img \
             kernel.config \
-            "${DEFCONFIG}" \
-            susfs_applied.diff \
+            lito-perf_defconfig \
             BUILD_INFO.txt
 
           cd ..
 
           ls -lh \
-            "ReSukiSU-SuSFS-4.19-${GITHUB_RUN_NUMBER}.zip"
+            "ReSukiSU-SuSFS-Kiev-4.19-${GITHUB_RUN_NUMBER}.zip"
 
-      # ==========================================================
-      # 22. UPLOAD ARTIFACTS
-      # ==========================================================
+      # ============================================================
+      # 23. UPLOAD ARTIFACTS
+      # ============================================================
 
-      - name: Upload artifacts
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ReSukiSU-SuSFS-4.19-${{ github.run_number }}
+          name: ReSukiSU-SuSFS-Kiev-4.19-${{ github.run_number }}
           path: |
             release/
-            ReSukiSU-SuSFS-4.19-${{ github.run_number }}.zip
-            susfs_applied.diff
+            ReSukiSU-SuSFS-Kiev-4.19-${{ github.run_number }}.zip
           if-no-files-found: error
           retention-days: 14
 
-      # ==========================================================
-      # 23. SUMMARY
-      # ==========================================================
+      # ============================================================
+      # 24. SUMMARY
+      # ============================================================
 
       - name: Build summary
         shell: bash
@@ -696,12 +767,13 @@ jobs:
           echo "BUILD SUCCESS"
           echo "=========================================="
 
-          echo "Kernel       : ${KERNEL_VERSION}"
-          echo "Architecture : ${ARCH}"
+          echo "Kernel       : Linux ${KERNEL_VERSION}.325"
+          echo "Device       : Motorola Kiev / SM8250"
+          echo "Branch       : ${KERNEL_BRANCH}"
           echo "Defconfig    : ${DEFCONFIG}"
           echo "Root         : ReSukiSU"
           echo "SuSFS        : enabled"
+
           echo
           echo "Artifacts:"
           ls -lah release/
-
