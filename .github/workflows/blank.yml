@@ -53,7 +53,7 @@ env:
   BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img
   DTBO_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/dtbo.img
 
-  # Dépôt choisi pour l'intégration Non-GKI
+  # Dépôt officiel utilisé pour les outils Non-GKI/SuSFS
   NONGKI_REPO: https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd.git
 
 
@@ -131,7 +131,6 @@ jobs:
             bison \
             build-essential \
             ccache \
-            clang \
             cpio \
             curl \
             device-tree-compiler \
@@ -142,8 +141,6 @@ jobs:
             libelf-dev \
             libncurses-dev \
             libssl-dev \
-            lld \
-            llvm \
             lz4 \
             make \
             python3 \
@@ -193,6 +190,7 @@ jobs:
           git remote -v
           git log -1 --oneline
 
+          echo
           echo "===== VERSION ====="
 
           test -f Makefile
@@ -257,19 +255,35 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -d "/usr/lib/llvm-18/bin" ]; then
-            echo "/usr/lib/llvm-18/bin" >> "${GITHUB_PATH}"
-            export PATH="/usr/lib/llvm-18/bin:${PATH}"
-          fi
+          echo "===== LLVM / CLANG ====="
 
-          echo "PATH=${PATH}"
+          CLANG="$(command -v clang || true)"
 
-          if command -v clang >/dev/null 2>&1; then
-            clang --version | head -n 2
-          else
-            echo "::error::clang not found."
+          if [ -z "${CLANG}" ]; then
+            echo "::error::clang not found on runner."
+            echo
+            echo "Available LLVM installations:"
+            find /usr/lib -maxdepth 2 \
+              -type f \
+              -name clang \
+              -o -name clang-18 \
+              -o -name clang-17 \
+              2>/dev/null | sort || true
             exit 1
           fi
+
+          LLVM_BIN="$(dirname "$(readlink -f "${CLANG}")")"
+
+          echo "clang=${CLANG}"
+          echo "LLVM_BIN=${LLVM_BIN}"
+
+          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
+          echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
+
+          clang --version | head -n 2
+
+          echo
+          echo "===== GCC ====="
 
           aarch64-linux-gnu-gcc --version | head -n 1
 
@@ -293,20 +307,24 @@ jobs:
           test -d NonGKI_Kernel_Build_2nd
 
           echo "===== NonGKI repository ====="
+
           cd NonGKI_Kernel_Build_2nd
 
           git log -1 --oneline
 
-          echo "===== available patch tools ====="
+          echo
+          echo "===== Required SuSFS files ====="
 
-          find . -maxdepth 3 \
-            \( \
-              -name '*hook*.sh' \
-              -o \
-              -name 'susfs_patch_to_4.19.patch' \
-            \) \
-            -print \
-            | sort
+          test -f "bin/clean_hook.sh"
+
+          test -f "Patches/susfs_inline_hook_patches.sh"
+
+          test -f "Patches/Patch/susfs_patch_to_4.19.patch"
+
+          ls -lh \
+            "bin/clean_hook.sh" \
+            "Patches/susfs_inline_hook_patches.sh" \
+            "Patches/Patch/susfs_patch_to_4.19.patch"
 
 
       # ============================================================
@@ -336,14 +354,15 @@ jobs:
 
             CLEAN_SCRIPT="${WORKSPACE}/NonGKI_Kernel_Build_2nd/bin/clean_hook.sh"
 
-            if [ -f "${CLEAN_SCRIPT}" ]; then
-              cp "${CLEAN_SCRIPT}" .
-              bash clean_hook.sh
-              rm -f clean_hook.sh
-            else
-              echo "::error::clean_hook.sh not found in NonGKI repository."
-              exit 1
-            fi
+            cp "${CLEAN_SCRIPT}" .
+
+            chmod +x clean_hook.sh
+
+            bash clean_hook.sh
+
+            rm -f clean_hook.sh
+
+            echo "Existing KernelSU cleaned."
           else
             echo "No existing KernelSU installation detected."
           fi
@@ -373,6 +392,7 @@ jobs:
 
           rm -f setup-resukisu.sh
 
+          echo
           echo "===== Verify ReSukiSU ====="
 
           test -d KernelSU || {
@@ -380,8 +400,10 @@ jobs:
             exit 1
           }
 
-          echo "KernelSU:"
-          find KernelSU -maxdepth 2 -type f | head -n 30
+          find KernelSU \
+            -maxdepth 2 \
+            -type f \
+            | head -n 30
 
 
       # ============================================================
@@ -399,9 +421,6 @@ jobs:
 
           test -f "${CONFIG_FILE}" || {
             echo "::error::Defconfig not found: ${CONFIG_FILE}"
-            find arch/arm64/configs \
-              \( -name '*lito*' -o -name '*perf*' \) \
-              -print
             exit 1
           }
 
@@ -409,7 +428,9 @@ jobs:
 
           {
             echo
-            echo "# ReSukiSU / SuSFS"
+            echo "# ============================================================"
+            echo "# ReSukiSU"
+            echo "# ============================================================"
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_MANUAL_HOOK=y"
             echo "CONFIG_KALLSYMS=y"
@@ -424,15 +445,11 @@ jobs:
 
 
       # ============================================================
-      # SUSFS PATCH
-      #
+      # SUSFS 4.19 PATCH
       # IMPORTANT:
-      # The 4.19 SuSFS patch MUST be applied BEFORE
-      # susfs_inline_hook_patches.sh.
-      #
-      # Diagnostic 1113 proved that applying inline hooks first
-      # modified fs/namespace.c and fs/proc/task_mmu.c and caused
-      # the official patch to generate rejected hunks.
+      # Apply the main SuSFS kernel patch BEFORE the inline hook
+      # script. This prevents task_mmu.c / namespace.c from being
+      # modified twice before the main patch is evaluated.
       # ============================================================
 
       - name: Apply SuSFS 4.19 patch
@@ -444,29 +461,33 @@ jobs:
 
           PATCH_FILE="${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches/Patch/susfs_patch_to_4.19.patch"
 
-          if [ ! -f "${PATCH_FILE}" ]; then
-            echo "::error::SuSFS 4.19 patch not found."
+          test -f "${PATCH_FILE}" || {
+            echo "::error::SuSFS 4.19 patch not found:"
+            echo "${PATCH_FILE}"
+            exit 1
+          }
 
-            find "${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches" \
-              -iname '*susfs*4.19*.patch' \
+          echo "===== Source state before SuSFS patch ====="
+
+          git status --short
+
+          echo
+          echo "Checking for stale reject/original files..."
+
+          if find . \
+            -type f \
+            \( -name '*.rej' -o -name '*.orig' \) \
+            -print \
+            | grep -q .; then
+
+            echo "::error::Stale .rej/.orig files found before patch."
+            find . \
+              -type f \
+              \( -name '*.rej' -o -name '*.orig' \) \
               -print
 
             exit 1
           fi
-
-          echo "===== SuSFS source state before patch ====="
-
-          if grep -q "CONFIG_KSU_SUSFS" fs/namespace.c 2>/dev/null; then
-            echo "::error::fs/namespace.c already contains SuSFS changes."
-            exit 1
-          fi
-
-          if grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c 2>/dev/null; then
-            echo "::error::fs/proc/task_mmu.c already contains SuSFS changes."
-            exit 1
-          fi
-
-          echo "Source state is clean for official SuSFS patch."
 
           cp -a "${KERNEL_PATH}" \
             "${WORKSPACE}/kernel-before-susfs"
@@ -494,10 +515,13 @@ jobs:
           REJECTS="$(find . -type f -name '*.rej' -print)"
 
           if [ -n "${REJECTS}" ]; then
+
             echo "::error::SuSFS produced rejected hunks."
+
             echo
             echo "===== REJECTED FILES ====="
             echo "${REJECTS}"
+
             echo
             echo "===== REJECT CONTENT ====="
 
@@ -523,9 +547,6 @@ jobs:
 
       # ============================================================
       # SUSFS INLINE HOOKS
-      #
-      # IMPORTANT:
-      # This step is intentionally AFTER the main SuSFS 4.19 patch.
       # ============================================================
 
       - name: Apply SuSFS inline hook patches
@@ -539,11 +560,6 @@ jobs:
 
           test -f "${SCRIPT}" || {
             echo "::error::susfs_inline_hook_patches.sh not found."
-
-            find "${WORKSPACE}/NonGKI_Kernel_Build_2nd" \
-              -name 'susfs_inline_hook_patches.sh' \
-              -print
-
             exit 1
           }
 
@@ -551,13 +567,33 @@ jobs:
 
           chmod +x susfs_inline_hook_patches.sh
 
-          echo "===== Applying SuSFS inline hooks ====="
+          echo "===== Applying SuSFS inline hook patches ====="
 
           bash susfs_inline_hook_patches.sh
 
           rm -f susfs_inline_hook_patches.sh
 
+          echo
           echo "===== Inline hooks complete ====="
+
+          echo
+          echo "===== Reject check ====="
+
+          if find . \
+            -type f \
+            \( -name '*.rej' -o -name '*.orig' \) \
+            -print \
+            | grep -q .; then
+
+            echo "::error::Inline hook script produced rejected/original files."
+
+            find . \
+              -type f \
+              \( -name '*.rej' -o -name '*.orig' \) \
+              -print
+
+            exit 1
+          fi
 
 
       # ============================================================
@@ -572,6 +608,11 @@ jobs:
           cd "${KERNEL_PATH}"
 
           CONFIG_FILE="arch/arm64/configs/${KERNEL_CONFIG}"
+
+          test -f "${CONFIG_FILE}" || {
+            echo "::error::Defconfig not found: ${CONFIG_FILE}"
+            exit 1
+          }
 
           cat >> "${CONFIG_FILE}" <<'EOF'
 
@@ -618,18 +659,39 @@ jobs:
             --include='Kconfig*' \
             --include='*.c' \
             --include='*.h' \
-            | head -n 20 || true
+            | head -n 30 || true
 
           echo
-          echo "===== SuSFS symbols ====="
+          echo "===== SuSFS source files ====="
+
+          test -f fs/susfs.c
+          test -f include/linux/susfs.h
+          test -f include/linux/susfs_def.h
+
+          echo "fs/susfs.c:"
+          ls -lh fs/susfs.c
+
+          echo
+          echo "include/linux/susfs.h:"
+          ls -lh include/linux/susfs.h
+
+          echo
+          echo "include/linux/susfs_def.h:"
+          ls -lh include/linux/susfs_def.h
+
+          echo
+          echo "===== SuSFS references ====="
 
           grep -R \
             "CONFIG_KSU_SUSFS" \
-            . \
-            --exclude-dir=.git \
-            --exclude='*.rej' \
-            --exclude='*.orig' \
-            | head -n 50 || true
+            fs \
+            include/linux \
+            kernel \
+            mm \
+            security \
+            --include='*.c' \
+            --include='*.h' \
+            | head -n 100 || true
 
           echo
           echo "===== Reject files ====="
@@ -649,15 +711,6 @@ jobs:
 
             exit 1
           fi
-
-          echo
-          echo "===== Required SuSFS files ====="
-
-          test -f fs/susfs.c
-          test -f include/linux/susfs.h
-          test -f include/linux/susfs_def.h
-
-          echo "SuSFS source files verified."
 
 
       # ============================================================
@@ -706,6 +759,15 @@ jobs:
 
           mkdir -p "${BUILD_DIR}"
 
+          echo "===== Toolchain ====="
+
+          command -v clang
+          clang --version | head -n 2
+
+          command -v ld.lld || true
+          command -v aarch64-linux-gnu-gcc
+
+          echo
           echo "===== Generate defconfig ====="
 
           make \
@@ -717,6 +779,7 @@ jobs:
             CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
             "${DEFCONFIG}"
 
+          echo
           echo "===== Verify generated .config ====="
 
           grep -E \
@@ -724,6 +787,7 @@ jobs:
             "${BUILD_DIR}/.config" \
             || true
 
+          echo
           echo "===== Kernel build ====="
 
           make \
@@ -812,7 +876,7 @@ jobs:
           path: |
             ${{ env.KERNEL_PATH }}/**/*.rej
             ${{ env.KERNEL_PATH }}/**/*.orig
-            ${{ env.BUILD_DIR }}/.config
+            ${{ env.KERNEL_PATH }}/.config
             ${{ env.KERNEL_PATH }}/Makefile
           if-no-files-found: ignore
           compression-level: 0
@@ -837,9 +901,9 @@ jobs:
             echo "| Defconfig | vendor/lito-perf_defconfig |"
             echo "| KernelSU | ReSukiSU |"
             echo "| ReSukiSU ref | ${KSU_REF} |"
-            echo "| Hook | manual + SuSFS inline |"
+            echo "| Hook | SuSFS inline |"
             echo "| SuSFS | enabled |"
             echo "| Image | Image.gz-dtb |"
-            echo "| SuSFS patch order | patch → inline hooks |"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
+
