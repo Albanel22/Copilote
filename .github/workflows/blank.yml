@@ -131,6 +131,7 @@ jobs:
             bison \
             build-essential \
             ccache \
+            clang \
             cpio \
             curl \
             device-tree-compiler \
@@ -138,9 +139,11 @@ jobs:
             gcc-aarch64-linux-gnu \
             gcc-arm-linux-gnueabi \
             git \
+            lld \
             libelf-dev \
             libncurses-dev \
             libssl-dev \
+            llvm \
             lz4 \
             make \
             python3 \
@@ -150,6 +153,25 @@ jobs:
             zstd
 
           mkdir -p "${WORKSPACE}"
+
+          echo "===== LLVM installed ====="
+          command -v clang
+          clang --version | head -n 2
+
+          echo
+          echo "===== LLVM ====="
+          command -v llvm-config || true
+          llvm-config --version || true
+
+          echo
+          echo "===== LLD ====="
+          command -v ld.lld
+          ld.lld --version | head -n 2
+
+          echo
+          echo "===== GCC ====="
+          command -v aarch64-linux-gnu-gcc
+          aarch64-linux-gnu-gcc --version | head -n 1
 
 
       # ============================================================
@@ -257,36 +279,35 @@ jobs:
 
           echo "===== LLVM / CLANG ====="
 
-          CLANG="$(command -v clang || true)"
+          CLANG="$(command -v clang)"
 
-          if [ -z "${CLANG}" ]; then
-            echo "::error::clang not found on runner."
-            echo
-            echo "Available LLVM installations:"
-            find /usr/lib -maxdepth 2 \
-              -type f \
-              -name clang \
-              -o -name clang-18 \
-              -o -name clang-17 \
-              2>/dev/null | sort || true
-            exit 1
-          fi
+          test -n "${CLANG}"
 
           LLVM_BIN="$(dirname "$(readlink -f "${CLANG}")")"
 
-          echo "clang=${CLANG}"
-          echo "LLVM_BIN=${LLVM_BIN}"
+          echo "clang      : ${CLANG}"
+          echo "LLVM_BIN   : ${LLVM_BIN}"
 
-          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
           echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
-
-          clang --version | head -n 2
+          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
 
           echo
-          echo "===== GCC ====="
+          clang --version | head -n 3
 
+          echo
+          echo "===== LLD ====="
+
+          command -v ld.lld
+          ld.lld --version | head -n 2
+
+          echo
+          echo "===== GCC AArch64 ====="
+
+          command -v aarch64-linux-gnu-gcc
           aarch64-linux-gnu-gcc --version | head -n 1
 
+          echo
+          echo "===== TOOLCHAIN READY ====="
 
       # ============================================================
       # NON-GKI BUILD REPOSITORY
