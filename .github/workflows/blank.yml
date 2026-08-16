@@ -302,7 +302,7 @@ jobs:
       # FIX REQUIRED RESUKISU STAT HOOK
       # ==========================================================
 
-      - name: Integrate missing newfstat return hook
+      - name: Integrate ReSukiSU stat hooks
         working-directory: ${{ env.KERNEL_PATH }}
         shell: bash
         run: |
@@ -310,12 +310,20 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("fs/stat.c")
           text = path.read_text()
 
-          declaration = r'''
-          #ifdef CONFIG_KSU_MANUAL_HOOK
+          # ==========================================================
+          # 1. Add official ReSukiSU stat declarations
+          # ==========================================================
+
+          if "ksu_handle_newfstat_ret" not in text:
+
+              marker = "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)"
+
+              declaration = """#ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot))
           extern int ksu_handle_stat(int *dfd,
                                      const char __user **filename_user,
@@ -332,19 +340,11 @@ jobs:
           #endif
           #endif
 
-          '''
-
-          # ------------------------------------------------------
-          # Add ReSukiSU declarations if absent
-          # ------------------------------------------------------
-
-          if "ksu_handle_newfstat_ret" not in text:
-
-              marker = "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)"
+          """
 
               if marker not in text:
                   raise SystemExit(
-                      "ERROR: stat.c: newfstatat declaration anchor not found"
+                      "ERROR: fs/stat.c: declaration anchor not found"
                   )
 
               text = text.replace(
@@ -353,48 +353,131 @@ jobs:
                   1
               )
 
-          # ------------------------------------------------------
-          # Add newfstat return hook
-          # ------------------------------------------------------
+          # ==========================================================
+          # 2. Hook newfstatat()
+          # ==========================================================
 
-          old = """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
-          {
-              struct kstat stat;
-              int error = vfs_fstat(fd, &stat);
-
-              if (!error)
-                  error = cp_new_stat(&stat, statbuf);
-
-              return error;
-          }"""
-
-          new = """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
-          {
-              struct kstat stat;
-              int error = vfs_fstat(fd, &stat);
-
-              if (!error)
-                  error = cp_new_stat(&stat, statbuf);
-
-          #ifdef CONFIG_KSU_MANUAL_HOOK
-              ksu_handle_newfstat_ret(&fd, &statbuf);
+          newfstatat_hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          	ksu_handle_stat(&dfd, &filename, &flag);
           #endif
+          """
 
-              return error;
-          }"""
+          if "ksu_handle_stat(&dfd, &filename, &flag);" not in text:
+
+              pattern = re.compile(
+                  r"(SYSCALL_DEFINE4\(newfstatat,.*?"
+                  r"\{.*?"
+                  r"struct kstat stat;\s*"
+                  r"int error;\s*)",
+                  re.S
+              )
+
+              match = pattern.search(text)
+
+              if not match:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: newfstatat() not found"
+                  )
+
+              text = (
+                  text[:match.end()]
+                  + newfstatat_hook
+                  + text[match.end():]
+              )
+
+          # ==========================================================
+          # 3. Hook newfstat()
+          # ==========================================================
 
           if "ksu_handle_newfstat_ret(&fd, &statbuf);" not in text:
 
-              if old not in text:
+              pattern = re.compile(
+                  r"(SYSCALL_DEFINE2\(newfstat,\s*"
+                  r"unsigned int,\s*fd,\s*"
+                  r"struct stat __user \*,\s*statbuf\)"
+                  r"\s*\{.*?"
+                  r"if\s*\(!error\)\s*"
+                  r"error\s*=\s*cp_new_stat\(&stat,\s*statbuf\);\s*)"
+                  r"(return error;)",
+                  re.S
+              )
+
+              match = pattern.search(text)
+
+              if not match:
                   raise SystemExit(
-                      "ERROR: stat.c: newfstat function does not match expected 4.19 source"
+                      "ERROR: fs/stat.c: newfstat() body not found"
                   )
 
-              text = text.replace(old, new, 1)
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          	ksu_handle_newfstat_ret(&fd, &statbuf);
+          #endif
+          	"""
+
+              text = (
+                  text[:match.end(1)]
+                  + hook
+                  + text[match.start(2):]
+              )
+
+          # ==========================================================
+          # 4. Hook fstat64() when present
+          # ==========================================================
+
+          if "SYSCALL_DEFINE2(fstat64" in text:
+
+              if "ksu_handle_fstat64_ret(&fd, &statbuf);" not in text:
+
+                  pattern = re.compile(
+                      r"(SYSCALL_DEFINE2\(fstat64,\s*"
+                      r"unsigned long,\s*fd,\s*"
+                      r"struct stat64 __user \*,\s*statbuf\)"
+                      r"\s*\{.*?"
+                      r"if\s*\(!error\)\s*"
+                      r"error\s*=\s*cp_new_stat64\(&stat,\s*statbuf\);\s*)"
+                      r"(return error;)",
+                      re.S
+                  )
+
+                  match = pattern.search(text)
+
+                  if match:
+                      hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          	ksu_handle_fstat64_ret(&fd, &statbuf);
+          #endif
+          	"""
+
+                      text = (
+                          text[:match.end(1)]
+                          + hook
+                          + text[match.start(2):]
+                      )
 
           path.write_text(text)
 
           PY
+
+          echo
+          echo "=========================================="
+          echo "ReSukiSU stat hooks verification"
+          echo "=========================================="
+
+          grep -n \
+            "ksu_handle_stat" \
+            fs/stat.c
+
+          grep -n \
+            "ksu_handle_newfstat_ret" \
+            fs/stat.c
+
+          if grep -q "SYSCALL_DEFINE2(fstat64" fs/stat.c; then
+            grep -n \
+              "ksu_handle_fstat64_ret" \
+              fs/stat.c || true
+          fi
+
+          echo
+          echo "ReSukiSU stat hooks successfully integrated."
 
 
       # ==========================================================
