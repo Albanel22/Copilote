@@ -440,7 +440,7 @@ jobs:
 
 
       # ============================================================
-      # SUSFS PATCH
+      # SUSFS PATCH + MANUAL ADAPTATION FOR KIEV 4.19
       # ============================================================
 
       - name: Apply SuSFS 4.19 patch
@@ -452,61 +452,377 @@ jobs:
 
           PATCH_FILE="${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches/Patch/susfs_patch_to_4.19.patch"
 
-          if [ ! -f "${PATCH_FILE}" ]; then
+          test -f "${PATCH_FILE}" || {
             echo "::error::SuSFS 4.19 patch not found."
             find "${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches" \
               -iname '*susfs*4.19*.patch' \
               -print
             exit 1
-          fi
+          }
+
+          echo "===== Backup kernel before SuSFS ====="
 
           cp -a "${KERNEL_PATH}" \
             "${WORKSPACE}/kernel-before-susfs"
 
           cp "${PATCH_FILE}" .
 
+          echo
           echo "===== Applying official NonGKI SuSFS 4.19 patch ====="
 
           set +e
+
           patch \
             --batch \
             --forward \
+            --no-backup-if-mismatch \
             -p1 \
             < susfs_patch_to_4.19.patch
 
           PATCH_STATUS=$?
+
           set -e
 
+          echo
           echo "patch exit code: ${PATCH_STATUS}"
 
-          REJECTS="$(find . -type f -name '*.rej' -print)"
+          echo
+          echo "===== Reject files ====="
+
+          REJECTS="$(find . -type f -name '*.rej' -print | sort || true)"
 
           if [ -n "${REJECTS}" ]; then
-            echo "::error::SuSFS produced rejected hunks."
-            echo
-            echo "===== REJECTED FILES ====="
             echo "${REJECTS}"
+          else
+            echo "No reject files."
+          fi
+
+          # --------------------------------------------------------
+          # The official patch is expected to fail only in:
+          #
+          #   fs/namespace.c
+          #   fs/proc/task_mmu.c
+          #
+          # These two files require adaptation because the kiev
+          # lineage-23.2 kernel has different VFS/MM code layout.
+          # --------------------------------------------------------
+
+          if [ -n "${REJECTS}" ]; then
+
+            BAD_REJECTS="$(
+              printf '%s\n' "${REJECTS}" |
+              grep -v -E '^\./fs/namespace\.c\.rej$|^\./fs/proc/task_mmu\.c\.rej$' ||
+              true
+            )"
+
+            if [ -n "${BAD_REJECTS}" ]; then
+              echo "::error::Unexpected SuSFS reject files detected:"
+              echo "${BAD_REJECTS}"
+              exit 1
+            fi
+
             echo
-            echo "===== REJECT CONTENT ====="
+            echo "===== Expected compatibility rejects detected ====="
+            echo
+            cat fs/namespace.c.rej
+            echo
+            cat fs/proc/task_mmu.c.rej
+          fi
 
-            while IFS= read -r rej; do
-              echo
-              echo "----- ${rej} -----"
-              cat "${rej}"
-            done <<< "${REJECTS}"
 
+          # ========================================================
+          # MANUAL COMPATIBILITY ADAPTATION
+          # ========================================================
+
+          echo
+          echo "===== Applying kiev 4.19 compatibility adaptations ====="
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path(".")
+
+          # ========================================================
+          # fs/namespace.c
+          # ========================================================
+
+          path = root / "fs/namespace.c"
+          text = path.read_text()
+
+          # --------------------------------------------------------
+          # 1. Add susfs_def.h include
+          # --------------------------------------------------------
+
+          include_anchor = """#include <linux/sched/task.h>
+          """
+
+          include_block = """#include <linux/sched/task.h>
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          #include <linux/susfs_def.h>
+          #endif // CONFIG_KSU_SUSFS_SUS_MOUNT
+          """
+
+          if "CONFIG_KSU_SUSFS_SUS_MOUNT" not in text:
+              if include_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: namespace.c include anchor not found"
+                  )
+
+              text = text.replace(
+                  include_anchor,
+                  include_block,
+                  1
+              )
+
+          # --------------------------------------------------------
+          # 2. Add SuSFS mount declarations
+          # --------------------------------------------------------
+
+          extern_anchor = """#include "pnode.h"
+          """
+
+          extern_block = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          extern bool susfs_is_current_ksu_domain(void);
+          extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
+
+          #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
+
+          #endif // CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          #include "pnode.h"
+          """
+
+          if "susfs_is_current_ksu_domain" not in text:
+              if extern_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: namespace.c extern anchor not found"
+                  )
+
+              text = text.replace(
+                  extern_anchor,
+                  extern_block,
+                  1
+              )
+
+          # --------------------------------------------------------
+          # 3. Adapt vfs_kern_mount()
+          #
+          # The original NonGKI patch expects an older 4.19 layout
+          # where vfs_kern_mount() directly calls alloc_vfsmnt().
+          #
+          # kiev lineage-23.2 uses fs_context/fc_mount(), therefore
+          # the SuSFS fast path must return before the normal
+          # fs_context flow.
+          # --------------------------------------------------------
+
+          vfs_anchor = """	struct vfsmount *mnt;
+          """
+
+          vfs_block = """	struct vfsmount *mnt;
+
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          	/*
+          	 * SuSFS: allow the KSU domain to obtain a non-unshare
+          	 * vfsmount when Android/data is not decrypted.
+          	 */
+          	if (static_branch_unlikely(
+          			&susfs_is_sdcard_android_data_not_decrypted)) {
+          		if (susfs_is_current_ksu_domain())
+          			return susfs_alloc_non_unshare_ksu_vfsmnt(
+          				name ?: "none");
+          	}
+          #endif
+          """
+
+          if "susfs_alloc_non_unshare_ksu_vfsmnt" not in text:
+              if vfs_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: namespace.c vfs_kern_mount anchor not found"
+                  )
+
+              text = text.replace(
+                  vfs_anchor,
+                  vfs_block,
+                  1
+              )
+
+          path.write_text(text)
+
+
+          # ========================================================
+          # fs/proc/task_mmu.c
+          # ========================================================
+
+          path = root / "fs/proc/task_mmu.c"
+          text = path.read_text()
+
+          # --------------------------------------------------------
+          # 4. Add susfs_def.h
+          #
+          # The kernel already contains:
+          #
+          #   #ifdef CONFIG_KSU_SUSFS
+          #   #include <linux/susfs.h>
+          #   #endif
+          #
+          # The SuSFS patch also needs susfs_def.h for the SUS_MAP
+          # helpers.
+          # --------------------------------------------------------
+
+          include_anchor = """#include <linux/ctype.h>
+          """
+
+          include_block = """#include <linux/ctype.h>
+          #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
+          #include <linux/susfs_def.h>
+          #endif // CONFIG_KSU_SUSFS_SUS_KSTAT || CONFIG_KSU_SUSFS_SUS_MAP || CONFIG_KSU_SUSFS_OPEN_REDIRECT
+          """
+
+          if "CONFIG_KSU_SUSFS_SUS_MAP" not in text:
+              if include_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: task_mmu.c include anchor not found"
+                  )
+
+              text = text.replace(
+                  include_anchor,
+                  include_block,
+                  1
+              )
+
+          # --------------------------------------------------------
+          # 5. Adapt pagemap_read()
+          #
+          # The stock patch expects:
+          #
+          #   down_read_killable(&mm->mmap_sem)
+          #
+          # kiev uses:
+          #
+          #   mmap_read_lock_killable(mm)
+          #
+          # We therefore insert the SUS_MAP check immediately after
+          # the successful mmap read lock.
+          # --------------------------------------------------------
+
+          lock_anchor = """		ret = mmap_read_lock_killable(mm);
+          		if (ret)
+          			goto out_free;
+          """
+
+          lock_block = """		ret = mmap_read_lock_killable(mm);
+          		if (ret)
+          			goto out_free;
+          #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          		vma = find_vma(mm, start_vaddr);
+          		if (vma && vma->vm_file &&
+          		    SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+          			goto bypass_orig_flow;
+          #endif // CONFIG_KSU_SUSFS_SUS_MAP
+          """
+
+          if "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" not in text:
+              if lock_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: task_mmu.c pagemap lock anchor not found"
+                  )
+
+              text = text.replace(
+                  lock_anchor,
+                  lock_block,
+                  1
+              )
+
+          # --------------------------------------------------------
+          # 6. Add bypass label before mmap unlock
+          # --------------------------------------------------------
+
+          unlock_anchor = """		walk_page_range(start_vaddr, end, &pagemap_walk);
+          		mmap_read_unlock(mm);
+          """
+
+          unlock_block = """		walk_page_range(start_vaddr, end, &pagemap_walk);
+          #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          bypass_orig_flow:
+          #endif // CONFIG_KSU_SUSFS_SUS_MAP
+          		mmap_read_unlock(mm);
+          """
+
+          if "bypass_orig_flow:" not in text:
+              if unlock_anchor not in text:
+                  raise SystemExit(
+                      "ERROR: task_mmu.c pagemap unlock anchor not found"
+                  )
+
+              text = text.replace(
+                  unlock_anchor,
+                  unlock_block,
+                  1
+              )
+
+          path.write_text(text)
+
+          print("Manual SuSFS compatibility adaptations applied successfully.")
+          PY
+
+
+          # ========================================================
+          # REMOVE EXPECTED REJECT FILES
+          # ========================================================
+
+          rm -f \
+            fs/namespace.c.rej \
+            fs/proc/task_mmu.c.rej \
+            susfs_patch_to_4.19.patch
+
+          echo
+          echo "===== Verify no patch rejects remain ====="
+
+          REMAINING_REJECTS="$(
+            find . \
+              -type f \
+              \( -name '*.rej' -o -name '*.orig' \) \
+              -print \
+              | sort || true
+          )"
+
+          if [ -n "${REMAINING_REJECTS}" ]; then
+            echo "::error::Patch reject/original files remain:"
+            echo "${REMAINING_REJECTS}"
             exit 1
           fi
 
-          if [ "${PATCH_STATUS}" -ne 0 ]; then
-            echo "::error::SuSFS 4.19 patch failed."
-            exit "${PATCH_STATUS}"
-          fi
 
-          rm -f susfs_patch_to_4.19.patch
+          # ========================================================
+          # VERIFY REQUIRED SUSFS CODE
+          # ========================================================
 
-          echo "===== SuSFS patch applied successfully ====="
+          echo
+          echo "===== Verify namespace.c ====="
 
+          grep -n \
+            "susfs_is_current_ksu_domain" \
+            fs/namespace.c
+
+          grep -n \
+            "susfs_alloc_non_unshare_ksu_vfsmnt" \
+            fs/namespace.c
+
+
+          echo
+          echo "===== Verify task_mmu.c ====="
+
+          grep -n \
+            "SUSFS_IS_INODE_SUS_MAP" \
+            fs/proc/task_mmu.c
+
+          grep -n \
+            "bypass_orig_flow" \
+            fs/proc/task_mmu.c
+
+
+          echo
+          echo "===== SuSFS 4.19 integration complete ====="
 
       # ============================================================
       # SUSFS CONFIG
@@ -523,7 +839,7 @@ jobs:
 
           cat >> "${CONFIG_FILE}" <<'EOF'
 
-                # ============================================================
+     # ============================================================
       # SUSFS CONFIG
       # ============================================================
 
