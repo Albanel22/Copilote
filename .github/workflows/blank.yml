@@ -747,4 +747,4 @@ jobs:
           name: kiev-resukisu-susfs-diagnostics-${{ github.run_number }}
           path: artifacts/diagnostic/
           if-no-files-found: warn
-          retention-days: 14 
+          retention-days: 14
