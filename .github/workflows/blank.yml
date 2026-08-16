@@ -1,4 +1,4 @@
-name: Kernel CI - kiev 4.19.325 - ReSukiSU + SuSFS
+name: Kernel CI - kiev 4.19.325 ReSukiSU + SuSFS
 
 on:
   workflow_dispatch:
@@ -7,35 +7,40 @@ permissions:
   contents: read
 
 env:
-  ARCH: arm64
-  SUBARCH: arm64
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm8250.git
+  KERNEL_BRANCH: lineage-23.2
 
   KERNEL_DIR: kernel_src
   OUT_DIR: out
 
-  DEFCONFIG: kiev_perfect_defconfig
+  ARCH: arm64
+  SUBARCH: arm64
+
+  DEFCONFIG: vendor/lito-perf_defconfig
 
   DEVICE: kiev
-  KERNEL_VERSION_EXPECTED: "4.19.325"
+  EXPECTED_KERNEL: "4.19.325"
+
+  BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img
 
   CCACHE_SIZE: 5G
 
 jobs:
   build:
     name: kiev 4.19.325 + ReSukiSU + SuSFS
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
 
       # ============================================================
-      # CHECKOUT
+      # CHECKOUT BUILD REPOSITORY
       # ============================================================
 
-      - name: Checkout source
+      - name: Checkout Copilote
         uses: actions/checkout@v4
         with:
-          ref: ResuKisu+SusFS
           fetch-depth: 1
+          ref: ResuKisu+SusFS
 
       # ============================================================
       # DEPENDENCIES
@@ -56,8 +61,6 @@ jobs:
             clang \
             curl \
             flex \
-            gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi \
             git \
             libelf-dev \
             libncurses-dev \
@@ -72,16 +75,194 @@ jobs:
             unzip \
             zip \
             device-tree-compiler \
-            dwarves
+            dwarves \
+            xz-utils \
+            cpio
 
-          echo
-          echo "=============================="
-          echo "Toolchain"
-          echo "=============================="
-
+          echo "=== TOOLCHAIN ==="
           clang --version
           ld.lld --version
-          aarch64-linux-gnu-gcc --version
+          llvm-ar --version
+
+      # ============================================================
+      # CLONE LINEAGEOS KERNEL
+      # ============================================================
+
+      - name: Clone LineageOS kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${KERNEL_DIR}"
+
+          git clone \
+            --depth=1 \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            "${KERNEL_DIR}"
+
+          cd "${KERNEL_DIR}"
+
+          echo
+          echo "Kernel repository:"
+          git remote -v
+
+          echo
+          echo "Kernel commit:"
+          git log -1 --oneline
+
+      # ============================================================
+      # VERIFY KERNEL VERSION
+      # ============================================================
+
+      - name: Verify kernel version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          VERSION="$(awk -F'= ' '/^VERSION =/ {print $2}' Makefile)"
+          PATCHLEVEL="$(awk -F'= ' '/^PATCHLEVEL =/ {print $2}' Makefile)"
+          SUBLEVEL="$(awk -F'= ' '/^SUBLEVEL =/ {print $2}' Makefile)"
+
+          DETECTED="${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+
+          echo "Detected kernel: ${DETECTED}"
+          echo "Expected kernel: ${EXPECTED_KERNEL}"
+
+          if [ "${DETECTED}" != "${EXPECTED_KERNEL}" ]; then
+            echo "::error::Wrong kernel version."
+            exit 1
+          fi
+
+          echo "Kernel version OK."
+
+      # ============================================================
+      # VERIFY DEFCONFIG
+      # ============================================================
+
+      - name: Verify lito defconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          CONFIG_PATH="arch/arm64/configs/${DEFCONFIG}"
+
+          if [ ! -f "${CONFIG_PATH}" ]; then
+            echo "::error::Missing ${CONFIG_PATH}"
+            exit 1
+          fi
+
+          echo "Defconfig found:"
+          echo "${CONFIG_PATH}"
+
+          echo
+          echo "=== KSU / SUSFS OPTIONS ALREADY PRESENT ==="
+
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_SUKISU|CONFIG_KSU_SUSFS)' \
+            "${CONFIG_PATH}" || true
+
+      # ============================================================
+      # VERIFY EXISTING COPILOTE PATCHES
+      # ============================================================
+
+      - name: Inspect integration files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== COPILOTE ROOT ==="
+          ls -la
+
+          echo
+          echo "=== AVAILABLE PATCHES ==="
+
+          find . -maxdepth 3 -type f \
+            \( \
+              -iname '*susfs*' \
+              -o -iname '*ksu*' \
+              -o -iname '*resuki*' \
+            \) \
+            -print | sort || true
+
+      # ============================================================
+      # APPLY RESUKISU / SUSFS PATCHES ONLY WHEN NEEDED
+      # ============================================================
+
+      - name: Apply Copilote integration patches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          echo "Checking existing ReSukiSU/SuSFS integration..."
+
+          if [ -d "drivers/kernelsu" ] || [ -d "drivers/ksu" ]; then
+            echo "KernelSU/ReSukiSU source already present."
+            echo "No automatic setup.sh execution."
+          else
+            echo "::error::ReSukiSU/KernelSU source is not present in the LineageOS kernel."
+            echo
+            echo "The Copilote repository contains integration material,"
+            echo "but no automatic blind patching will be performed."
+            echo
+            echo "This prevents corrupting the 4.19.325 kernel tree."
+            exit 1
+          fi
+
+      # ============================================================
+      # VERIFY SUSFS SOURCE
+      # ============================================================
+
+      - name: Verify SuSFS source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          echo "Searching for SuSFS..."
+
+          SUSFS_FILES="$(find . -type f \
+            \( -name 'susfs.c' -o -name 'susfs.h' \) \
+            -print)"
+
+          if [ -z "${SUSFS_FILES}" ]; then
+            echo "::error::SuSFS source was not found in kernel tree."
+            exit 1
+          fi
+
+          echo "${SUSFS_FILES}"
+
+      # ============================================================
+      # VERIFY MANUAL HOOK
+      # ============================================================
+
+      - name: Verify Manual Hook
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          echo "Searching Manual Hook support..."
+
+          if grep -Rqs \
+            "CONFIG_KSU_MANUAL_HOOK" \
+            drivers/kernelsu \
+            drivers/ksu \
+            2>/dev/null; then
+
+            echo "Manual Hook support detected."
+
+          else
+            echo "::warning::Manual Hook source reference not detected."
+          fi
 
       # ============================================================
       # CCACHE
@@ -91,11 +272,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-kiev-4.19.325-${{ github.ref_name }}-ccache
+          key: kiev-4.19.325-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
-            ${{ runner.os }}-kiev-4.19.325-${{ github.ref_name }}-
-            ${{ runner.os }}-kiev-4.19.325-
-            ${{ runner.os }}-ccache-
+            kiev-4.19.325-${{ runner.os }}-
+            kiev-4.19-
+            kiev-
 
       - name: Configure ccache
         shell: bash
@@ -110,205 +291,55 @@ jobs:
 
           ccache --zero-stats
 
-          echo
-          echo "ccache configuration:"
-          ccache --show-config
-
       # ============================================================
-      # VERIFY SOURCE
+      # PREPARE OUTPUT
       # ============================================================
 
-      - name: Verify kernel source
+      - name: Prepare build directory
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -d "${KERNEL_DIR}" ]; then
-            echo "::error::${KERNEL_DIR} does not exist."
-            exit 1
-          fi
-
-          if [ ! -f "${KERNEL_DIR}/Makefile" ]; then
-            echo "::error::${KERNEL_DIR}/Makefile does not exist."
-            exit 1
-          fi
-
-          echo "Kernel source:"
-          realpath "${KERNEL_DIR}"
-
-          echo
-          echo "Git commit:"
-          git log -1 --oneline
-
-          echo
-          echo "Kernel Makefile:"
-          sed -n '1,15p' "${KERNEL_DIR}/Makefile"
+          rm -rf "${OUT_DIR}"
+          mkdir -p "${OUT_DIR}"
 
       # ============================================================
-      # VERIFY KERNEL VERSION
+      # GENERATE DEFCONFIG
       # ============================================================
 
-      - name: Verify kernel 4.19.325
+      - name: Generate kernel configuration
         shell: bash
         run: |
           set -euo pipefail
 
           cd "${KERNEL_DIR}"
 
-          VERSION="$(awk -F'= ' '/^VERSION =/ {print $2}' Makefile)"
-          PATCHLEVEL="$(awk -F'= ' '/^PATCHLEVEL =/ {print $2}' Makefile)"
-          SUBLEVEL="$(awk -F'= ' '/^SUBLEVEL =/ {print $2}' Makefile)"
+          make \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            "${DEFCONFIG}"
 
-          DETECTED="${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
-
-          echo "Detected kernel: ${DETECTED}"
-          echo "Expected kernel: ${KERNEL_VERSION_EXPECTED}"
-
-          if [ "${DETECTED}" != "${KERNEL_VERSION_EXPECTED}" ]; then
-            echo "::error::Wrong kernel version."
-            exit 1
-          fi
-
-          echo "Kernel version OK."
+          make \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            olddefconfig
 
       # ============================================================
-      # VERIFY KIEV DEFCONFIG
+      # VERIFY FINAL CONFIG
       # ============================================================
 
-      - name: Verify kiev defconfig
+      - name: Verify final KSU and SuSFS config
         shell: bash
         run: |
           set -euo pipefail
 
-          DEFCONFIG_PATH="${KERNEL_DIR}/arch/${ARCH}/configs/${DEFCONFIG}"
+          CONFIG="${OUT_DIR}/.config"
 
-          if [ ! -f "${DEFCONFIG_PATH}" ]; then
-            echo "::error::Missing ${DEFCONFIG_PATH}"
-            exit 1
-          fi
-
-          echo "Found:"
-          echo "${DEFCONFIG_PATH}"
-
-          echo
-          echo "Kernel configuration header:"
-          head -n 8 "${DEFCONFIG_PATH}"
-
-      # ============================================================
-      # VERIFY RESUKISU
-      # ============================================================
-
-      - name: Verify ReSukiSU
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_DIR}"
-
-          FOUND=false
-
-          for dir in \
-            drivers/kernelsu \
-            drivers/ksu \
-            KernelSU
-          do
-            if [ -d "${dir}" ]; then
-              echo "Found KernelSU/ReSukiSU tree: ${dir}"
-              FOUND=true
-            fi
-          done
-
-          if [ "${FOUND}" != "true" ]; then
-            echo "::error::ReSukiSU/KernelSU source tree not found."
-            exit 1
-          fi
-
-          echo
-          echo "ReSukiSU source detected."
-
-      # ============================================================
-      # VERIFY SUSFS SOURCE
-      # ============================================================
-
-      - name: Verify SuSFS
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_DIR}"
-
-          echo "Searching for SuSFS source..."
-
-          SUSFS_FOUND=false
-
-          if find . -type f \
-              \( \
-                -name 'susfs.c' \
-                -o -name 'susfs.h' \
-              \) \
-              | grep -q .; then
-
-            SUSFS_FOUND=true
-
-          fi
-
-          if [ "${SUSFS_FOUND}" != "true" ]; then
-            echo "::error::SuSFS source files not found."
-            exit 1
-          fi
-
-          echo "SuSFS source detected."
-
-      # ============================================================
-      # VERIFY MANUAL HOOK
-      # ============================================================
-
-      - name: Verify Manual Hook
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_DIR}"
-
-          echo "Searching Manual Hook implementation..."
-
-          if grep -Rqs \
-            "CONFIG_KSU_MANUAL_HOOK" \
-            drivers/kernelsu \
-            drivers/ksu \
-            KernelSU \
-            2>/dev/null; then
-
-            echo "CONFIG_KSU_MANUAL_HOOK support detected."
-
-          else
-
-            echo "::warning::CONFIG_KSU_MANUAL_HOOK was not found in source tree."
-
-          fi
-
-          if [ -f "../kernelsu_manual_hooks.patch" ]; then
-            echo
-            echo "Manual Hook patch exists:"
-            echo "../kernelsu_manual_hooks.patch"
-            echo
-            echo "It will NOT be applied automatically."
-          fi
-
-      # ============================================================
-      # VERIFY DEFCONFIG OPTIONS
-      # ============================================================
-
-      - name: Verify ReSukiSU and SuSFS configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${KERNEL_DIR}/arch/${ARCH}/configs/${DEFCONFIG}"
+          test -f "${CONFIG}"
 
           echo
           echo "=========================================="
-          echo "ReSukiSU / SuSFS configuration"
+          echo "FINAL KSU / SUSFS CONFIG"
           echo "=========================================="
 
           grep -E \
@@ -330,109 +361,44 @@ jobs:
           "
 
           while IFS= read -r option; do
-
             [ -z "${option}" ] && continue
 
             if ! grep -q "^${option}$" "${CONFIG}"; then
-              echo "::error::Missing configuration: ${option}"
+              echo "::error::Missing: ${option}"
               exit 1
             fi
 
             echo "OK: ${option}"
-
           done <<< "${REQUIRED}"
 
           echo
-          echo "ReSukiSU + SuSFS configuration validated."
+          echo "ReSukiSU + SuSFS configuration OK."
 
       # ============================================================
-      # PREPARE OUTPUT
+      # DOWNLOAD LINEAGEOS BOOT
       # ============================================================
 
-      - name: Prepare build directory
+      - name: Download LineageOS kiev boot.img
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf "${OUT_DIR}"
+          mkdir -p boot
 
-          mkdir -p "${OUT_DIR}"
+          curl \
+            -L \
+            --fail \
+            --retry 5 \
+            --retry-delay 5 \
+            -o boot/boot.img \
+            "${BOOT_URL}"
 
-          echo "Output directory:"
-          realpath "${OUT_DIR}"
+          test -s boot/boot.img
 
-      # ============================================================
-      # GENERATE .CONFIG
-      # ============================================================
+          echo "boot.img downloaded:"
+          ls -lh boot/boot.img
 
-      - name: Generate kernel configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_DIR}"
-
-          make \
-            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            "${DEFCONFIG}"
-
-          make \
-            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            olddefconfig
-
-      # ============================================================
-      # VERIFY FINAL .CONFIG
-      # ============================================================
-
-      - name: Verify final .config
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${OUT_DIR}/.config"
-
-          if [ ! -f "${CONFIG}" ]; then
-            echo "::error::Generated .config not found."
-            exit 1
-          fi
-
-          echo
-          echo "=========================================="
-          echo "FINAL CONFIGURATION"
-          echo "=========================================="
-
-          grep -E \
-            '^(CONFIG_KSU|CONFIG_SUKISU|CONFIG_KSU_SUSFS)' \
-            "${CONFIG}" || true
-
-          echo
-          echo "Checking required options..."
-
-          REQUIRED="
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          "
-
-          while IFS= read -r option; do
-
-            [ -z "${option}" ] && continue
-
-            if ! grep -q "^${option}$" "${CONFIG}"; then
-              echo "::error::Final .config is missing: ${option}"
-              exit 1
-            fi
-
-            echo "OK: ${option}"
-
-          done <<< "${REQUIRED}"
+          file boot/boot.img
 
       # ============================================================
       # BUILD KERNEL
@@ -449,17 +415,16 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "BUILD"
+          echo "BUILDING KERNEL"
           echo "=========================================="
 
-          echo "CPU threads: $(nproc)"
-          echo "Architecture: ${ARCH}"
-          echo "Device: ${DEVICE}"
-          echo "Kernel: ${KERNEL_VERSION_EXPECTED}"
-          echo "Compiler: Clang 18"
-          echo "Root: ReSukiSU"
-          echo "Hook: Manual Hook"
-          echo "SuSFS: enabled"
+          echo "Device:     ${DEVICE}"
+          echo "Kernel:     ${EXPECTED_KERNEL}"
+          echo "Arch:       ${ARCH}"
+          echo "Defconfig:  ${DEFCONFIG}"
+          echo "Root:       ReSukiSU"
+          echo "Hook:       Manual Hook"
+          echo "SuSFS:      enabled"
 
           make \
             -j"$(nproc)" \
@@ -475,7 +440,7 @@ jobs:
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
       # ============================================================
-      # DTBS
+      # BUILD DTBS
       # ============================================================
 
       - name: Build DTBs
@@ -494,70 +459,60 @@ jobs:
             dtbs
 
       # ============================================================
-      # FIND IMAGE
+      # LOCATE IMAGE
       # ============================================================
 
-      - name: Locate kernel image
+      - name: Locate kernel Image
         shell: bash
         run: |
           set -euo pipefail
 
           BOOT_DIR="${OUT_DIR}/arch/${ARCH}/boot"
 
-          echo "Boot directory:"
-          ls -lah "${BOOT_DIR}"
+          echo "=== BOOT DIRECTORY ==="
+          find "${BOOT_DIR}" -maxdepth 3 -type f -print | sort
 
           IMAGE=""
 
-          for file in \
+          for candidate in \
             Image.gz-dtb \
             Image.lz4-dtb \
             Image.gz \
             Image.lz4 \
             Image
           do
-            if [ -f "${BOOT_DIR}/${file}" ]; then
-              IMAGE="${BOOT_DIR}/${file}"
+            if [ -f "${BOOT_DIR}/${candidate}" ]; then
+              IMAGE="${BOOT_DIR}/${candidate}"
               break
             fi
           done
 
           if [ -z "${IMAGE}" ]; then
-            echo "::error::No kernel Image found."
-
-            find "${OUT_DIR}/arch/${ARCH}/boot" \
-              -type f \
-              -maxdepth 3 \
-              -print
-
+            echo "::error::Kernel Image not found."
             exit 1
           fi
 
           echo "KERNEL_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
           echo
-          echo "Selected kernel image:"
+          echo "Selected image:"
           ls -lh "${IMAGE}"
 
       # ============================================================
       # VERIFY VMLINUX
       # ============================================================
 
-      - name: Verify vmlinux
+      - name: Verify kernel symbols
         shell: bash
         run: |
           set -euo pipefail
 
           if [ ! -f "${OUT_DIR}/vmlinux" ]; then
-            echo "::warning::vmlinux was not generated."
+            echo "::warning::vmlinux not found."
             exit 0
           fi
 
-          echo "vmlinux:"
-          ls -lh "${OUT_DIR}/vmlinux"
-
-          echo
-          echo "ReSukiSU/SuSFS symbols:"
+          echo "Checking ReSukiSU / SuSFS symbols..."
 
           nm "${OUT_DIR}/vmlinux" 2>/dev/null \
             | grep -E 'ksu_|susfs_' \
@@ -565,19 +520,10 @@ jobs:
             || true
 
       # ============================================================
-      # CCACHE STATS
-      # ============================================================
-
-      - name: ccache statistics
-        shell: bash
-        run: |
-          ccache --show-stats || true
-
-      # ============================================================
       # PACKAGE
       # ============================================================
 
-      - name: Package artifacts
+      - name: Package build
         shell: bash
         run: |
           set -euo pipefail
@@ -596,10 +542,14 @@ jobs:
           fi
 
           if [ -d "${OUT_DIR}/arch/${ARCH}/boot/dts" ]; then
-            tar -C "${OUT_DIR}/arch/${ARCH}/boot" \
+            tar \
+              -C "${OUT_DIR}/arch/${ARCH}/boot" \
               -czf artifacts/dtb.tar.gz \
               dts
           fi
+
+          cp boot/boot.img \
+            artifacts/lineage-kiev-20260809-original-boot.img
 
           cat > artifacts/build-info.txt <<EOF
           Device: Motorola One 5G Ace
@@ -608,14 +558,15 @@ jobs:
           Android: 16
           LineageOS: 23.2
           Architecture: arm64
+          Defconfig: vendor/lito-perf_defconfig
           Root: ReSukiSU
           Hook: Manual Hook
           SuSFS: enabled
-          Compiler: Clang 18
+          Boot source: LineageOS 2026-08-09
           Repository: Albanel22/Copilote
-          Branch: ResuKisu+SusFS
+          Kernel repository: LineageOS/android_kernel_motorola_sm8250
+          Kernel branch: lineage-23.2
           Commit: ${GITHUB_SHA}
-          Run: ${GITHUB_RUN_NUMBER}
           EOF
 
           zip -r \
@@ -635,3 +586,12 @@ jobs:
             kiev-4.19.325-ReSukiSU-SuSFS-${{ github.run_number }}.zip
           if-no-files-found: error
           retention-days: 14
+
+      # ============================================================
+      # CCACHE STATS
+      # ============================================================
+
+      - name: ccache statistics
+        shell: bash
+        run: |
+          ccache --show-stats || true
