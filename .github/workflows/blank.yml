@@ -1,4 +1,4 @@
- name: Kernel CI - ReSukiSU + SuSFS 4.19
+name: Kernel CI - ReSukiSU + SuSFS 4.19
 
 on:
   workflow_dispatch:
