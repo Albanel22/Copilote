@@ -131,6 +131,7 @@ jobs:
             bison \
             build-essential \
             ccache \
+            clang \
             cpio \
             curl \
             device-tree-compiler \
@@ -141,6 +142,8 @@ jobs:
             libelf-dev \
             libncurses-dev \
             libssl-dev \
+            lld \
+            llvm \
             lz4 \
             make \
             python3 \
