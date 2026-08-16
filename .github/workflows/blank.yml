@@ -31,7 +31,6 @@ env:
   DEFCONFIG: lito-perf_defconfig
 
   KERNEL_IMAGE_NAME: Image.gz-dtb
-
   KERNEL_VERSION: "4.19"
 
   # ReSukiSU
@@ -255,12 +254,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/lib/llvm-18/bin:${PATH}"
+          if [ -d "/usr/lib/llvm-18/bin" ]; then
+            echo "/usr/lib/llvm-18/bin" >> "${GITHUB_PATH}"
+            export PATH="/usr/lib/llvm-18/bin:${PATH}"
+          fi
 
           echo "PATH=${PATH}"
 
           if command -v clang >/dev/null 2>&1; then
             clang --version | head -n 2
+          else
+            echo "::error::clang not found."
+            exit 1
           fi
 
           aarch64-linux-gnu-gcc --version | head -n 1
@@ -292,8 +297,13 @@ jobs:
           echo "===== available patch tools ====="
 
           find . -maxdepth 3 \
-            \( -name '*hook*.sh' -o -name 'susfs_patch_to_4.19.patch' \) \
-            -print | sort
+            \( \
+              -name '*hook*.sh' \
+              -o \
+              -name 'susfs_patch_to_4.19.patch' \
+            \) \
+            -print \
+            | sort
 
 
       # ============================================================
@@ -386,7 +396,9 @@ jobs:
 
           test -f "${CONFIG_FILE}" || {
             echo "::error::Defconfig not found: ${CONFIG_FILE}"
-            find arch/arm64/configs -name '*lito*' -o -name '*perf*'
+            find arch/arm64/configs \
+              \( -name '*lito*' -o -name '*perf*' \) \
+              -print
             exit 1
           }
 
@@ -409,39 +421,15 @@ jobs:
 
 
       # ============================================================
-      # SUSFS INLINE HOOKS
-      # ============================================================
-
-      - name: Apply SuSFS inline hook patches
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_PATH}"
-
-          SCRIPT="${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches/susfs_inline_hook_patches.sh"
-
-          test -f "${SCRIPT}" || {
-            echo "::error::susfs_inline_hook_patches.sh not found."
-            find "${WORKSPACE}/NonGKI_Kernel_Build_2nd" \
-              -name 'susfs_inline_hook_patches.sh' \
-              -print
-            exit 1
-          }
-
-          cp "${SCRIPT}" .
-
-          chmod +x susfs_inline_hook_patches.sh
-
-          bash susfs_inline_hook_patches.sh
-
-          rm -f susfs_inline_hook_patches.sh
-
-          echo "===== Inline hooks complete ====="
-
-
-      # ============================================================
       # SUSFS PATCH
+      #
+      # IMPORTANT:
+      # The 4.19 SuSFS patch MUST be applied BEFORE
+      # susfs_inline_hook_patches.sh.
+      #
+      # Diagnostic 1113 proved that applying inline hooks first
+      # modified fs/namespace.c and fs/proc/task_mmu.c and caused
+      # the official patch to generate rejected hunks.
       # ============================================================
 
       - name: Apply SuSFS 4.19 patch
@@ -455,17 +443,34 @@ jobs:
 
           if [ ! -f "${PATCH_FILE}" ]; then
             echo "::error::SuSFS 4.19 patch not found."
+
             find "${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches" \
               -iname '*susfs*4.19*.patch' \
               -print
+
             exit 1
           fi
+
+          echo "===== SuSFS source state before patch ====="
+
+          if grep -q "CONFIG_KSU_SUSFS" fs/namespace.c 2>/dev/null; then
+            echo "::error::fs/namespace.c already contains SuSFS changes."
+            exit 1
+          fi
+
+          if grep -q "CONFIG_KSU_SUSFS" fs/proc/task_mmu.c 2>/dev/null; then
+            echo "::error::fs/proc/task_mmu.c already contains SuSFS changes."
+            exit 1
+          fi
+
+          echo "Source state is clean for official SuSFS patch."
 
           cp -a "${KERNEL_PATH}" \
             "${WORKSPACE}/kernel-before-susfs"
 
           cp "${PATCH_FILE}" .
 
+          echo
           echo "===== Applying official NonGKI SuSFS 4.19 patch ====="
 
           set +e
@@ -480,302 +485,76 @@ jobs:
 
           set -e
 
-          echo "patch exit code: ${PATCH_STATUS}"
-
           echo
-          echo "===== Automatic patch result ====="
+          echo "patch exit code: ${PATCH_STATUS}"
 
           REJECTS="$(find . -type f -name '*.rej' -print)"
 
           if [ -n "${REJECTS}" ]; then
-            echo "Rejected hunks detected."
+            echo "::error::SuSFS produced rejected hunks."
+            echo
+            echo "===== REJECTED FILES ====="
             echo "${REJECTS}"
-          fi
-
-
-          # ========================================================
-          # MANUAL REPAIR
-          #
-          # The official NonGKI patch is known to miss these
-          # contexts on this Motorola SM8250 4.19 source:
-          #
-          #   fs/namespace.c
-          #   fs/proc/task_mmu.c
-          #
-          # We repair ONLY the exact missing SuSFS hunks reported
-          # by the previous build.
-          # ========================================================
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          root = Path(".")
-
-
-          def fail(msg):
-              print(f"::error::{msg}")
-              raise SystemExit(1)
-
-
-          def insert_once(path, anchor, block, description):
-              p = root / path
-              text = p.read_text()
-
-              if block.strip() in text:
-                  print(f"[OK] Already present: {description}")
-                  return
-
-              if anchor not in text:
-                  fail(
-                      f"Anchor not found for {description}: "
-                      f"{path} -> {anchor!r}"
-                  )
-
-              text = text.replace(anchor, anchor + block, 1)
-              p.write_text(text)
-
-              print(f"[OK] Applied: {description}")
-
-
-          def replace_once(path, old, new, description):
-              p = root / path
-              text = p.read_text()
-
-              if new.strip() in text:
-                  print(f"[OK] Already present: {description}")
-                  return
-
-              if old not in text:
-                  fail(
-                      f"Anchor not found for {description}: "
-                      f"{path}"
-                  )
-
-              text = text.replace(old, new, 1)
-              p.write_text(text)
-
-              print(f"[OK] Applied: {description}")
-
-
-          # ========================================================
-          # fs/namespace.c
-          # ========================================================
-
-          namespace_include_anchor = (
-              "#include <linux/bootmem.h>\n"
-              "#include <linux/task_work.h>\n"
-              "#include <linux/sched/task.h>\n"
-          )
-
-          namespace_include_block = (
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-              "#include <linux/susfs_def.h>\n"
-              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-          )
-
-          insert_once(
-              "fs/namespace.c",
-              namespace_include_anchor,
-              namespace_include_block,
-              "SuSFS namespace include"
-          )
-
-
-          namespace_extern_anchor = (
-              '#include "pnode.h"\n'
-              '#include "internal.h"\n'
-          )
-
-          namespace_extern_block = (
-              "\n"
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-              "extern bool susfs_is_current_ksu_domain(void);\n"
-              "extern struct static_key_true "
-              "susfs_is_sdcard_android_data_not_decrypted;\n"
-              "\n"
-              "#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */\n"
-              "\n"
-              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-          )
-
-          insert_once(
-              "fs/namespace.c",
-              namespace_extern_anchor,
-              namespace_extern_block,
-              "SuSFS namespace extern declarations"
-          )
-
-
-          # ========================================================
-          # fs/namespace.c - vfs_kern_mount()
-          # ========================================================
-
-          namespace_mount_anchor = (
-              "\tif (!type)\n"
-              "\t\treturn ERR_PTR(-ENODEV);\n"
-              "\n"
-              "\tmnt = alloc_vfsmnt(name);\n"
-          )
-
-          namespace_mount_block = (
-              "\tif (!type)\n"
-              "\t\treturn ERR_PTR(-ENODEV);\n"
-              "\n"
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-              "\t// - We will just stop checking for ksu process if "
-              "/sdcard/Android is accessible,\n"
-              "\t//   for the sake of performance\n"
-              "\tif (static_branch_unlikely("
-              "&susfs_is_sdcard_android_data_not_decrypted)) {\n"
-              "\t\tif (susfs_is_current_ksu_domain()) {\n"
-              '\t\t\tmnt = susfs_alloc_non_unshare_ksu_vfsmnt('
-              '"none" : name);\n'
-              "\t\t\tgoto bypass_orig_flow;\n"
-              "\t\t}\n"
-              "\t}\n"
-              "#endif\n"
-              "\n"
-              "\tmnt = alloc_vfsmnt(name);\n"
-              "\n"
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
-              "bypass_orig_flow:\n"
-              "#endif\n"
-          )
-
-          replace_once(
-              "fs/namespace.c",
-              namespace_mount_anchor,
-              namespace_mount_block,
-              "SuSFS vfs_kern_mount hook"
-          )
-
-
-          # ========================================================
-          # fs/proc/task_mmu.c - include
-          # ========================================================
-
-          task_mmu_include_anchor = (
-              "#include <linux/pkeys.h>\n"
-              "#include <linux/mm_inline.h>\n"
-              "#include <linux/ctype.h>\n"
-          )
-
-          task_mmu_include_block = (
-              "#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || "
-              "defined(CONFIG_KSU_SUSFS_SUS_MAP) || "
-              "defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n"
-              "#include <linux/susfs_def.h>\n"
-              "#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || "
-              "defined(CONFIG_KSU_SUSFS_SUS_MAP) || "
-              "defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n"
-          )
-
-          insert_once(
-              "fs/proc/task_mmu.c",
-              task_mmu_include_anchor,
-              task_mmu_include_block,
-              "SuSFS task_mmu include"
-          )
-
-
-          # ========================================================
-          # fs/proc/task_mmu.c - pagemap_read()
-          # ========================================================
-
-          task_mmu_anchor = (
-              "\t\tret = down_read_killable(&mm->mmap_sem);\n"
-              "\t\tif (ret)\n"
-              "\t\t\tgoto out_free;\n"
-              "\t\tret = walk_page_range(start_vaddr, end, "
-              "&pagemap_walk);\n"
-          )
-
-          task_mmu_replacement = (
-              "\t\tret = down_read_killable(&mm->mmap_sem);\n"
-              "\t\tif (ret)\n"
-              "\t\t\tgoto out_free;\n"
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
-              "\t\tvma = find_vma(mm, start_vaddr);\n"
-              "\t\tif (vma && vma->vm_file && "
-              "SUSFS_IS_INODE_SUS_MAP("
-              "file_inode(vma->vm_file)))\n"
-              "\t\t\tgoto bypass_orig_flow;\n"
-              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
-              "\t\tret = walk_page_range(start_vaddr, end, "
-              "&pagemap_walk);\n"
-              "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
-              "bypass_orig_flow:\n"
-              "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
-          )
-
-          replace_once(
-              "fs/proc/task_mmu.c",
-              task_mmu_anchor,
-              task_mmu_replacement,
-              "SuSFS SUS_MAP pagemap hook"
-          )
-
-
-          print()
-          print("===== Manual SuSFS repair complete =====")
-          PY
-
-
-          # ========================================================
-          # REMOVE REJECT FILES ONLY AFTER SUCCESSFUL REPAIR
-          # ========================================================
-
-          echo
-          echo "===== Verify repaired SuSFS files ====="
-
-          if [ -f fs/namespace.c.rej ]; then
-            echo "::error::fs/namespace.c still contains a rejected patch."
-            cat fs/namespace.c.rej
-            exit 1
-          fi
-
-          if [ -f fs/proc/task_mmu.c.rej ]; then
-            echo "::error::fs/proc/task_mmu.c still contains a rejected patch."
-            cat fs/proc/task_mmu.c.rej
-            exit 1
-          fi
-
-
-          # Any other reject is a hard failure.
-          OTHER_REJECTS="$(
-            find . \
-              -type f \
-              -name '*.rej' \
-              -print
-          )"
-
-          if [ -n "${OTHER_REJECTS}" ]; then
-            echo "::error::Unexpected SuSFS rejected hunks remain."
-            echo "${OTHER_REJECTS}"
+            echo
+            echo "===== REJECT CONTENT ====="
 
             while IFS= read -r rej; do
               echo
               echo "----- ${rej} -----"
               cat "${rej}"
-            done <<< "${OTHER_REJECTS}"
+            done <<< "${REJECTS}"
 
             exit 1
           fi
 
-
-          # The automatic patch is allowed to return 1 ONLY when
-          # the known namespace/task_mmu hunks failed and were
-          # repaired above.
           if [ "${PATCH_STATUS}" -ne 0 ]; then
-            echo "Automatic patch returned ${PATCH_STATUS}."
-            echo "Known rejected hunks were repaired successfully."
+            echo "::error::SuSFS 4.19 patch failed."
+            exit "${PATCH_STATUS}"
           fi
-
 
           rm -f susfs_patch_to_4.19.patch
 
           echo
-          echo "===== SuSFS patch applied successfully ====="
+          echo "===== SuSFS 4.19 patch applied successfully ====="
+
+
+      # ============================================================
+      # SUSFS INLINE HOOKS
+      #
+      # IMPORTANT:
+      # This step is intentionally AFTER the main SuSFS 4.19 patch.
+      # ============================================================
+
+      - name: Apply SuSFS inline hook patches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_PATH}"
+
+          SCRIPT="${WORKSPACE}/NonGKI_Kernel_Build_2nd/Patches/susfs_inline_hook_patches.sh"
+
+          test -f "${SCRIPT}" || {
+            echo "::error::susfs_inline_hook_patches.sh not found."
+
+            find "${WORKSPACE}/NonGKI_Kernel_Build_2nd" \
+              -name 'susfs_inline_hook_patches.sh' \
+              -print
+
+            exit 1
+          }
+
+          cp "${SCRIPT}" .
+
+          chmod +x susfs_inline_hook_patches.sh
+
+          echo "===== Applying SuSFS inline hooks ====="
+
+          bash susfs_inline_hook_patches.sh
+
+          rm -f susfs_inline_hook_patches.sh
+
+          echo "===== Inline hooks complete ====="
 
 
       # ============================================================
@@ -850,24 +629,6 @@ jobs:
             | head -n 50 || true
 
           echo
-          echo "===== SuSFS source verification ====="
-
-          test -f fs/susfs.c || {
-            echo "::error::fs/susfs.c is missing."
-            exit 1
-          }
-
-          test -f include/linux/susfs.h || {
-            echo "::error::include/linux/susfs.h is missing."
-            exit 1
-          }
-
-          test -f include/linux/susfs_def.h || {
-            echo "::error::include/linux/susfs_def.h is missing."
-            exit 1
-          }
-
-          echo
           echo "===== Reject files ====="
 
           if find . \
@@ -887,7 +648,13 @@ jobs:
           fi
 
           echo
-          echo "===== SuSFS source integration OK ====="
+          echo "===== Required SuSFS files ====="
+
+          test -f fs/susfs.c
+          test -f include/linux/susfs.h
+          test -f include/linux/susfs_def.h
+
+          echo "SuSFS source files verified."
 
 
       # ============================================================
@@ -1042,7 +809,7 @@ jobs:
           path: |
             ${{ env.KERNEL_PATH }}/**/*.rej
             ${{ env.KERNEL_PATH }}/**/*.orig
-            ${{ env.KERNEL_PATH }}/.config
+            ${{ env.BUILD_DIR }}/.config
             ${{ env.KERNEL_PATH }}/Makefile
           if-no-files-found: ignore
           compression-level: 0
@@ -1070,5 +837,6 @@ jobs:
             echo "| Hook | manual + SuSFS inline |"
             echo "| SuSFS | enabled |"
             echo "| Image | Image.gz-dtb |"
+            echo "| SuSFS patch order | patch → inline hooks |"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
