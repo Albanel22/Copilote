@@ -7,7 +7,6 @@ permissions:
   contents: read
 
 env:
-  env:
   KERNEL_REPO: LineageOS/android_kernel_motorola_sm8250
   KERNEL_BRANCH: lineage-23.2
 
@@ -65,6 +64,7 @@ jobs:
             libssl-dev \
             lld \
             llvm \
+            perl \
             python3 \
             rsync \
             unzip \
@@ -111,14 +111,16 @@ jobs:
           echo "JackA1ltman tools verified."
 
       # ==========================================================
-      # 5. Clean old KernelSU integration
+      # 5. Clean old KernelSU / SuSFS integration
       # ==========================================================
       - name: Clean previous KernelSU integration
         run: |
           set -eux
 
-          if [ -d "${KERNEL_PATH}/KernelSU" ]; then
-            echo "Existing KernelSU directory detected."
+          if [ -d "${KERNEL_PATH}/KernelSU" ] || \
+             [ -L "${KERNEL_PATH}/drivers/kernelsu" ]; then
+
+            echo "Existing KernelSU integration detected."
 
             cp \
               non_gki_tools/Bin/clean_hook.sh \
@@ -132,22 +134,58 @@ jobs:
             )
 
             rm -f "${KERNEL_PATH}/clean_hook.sh"
+          else
+            echo "No previous KernelSU integration detected."
           fi
 
       # ==========================================================
-      # 6. Install current ReSukiSU
+      # 6. Install CURRENT ReSukiSU
+      #
+      # IMPORTANT:
+      # ReSukiSU setup.sh uses pwd as GKI_ROOT and expects
+      # drivers/ directly under that directory.
+      #
+      # Therefore the script MUST run inside kernel_src.
       # ==========================================================
-      - name: Install ReSukiSU
+      - name: Install current ReSukiSU
+        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -eux
 
-          curl -LSs "${RESUKISU_SETUP}" \
+          echo "Current directory:"
+          pwd
+
+          echo "Checking kernel tree:"
+          test -d drivers
+          test -f drivers/Makefile
+          test -f drivers/Kconfig
+          test -f Makefile
+
+          echo "Installing ReSukiSU from:"
+          echo "${RESUKISU_SETUP}"
+
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "${RESUKISU_SETUP}" \
             | bash -s main
 
-          test -d "${KERNEL_PATH}/KernelSU"
+          echo "Verifying ReSukiSU installation..."
 
-          test -f "${KERNEL_PATH}/KernelSU/kernel/Kconfig"
-          test -f "${KERNEL_PATH}/KernelSU/kernel/Makefile"
+          test -d KernelSU
+          test -d drivers/kernelsu
+
+          test -f KernelSU/kernel/Kconfig
+          test -f KernelSU/kernel/Makefile
+
+          test -L drivers/kernelsu
+
+          echo "ReSukiSU installation successful."
+
+          ls -ld KernelSU
+          ls -l drivers/kernelsu
 
       # ==========================================================
       # 7. Apply lito-perf configuration
@@ -165,11 +203,13 @@ jobs:
           from pathlib import Path
 
           path = Path("arch/arm64/configs/vendor/lito-perf_defconfig")
+
           lines = path.read_text().splitlines()
 
           configs = {
               "CONFIG_KSU": "y",
               "CONFIG_KSU_MANUAL_HOOK": "y",
+
               "CONFIG_KALLSYMS": "y",
               "CONFIG_KALLSYMS_ALL": "y",
 
@@ -195,6 +235,7 @@ jobs:
 
               if line.startswith("# CONFIG_") and line.endswith(" is not set"):
                   key = line[2:-len(" is not set")]
+
                   if key in configs:
                       continue
 
@@ -205,6 +246,11 @@ jobs:
 
           path.write_text("\n".join(result) + "\n")
           PY
+
+          echo
+          echo "=========================================="
+          echo "Defconfig configuration"
+          echo "=========================================="
 
           grep -E \
             '^(CONFIG_KSU|CONFIG_KALLSYMS)' \
@@ -218,9 +264,16 @@ jobs:
         run: |
           set -eux
 
+          PATCH_FILE="${GITHUB_WORKSPACE}/non_gki_tools/Patches/Patch/susfs_patch_to_4.19.patch"
+
+          test -f "${PATCH_FILE}"
+
           cp \
-            "${GITHUB_WORKSPACE}/non_gki_tools/Patches/Patch/susfs_patch_to_4.19.patch" \
-            .
+            "${PATCH_FILE}" \
+            susfs_patch_to_4.19.patch
+
+          echo "Applying:"
+          echo "${PATCH_FILE}"
 
           patch \
             --batch \
@@ -231,7 +284,7 @@ jobs:
 
           rm -f susfs_patch_to_4.19.patch
 
-          echo "SuSFS 4.19 patch applied."
+          echo "SuSFS 4.19 patch applied successfully."
 
       # ==========================================================
       # 9. Apply JackA1ltman inline hooks
@@ -241,9 +294,13 @@ jobs:
         run: |
           set -eux
 
+          PATCH_SCRIPT="${GITHUB_WORKSPACE}/non_gki_tools/Patches/susfs_inline_hook_patches.sh"
+
+          test -f "${PATCH_SCRIPT}"
+
           cp \
-            "${GITHUB_WORKSPACE}/non_gki_tools/Patches/susfs_inline_hook_patches.sh" \
-            ./susfs_inline_hook_patches.sh
+            "${PATCH_SCRIPT}" \
+            susfs_inline_hook_patches.sh
 
           chmod +x susfs_inline_hook_patches.sh
 
@@ -251,12 +308,18 @@ jobs:
 
           rm -f susfs_inline_hook_patches.sh
 
+          echo "SuSFS inline hooks applied."
+
       # ==========================================================
       # 10. Add ReSukiSU stat return hooks
       #
-      # ReSukiSU explicitly requires:
+      # Required by current ReSukiSU manual integration:
+      #
       #   ksu_handle_newfstat_ret
       #   ksu_handle_fstat64_ret
+      #
+      # These hooks are specifically required for the stat return
+      # path on legacy kernels.
       # ==========================================================
       - name: Add ReSukiSU stat return hooks
         working-directory: ${{ env.KERNEL_PATH }}
@@ -274,6 +337,7 @@ jobs:
           extern void ksu_handle_newfstat_ret(
               unsigned int *fd,
               struct stat __user **statbuf_ptr);
+
           #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
           extern void ksu_handle_fstat64_ret(
               unsigned long *fd,
@@ -282,18 +346,27 @@ jobs:
           #endif
           '''
 
+          # --------------------------------------------------------
+          # Declarations
+          # --------------------------------------------------------
+
           if "ksu_handle_newfstat_ret" not in text:
+
               anchors = [
                   "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
                   "#if !defined(__ARCH_WANT_STAT64)",
                   "SYSCALL_DEFINE4(newfstatat",
               ]
 
-              anchor = next((a for a in anchors if a in text), None)
+              anchor = next(
+                  (a for a in anchors if a in text),
+                  None
+              )
 
               if anchor is None:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: cannot locate stat hook declaration anchor"
+                      "ERROR: fs/stat.c: "
+                      "cannot locate stat hook declaration anchor"
                   )
 
               text = text.replace(
@@ -301,6 +374,10 @@ jobs:
                   declaration + "\n" + anchor,
                   1
               )
+
+          # --------------------------------------------------------
+          # newfstat return hook
+          # --------------------------------------------------------
 
           if "ksu_handle_newfstat_ret(&fd, &statbuf);" not in text:
 
@@ -310,7 +387,8 @@ jobs:
 
               if start == -1:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: newfstat syscall not found"
+                      "ERROR: fs/stat.c: "
+                      "SYSCALL_DEFINE2(newfstat not found"
                   )
 
               end = text.find(
@@ -320,36 +398,49 @@ jobs:
 
               if end == -1:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: end of newfstat not found"
+                      "ERROR: fs/stat.c: "
+                      "end of newfstat function not found"
                   )
 
               function = text[start:end]
 
               if "cp_new_stat(&stat, statbuf)" not in function:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: unexpected newfstat implementation"
+                      "ERROR: fs/stat.c: "
+                      "unexpected newfstat implementation"
+                  )
+
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_newfstat_ret(&fd, &statbuf);
+          #endif
+          """
+
+              if "\treturn error;" not in function:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: "
+                      "newfstat return statement not found"
                   )
 
               function = function.replace(
                   "\treturn error;",
-                  """#ifdef CONFIG_KSU_MANUAL_HOOK
-          \tksu_handle_newfstat_ret(&fd, &statbuf);
-          #endif
-          \treturn error;""",
+                  hook + "\treturn error;",
                   1
               )
 
               text = text[:start] + function + text[end:]
 
           # --------------------------------------------------------
-          # fstat64 is optional and only added when the syscall
-          # actually exists in this kernel.
+          # fstat64 return hook
+          #
+          # Optional: only added when this syscall exists.
           # --------------------------------------------------------
 
           if (
               "SYSCALL_DEFINE2(fstat64" in text
-              and "ksu_handle_fstat64_ret(&fd, &statbuf);" not in text
+              and
+              "ksu_handle_fstat64_ret(&fd, &statbuf);" not in text
           ):
+
               start = text.find(
                   "SYSCALL_DEFINE2(fstat64"
               )
@@ -361,22 +452,32 @@ jobs:
 
               if start == -1 or end == -1:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: fstat64 implementation not found"
+                      "ERROR: fs/stat.c: "
+                      "fstat64 implementation not found"
                   )
 
               function = text[start:end]
 
               if "cp_new_stat64(&stat, statbuf)" not in function:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: unexpected fstat64 implementation"
+                      "ERROR: fs/stat.c: "
+                      "unexpected fstat64 implementation"
+                  )
+
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_fstat64_ret(&fd, &statbuf);
+          #endif
+          """
+
+              if "\treturn error;" not in function:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: "
+                      "fstat64 return statement not found"
                   )
 
               function = function.replace(
                   "\treturn error;",
-                  """#ifdef CONFIG_KSU_MANUAL_HOOK
-          \tksu_handle_fstat64_ret(&fd, &statbuf);
-          #endif
-          \treturn error;""",
+                  hook + "\treturn error;",
                   1
               )
 
@@ -385,57 +486,97 @@ jobs:
           path.write_text(text)
           PY
 
-          grep -n "ksu_handle_newfstat_ret" fs/stat.c
+          echo
+          echo "=========================================="
+          echo "Checking stat return hooks"
+          echo "=========================================="
+
+          grep -n \
+            "ksu_handle_newfstat_ret" \
+            fs/stat.c
 
           if grep -q "SYSCALL_DEFINE2(fstat64" fs/stat.c; then
-            grep -n "ksu_handle_fstat64_ret" fs/stat.c || true
+            grep -n \
+              "ksu_handle_fstat64_ret" \
+              fs/stat.c || true
           fi
 
       # ==========================================================
-      # 11. Verify manual hooks before compiling
+      # 11. Verify ReSukiSU manual hooks
       # ==========================================================
       - name: Verify ReSukiSU manual hooks
         working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -eux
 
-          echo "Checking required ReSukiSU hooks..."
+          echo "=========================================="
+          echo "Checking required ReSukiSU hooks"
+          echo "=========================================="
 
-          grep -q "ksu_handle_execveat" fs/exec.c
-          grep -q "ksu_handle_faccessat" fs/open.c
-          grep -q "ksu_handle_stat" fs/stat.c
-          grep -q "ksu_handle_newfstat_ret" fs/stat.c
-          grep -q "ksu_handle_sys_reboot" kernel/reboot.c
+          grep -q \
+            "ksu_handle_execveat" \
+            fs/exec.c
 
-          if ! grep -q "ksu_handle_setresuid" kernel/sys.c; then
-            echo "::error::ksu_handle_setresuid hook missing."
-            exit 1
-          fi
+          grep -q \
+            "ksu_handle_faccessat" \
+            fs/open.c
 
-          if ! grep -q "ksu_handle_sys_read" fs/read_write.c; then
-            echo "::error::ksu_handle_sys_read hook missing."
-            exit 1
-          fi
+          grep -q \
+            "ksu_handle_stat" \
+            fs/stat.c
 
-          if ! grep -q "ksu_handle_input_handle_event" drivers/input/input.c; then
-            echo "::error::ksu_handle_input_handle_event hook missing."
-            exit 1
-          fi
+          grep -q \
+            "ksu_handle_newfstat_ret" \
+            fs/stat.c
 
-          echo "Required manual hooks detected."
+          grep -q \
+            "ksu_handle_sys_reboot" \
+            kernel/reboot.c
+
+          grep -q \
+            "ksu_handle_setresuid" \
+            kernel/sys.c
+
+          grep -q \
+            "ksu_handle_sys_read" \
+            fs/read_write.c
+
+          grep -q \
+            "ksu_handle_input_handle_event" \
+            drivers/input/input.c
+
+          echo
+          echo "All required ReSukiSU manual hooks detected."
 
       # ==========================================================
-      # 12. Prepare build
+      # 12. Verify SuSFS files
+      # ==========================================================
+      - name: Verify SuSFS source integration
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -eux
+
+          test -f fs/susfs.c
+          test -f include/linux/susfs.h
+          test -f include/linux/susfs_def.h
+
+          grep -q "CONFIG_KSU_SUSFS" fs/Makefile
+
+          echo "SuSFS source integration verified."
+
+      # ==========================================================
+      # 13. Prepare build directory
       # ==========================================================
       - name: Prepare build directory
         run: |
           set -eux
 
           rm -rf "${BUILD_DIR}"
+
           mkdir -p "${BUILD_DIR}"
 
       # ==========================================================
-      # 13. Generate defconfig
+      # 14. Generate defconfig
       # ==========================================================
       - name: Configure kernel
         working-directory: ${{ env.KERNEL_PATH }}
@@ -445,12 +586,13 @@ jobs:
           make \
             O="${GITHUB_WORKSPACE}/${BUILD_DIR}" \
             ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             "${DEFCONFIG}"
 
       # ==========================================================
-      # 14. Verify final configuration
+      # 15. Verify final configuration
       # ==========================================================
       - name: Verify final configuration
         run: |
@@ -478,16 +620,23 @@ jobs:
           )
 
           for CONFIG_NAME in "${REQUIRED_CONFIGS[@]}"; do
-            grep -q "^${CONFIG_NAME}=y$" "${CONFIG}" || {
+            if ! grep -q "^${CONFIG_NAME}=y$" "${CONFIG}"; then
               echo "::error::${CONFIG_NAME} is not enabled"
               exit 1
-            }
+            fi
           done
 
-          echo "ReSukiSU + SuSFS configuration verified."
+          echo
+          echo "=========================================="
+          echo "ReSukiSU + SuSFS configuration verified"
+          echo "=========================================="
+
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_KALLSYMS)' \
+            "${CONFIG}"
 
       # ==========================================================
-      # 15. Build kernel
+      # 16. Build kernel
       # ==========================================================
       - name: Build kernel
         working-directory: ${{ env.KERNEL_PATH }}
@@ -498,6 +647,7 @@ jobs:
             -j"$(nproc)" \
             O="${GITHUB_WORKSPACE}/${BUILD_DIR}" \
             ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-Wno-error" \
@@ -505,20 +655,23 @@ jobs:
             "${GITHUB_WORKSPACE}/kernel-build.log"
 
       # ==========================================================
-      # 16. Verify Image
+      # 17. Verify Image
       # ==========================================================
       - name: Verify kernel image
         run: |
           set -eux
 
-          test -f \
-            "${BUILD_DIR}/arch/arm64/boot/Image"
+          IMAGE="${BUILD_DIR}/arch/arm64/boot/Image"
 
-          ls -lh \
-            "${BUILD_DIR}/arch/arm64/boot/Image"
+          test -f "${IMAGE}"
+
+          echo "Kernel Image:"
+          ls -lh "${IMAGE}"
+
+          file "${IMAGE}"
 
       # ==========================================================
-      # 17. Download stock boot
+      # 18. Download stock boot
       # ==========================================================
       - name: Download stock boot image
         run: |
@@ -532,16 +685,21 @@ jobs:
             "${BOOT_URL}" \
             -o stock-boot.img
 
+          test -s stock-boot.img
+
           file stock-boot.img
 
+          ls -lh stock-boot.img
+
       # ==========================================================
-      # 18. Package
+      # 19. Package artifacts
       # ==========================================================
       - name: Package artifacts
         run: |
           set -eux
 
           rm -rf release
+
           mkdir -p release
 
           cp \
@@ -561,8 +719,16 @@ jobs:
             -C release \
             .
 
+          echo
+          echo "=========================================="
+          echo "Release package"
+          echo "=========================================="
+
+          ls -lh release/
+          ls -lh resukisu-susfs-kernel.tar.gz
+
       # ==========================================================
-      # 19. Upload
+      # 20. Upload artifacts
       # ==========================================================
       - name: Upload artifacts
         if: always()
