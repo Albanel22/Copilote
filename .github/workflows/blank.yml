@@ -3,41 +3,42 @@ name: Kernel CI - ReSukiSU + SuSFS 4.19
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm8250.git
   KERNEL_BRANCH: lineage-23.2
-
   KERNEL_PATH: kernel_src
   BUILD_DIR: out
-
   ARCH: arm64
   DEFCONFIG: vendor/lito-perf_defconfig
 
   NONGKI_REPO: https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd.git
   NONGKI_BRANCH: mainline
 
-  RESUKISU_SETUP: https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh
-
   BOOT_URL: https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img
 
-  CCACHE_SIZE: 5G
+  RESUKISU_SETUP: https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh
 
 jobs:
   build:
-    name: Build 4.19 - ReSukiSU + SuSFS
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
 
       # ============================================================
-      # 1. Checkout workflow repository
+      # CHECKOUT
       # ============================================================
-      - name: Checkout repository
+
+      - name: Checkout build repository
         uses: actions/checkout@v4
 
       # ============================================================
-      # 2. Dependencies
+      # DEPENDENCIES
       # ============================================================
+
       - name: Install build dependencies
         run: |
           set -euxo pipefail
@@ -49,29 +50,56 @@ jobs:
             bison \
             build-essential \
             ccache \
-            clang \
             flex \
+            libelf-dev \
+            libssl-dev \
+            libncurses-dev \
             gcc-aarch64-linux-gnu \
             gcc-arm-linux-gnueabi \
-            git \
-            libelf-dev \
-            libncurses-dev \
-            libssl-dev \
-            lld \
+            clang \
             llvm \
-            python3 \
-            python3-pip \
-            rsync \
-            unzip \
+            lld \
+            device-tree-compiler \
             zip \
+            unzip \
             curl \
-            wget \
-            device-tree-compiler
+            git \
+            python3 \
+            rsync \
+            cpio \
+            gzip \
+            xz-utils
 
       # ============================================================
-      # 3. Clone exact LineageOS kernel
+      # CCACHE
       # ============================================================
-      - name: Clone kernel source
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-sm8250-4.19-${{ hashFiles('.github/workflows/**') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-sm8250-4.19-
+            ${{ runner.os }}-ccache-
+
+      - name: Configure ccache
+        run: |
+          set -euxo pipefail
+
+          mkdir -p ~/.cache/ccache
+
+          ccache --set-config=cache_dir=$HOME/.cache/ccache
+          ccache --set-config=max_size=5G
+          ccache --set-config=compression=true
+
+          ccache -z
+
+      # ============================================================
+      # KERNEL SOURCE
+      # ============================================================
+
+      - name: Clone LineageOS kernel
         run: |
           set -euxo pipefail
 
@@ -85,107 +113,111 @@ jobs:
 
           cd "${KERNEL_PATH}"
 
-          echo "Kernel commit:"
-          git rev-parse HEAD
+          echo "=========================================="
+          echo "Kernel source"
+          echo "=========================================="
 
-          echo
-          echo "Kernel version:"
+          echo "Branch: ${KERNEL_BRANCH}"
+          echo "Commit: $(git rev-parse HEAD)"
+
           head -n 5 Makefile
 
       # ============================================================
-      # 4. Clone JackA1ltman NonGKI helper repository
+      # JACKA1LTMAN TOOLS
       # ============================================================
-      - name: Clone NonGKI helper repository
+
+      - name: Clone JackA1ltman NonGKI tools
         run: |
           set -euxo pipefail
 
-          rm -rf nongki
+          rm -rf non_gki_tools
 
           git clone \
             --depth=1 \
             --branch "${NONGKI_BRANCH}" \
             "${NONGKI_REPO}" \
-            nongki
+            non_gki_tools
 
-          echo "NonGKI commit:"
-          git -C nongki rev-parse HEAD
+          test -f non_gki_tools/bin/clean_hook.sh
+          test -f non_gki_tools/Patches/susfs_inline_hook_patches.sh
+          test -f non_gki_tools/Patches/Patch/susfs_patch_to_4.19.patch
+
+          echo "JackA1ltman tools OK"
 
       # ============================================================
-      # 5. Detect kernel version
+      # CLEAN EXISTING KSU
       # ============================================================
-      - name: Detect kernel version
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Clean existing KernelSU installation
         run: |
           set -euxo pipefail
 
-          KVER="$(
-            head -n 2 Makefile |
-            awk '
-              /VERSION/    { v=$3 }
-              /PATCHLEVEL/ { p=$3 }
-              END { print v "." p }
-            '
-          )"
+          cd "${KERNEL_PATH}"
 
-          echo "Detected kernel version: ${KVER}"
+          if [ -d KernelSU ] || grep -q 'CONFIG_KSU' fs/exec.c 2>/dev/null; then
 
-          if [ "${KVER}" != "4.19" ]; then
-            echo "::error::Expected kernel 4.19 but detected ${KVER}"
-            exit 1
+            echo "Existing KernelSU detected."
+
+            cp ../non_gki_tools/bin/clean_hook.sh ./clean_hook.sh
+
+            bash ./clean_hook.sh
+
+            rm -f ./clean_hook.sh
+
+          else
+
+            echo "No existing KernelSU installation detected."
+
           fi
 
       # ============================================================
-      # 6. Clean any previous KernelSU installation
+      # RESUKISU
       # ============================================================
-      - name: Clean existing KernelSU integration
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Embed current ReSukiSU
         run: |
           set -euxo pipefail
 
-          if [ -f "../nongki/bin/clean_hook.sh" ]; then
-            cp ../nongki/bin/clean_hook.sh .
-            chmod +x clean_hook.sh
+          cd "${KERNEL_PATH}"
 
-            ./clean_hook.sh || true
+          curl -fsSL \
+            "${RESUKISU_SETUP}" \
+            -o setup_resukisu.sh
 
-            rm -f clean_hook.sh
-          fi
+          bash setup_resukisu.sh
 
-          rm -rf KernelSU
+          rm -f setup_resukisu.sh
 
-      # ============================================================
-      # 7. Install current ReSukiSU
-      # ============================================================
-      - name: Install current ReSukiSU
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euxo pipefail
-
-          curl -LSs "${RESUKISU_SETUP}" | bash -s main
-
+          test -L drivers/kernelsu
           test -d KernelSU
-          test -e drivers/kernelsu
 
-          echo
-          echo "ReSukiSU installed:"
-          git -C KernelSU rev-parse HEAD || true
+          echo "=========================================="
+          echo "ReSukiSU"
+          echo "=========================================="
+
+          echo "Commit:"
+          git -C KernelSU rev-parse HEAD
+
+          git -C KernelSU log -1 --oneline
 
       # ============================================================
-      # 8. Add base ReSukiSU configuration to defconfig
+      # DEFCONFIG
       # ============================================================
-      - name: Configure ReSukiSU
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Configure ReSukiSU and SuSFS
         run: |
           set -euxo pipefail
 
-          DEFCONFIG_FILE="arch/arm64/configs/${DEFCONFIG}"
+          DEFCONFIG_FILE="${KERNEL_PATH}/arch/arm64/configs/${DEFCONFIG}"
 
           test -f "${DEFCONFIG_FILE}"
 
-          python3 <<'PY'
+          python3 - "${DEFCONFIG_FILE}" <<'PY'
+          import sys
           from pathlib import Path
 
-          path = Path("arch/arm64/configs/vendor/lito-perf_defconfig")
+          path = Path(sys.argv[1])
+
           text = path.read_text()
 
           configs = [
@@ -208,73 +240,347 @@ jobs:
 
           lines = text.splitlines()
 
-          for config in configs:
-              key = config.split("=")[0]
+          wanted = {
+              item.split("=", 1)[0]: item
+              for item in configs
+          }
 
-              if not any(line.startswith(key + "=") for line in lines):
-                  lines.append(config)
+          output = []
+          seen = set()
 
-          path.write_text("\n".join(lines) + "\n")
+          for line in lines:
+
+              if "=" in line:
+                  key = line.split("=", 1)[0]
+
+                  if key in wanted:
+                      output.append(wanted[key])
+                      seen.add(key)
+                      continue
+
+              output.append(line)
+
+          for item in configs:
+
+              key = item.split("=", 1)[0]
+
+              if key not in seen:
+                  output.append(item)
+
+          path.write_text(
+              "\n".join(output) + "\n"
+          )
           PY
 
+          echo
+          echo "Final defconfig entries:"
+          grep -E '^(CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_KSU_SUSFS)' \
+            "${DEFCONFIG_FILE}"
+
       # ============================================================
-      # 9. Apply JackA1ltman SuSFS inline hooks
+      # JACKA1LTMAN INLINE HOOKS
       # ============================================================
+
       - name: Apply JackA1ltman SuSFS inline hooks
-        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euxo pipefail
 
-          cp ../nongki/Patches/susfs_inline_hook_patches.sh .
+          cd "${KERNEL_PATH}"
 
-          chmod +x susfs_inline_hook_patches.sh
+          cp \
+            ../non_gki_tools/Patches/susfs_inline_hook_patches.sh \
+            ./susfs_inline_hook_patches.sh
 
-          ./susfs_inline_hook_patches.sh
+          bash ./susfs_inline_hook_patches.sh
+
+          rm -f ./susfs_inline_hook_patches.sh
 
       # ============================================================
-      # 10. Apply ReSukiSU manual hooks robustly
+      # SUSFS PATCH
+      # ============================================================
+
+      - name: Apply JackA1ltman SuSFS 4.19 patch
+        run: |
+          set -uo pipefail
+
+          cd "${KERNEL_PATH}"
+
+          cp \
+            ../non_gki_tools/Patches/Patch/susfs_patch_to_4.19.patch \
+            ./susfs_patch_to_4.19.patch
+
+          rm -f \
+            ./*.rej \
+            ./fs/*.rej \
+            ./fs/proc/*.rej \
+            2>/dev/null || true
+
+          echo
+          echo "=========================================="
+          echo "Applying SuSFS 4.19 patch"
+          echo "=========================================="
+
+          set +e
+
+          patch -p1 < susfs_patch_to_4.19.patch
+
+          PATCH_STATUS=$?
+
+          set -e
+
+          echo
+          echo "patch exit status: ${PATCH_STATUS}"
+
+          echo
+          echo "Reject files currently present:"
+
+          find . \
+            -type f \
+            -name '*.rej' \
+            -print || true
+
+          # patch is allowed to return non-zero here because the
+          # known 4.19 differences are adapted in the next step.
+
+          exit 0
+
+      # ============================================================
+      # MANUAL ADAPTATION
       #
-      # IMPORTANT:
-      # Do not use brittle exact multi-line matching.
-      # The source formatting of LineageOS 4.19 differs.
+      # This is based on the ACTUAL LineageOS lineage-23.2 source.
+      #
+      # Known differences:
+      #   fs/namespace.c
+      #   fs/proc/task_mmu.c
+      #   fs/stat.c / ReSukiSU newfstat return hook
       # ============================================================
-      - name: Fix ReSukiSU manual hooks for LineageOS 4.19
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Adapt SuSFS and ReSukiSU to actual 4.19 source
         run: |
           set -euxo pipefail
+
+          cd "${KERNEL_PATH}"
 
           python3 <<'PY'
           from pathlib import Path
-          import re
 
-          path = Path("fs/stat.c")
+          # ==========================================================
+          # fs/namespace.c
+          # ==========================================================
+
+          path = Path("fs/namespace.c")
+
           text = path.read_text()
 
-          # --------------------------------------------------------
-          # ReSukiSU declarations
-          # --------------------------------------------------------
-          declaration = r'''
-          #ifdef CONFIG_KSU_MANUAL_HOOK
+          include_block = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          #include <linux/susfs_def.h>
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          """
+
+          if "#include <linux/susfs_def.h>" not in text:
+
+              anchor = "#include <linux/sched/task.h>\n"
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: fs/namespace.c: include anchor not found"
+                  )
+
+              text = text.replace(
+                  anchor,
+                  anchor + include_block,
+                  1
+              )
+
+          declaration = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          extern bool susfs_is_current_ksu_domain(void);
+          extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
+
+          #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
+
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          """
+
+          if "susfs_is_current_ksu_domain(void)" not in text:
+
+              anchor = '#include "internal.h"\n\n'
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: fs/namespace.c: declaration anchor not found"
+                  )
+
+              text = text.replace(
+                  anchor,
+                  anchor + declaration,
+                  1
+              )
+
+          # ----------------------------------------------------------
+          # Current LineageOS 4.19 uses vfs_create_mount()
+          # ----------------------------------------------------------
+
+          if "susfs_alloc_non_unshare_ksu_vfsmnt(fc->source ?: \"none\")" not in text:
+
+              anchor = 'mnt = alloc_vfsmnt(fc->source ?: "none");'
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: fs/namespace.c: "
+                      "vfs_create_mount anchor not found"
+                  )
+
+              replacement = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          \t/* Keep the KSU mount namespace hidden while Android data
+          \t * is not yet accessible.
+          \t */
+          \tif (static_branch_unlikely(
+          \t\t&susfs_is_sdcard_android_data_not_decrypted)) {
+          \t\tif (susfs_is_current_ksu_domain()) {
+          \t\t\tmnt = susfs_alloc_non_unshare_ksu_vfsmnt(
+          \t\t\t\tfc->source ?: "none");
+          \t\t\tgoto bypass_orig_flow;
+          \t\t}
+          \t}
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          mnt = alloc_vfsmnt(fc->source ?: "none");
+
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          bypass_orig_flow:
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+          """
+
+              text = text.replace(
+                  anchor,
+                  replacement,
+                  1
+              )
+
+          path.write_text(text)
+
+          # ==========================================================
+          # fs/proc/task_mmu.c
+          # ==========================================================
+
+          path = Path("fs/proc/task_mmu.c")
+
+          text = path.read_text()
+
+          if "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" not in text:
+
+              if "#include <linux/susfs_def.h>" not in text:
+
+                  anchor = "#include <linux/shmem_fs.h>\n"
+
+                  if anchor not in text:
+                      raise SystemExit(
+                          "ERROR: task_mmu.c: include anchor not found"
+                      )
+
+                  text = text.replace(
+                      anchor,
+                      anchor
+                      + "#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n"
+                      + "#include <linux/susfs_def.h>\n"
+                      + "#endif\n",
+                      1
+                  )
+
+              # pagemap_read() currently has no vma variable.
+              anchor = "struct pagemapread pm;\n"
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: task_mmu.c: pagemap_read anchor not found"
+                  )
+
+              text = text.replace(
+                  anchor,
+                  anchor
+                  + "\tstruct vm_area_struct *vma;\n",
+                  1
+              )
+
+              # Current source uses mmap_read_lock_killable() /
+              # mmap_read_unlock(), so patch around walk_page_range().
+              anchor = (
+                  "\t\tret = walk_page_range("
+                  "start_vaddr, end, &pagemap_walk);\n"
+              )
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: task_mmu.c: walk_page_range anchor not found"
+                  )
+
+              replacement = """#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          \t\tvma = find_vma(mm, start_vaddr);
+
+          \t\tif (vma &&
+          \t\t    vma->vm_file &&
+          \t\t    SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+          \t\t\tgoto bypass_orig_flow;
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+
+          \t\tret = walk_page_range(start_vaddr, end, &pagemap_walk);
+
+          #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          bypass_orig_flow:
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          """
+
+              text = text.replace(
+                  anchor,
+                  replacement,
+                  1
+              )
+
+          path.write_text(text)
+
+          # ==========================================================
+          # fs/stat.c
+          #
+          # Do NOT match the entire function.
+          #
+          # The actual LineageOS 4.19 file has:
+          #
+          #   SYSCALL_DEFINE2(newfstat...)
+          #
+          # but spacing/context differs from the old patch.
+          # ==========================================================
+
+          path = Path("fs/stat.c")
+
+          text = path.read_text()
+
+          declaration = """#ifdef CONFIG_KSU_MANUAL_HOOK
           __attribute__((hot))
-          extern int ksu_handle_stat(int *dfd,
-                                     const char __user **filename_user,
-                                     int *flags);
+          extern int ksu_handle_stat(
+          \tint *dfd,
+          \tconst char __user **filename_user,
+          \tint *flags);
 
           extern void ksu_handle_newfstat_ret(
-              unsigned int *fd,
-              struct stat __user **statbuf_ptr);
+          \tunsigned int *fd,
+          \tstruct stat __user **statbuf_ptr);
 
           #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
           extern void ksu_handle_fstat64_ret(
-              unsigned long *fd,
-              struct stat64 __user **statbuf_ptr);
+          \tunsigned long *fd,
+          \tstruct stat64 __user **statbuf_ptr);
           #endif
           #endif
 
-          '''
+          """
 
           if "ksu_handle_newfstat_ret" not in text:
-              anchor = "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)"
+
+              anchor = (
+                  "#if !defined(__ARCH_WANT_STAT64) "
+                  "|| defined(__ARCH_WANT_SYS_NEWFSTATAT)\n"
+              )
 
               if anchor not in text:
                   raise SystemExit(
@@ -287,419 +593,200 @@ jobs:
                   1
               )
 
-          # --------------------------------------------------------
-          # newfstat() return hook
-          # --------------------------------------------------------
-          if "ksu_handle_newfstat_ret(&fd, &statbuf);" not in text:
+          # ----------------------------------------------------------
+          # newfstatat()
+          # ----------------------------------------------------------
 
-              pattern = re.compile(
-                  r'(SYSCALL_DEFINE2\(newfstat,\s*'
-                  r'unsigned int,\s*fd,\s*'
-                  r'struct stat __user \*,\s*statbuf\)'
-                  r'\s*\{.*?'
-                  r'if\s*\(!error\)\s*'
-                  r'error\s*=\s*cp_new_stat\(&stat,\s*statbuf\);)',
-                  re.S
-              )
+          if "ksu_handle_stat(&dfd, &filename, &flag);" not in text:
 
-              match = pattern.search(text)
+              signature = "SYSCALL_DEFINE4(newfstatat,"
 
-              if not match:
+              start = text.find(signature)
+
+              if start < 0:
                   raise SystemExit(
-                      "ERROR: fs/stat.c: SYSCALL_DEFINE2(newfstat) not found"
+                      "ERROR: fs/stat.c: newfstatat function not found"
                   )
 
-              replacement = (
-                  match.group(1)
-                  + "\n\n"
-                  + "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
-                  + "\tksu_handle_newfstat_ret(&fd, &statbuf);\n"
-                  + "#endif"
-              )
+              anchor = "\terror = vfs_fstatat("
+              pos = text.find(anchor, start)
+
+              if pos < 0:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: newfstatat hook anchor not found"
+                  )
+
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_stat(&dfd, &filename, &flag);
+          #endif
+          """
 
               text = (
-                  text[:match.start()]
-                  + replacement
-                  + text[match.end():]
+                  text[:pos]
+                  + hook
+                  + text[pos:]
               )
 
-          # --------------------------------------------------------
-          # fstat64() return hook
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # newfstat()
+          # ----------------------------------------------------------
+
+          if "ksu_handle_newfstat_ret(&fd, &statbuf);" not in text:
+
+              signature = "SYSCALL_DEFINE2(newfstat,"
+
+              start = text.find(signature)
+
+              if start < 0:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: newfstat function not found"
+                  )
+
+              pos = text.find(
+                  "\treturn error;\n",
+                  start
+              )
+
+              if pos < 0:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: newfstat return anchor not found"
+                  )
+
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_newfstat_ret(&fd, &statbuf);
+          #endif
+          """
+
+              text = (
+                  text[:pos]
+                  + hook
+                  + text[pos:]
+              )
+
+          # ----------------------------------------------------------
+          # fstat64()
+          # ----------------------------------------------------------
+
           if (
+              "SYSCALL_DEFINE2(fstat64," in text
+              and
               "ksu_handle_fstat64_ret(&fd, &statbuf);" not in text
-              and re.search(r'SYSCALL_DEFINE2\(fstat64', text)
           ):
 
-              pattern = re.compile(
-                  r'(SYSCALL_DEFINE2\(fstat64,\s*'
-                  r'unsigned long,\s*fd,\s*'
-                  r'struct stat64 __user \*,\s*statbuf\)'
-                  r'\s*\{.*?'
-                  r'if\s*\(!error\)\s*'
-                  r'error\s*=\s*cp_new_stat64\(&stat,\s*statbuf\);)',
-                  re.S
+              signature = "SYSCALL_DEFINE2(fstat64,"
+
+              start = text.find(signature)
+
+              pos = text.find(
+                  "\treturn error;\n",
+                  start
               )
 
-              match = pattern.search(text)
-
-              if match:
-                  replacement = (
-                      match.group(1)
-                      + "\n\n"
-                      + "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
-                      + "\tksu_handle_fstat64_ret(&fd, &statbuf);\n"
-                      + "#endif"
+              if pos < 0:
+                  raise SystemExit(
+                      "ERROR: fs/stat.c: fstat64 return anchor not found"
                   )
 
-                  text = (
-                      text[:match.start()]
-                      + replacement
-                      + text[match.end():]
-                  )
+              hook = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_fstat64_ret(&fd, &statbuf);
+          #endif
+          """
+
+              text = (
+                  text[:pos]
+                  + hook
+                  + text[pos:]
+              )
 
           path.write_text(text)
 
-          print("ReSukiSU stat hooks installed.")
-          PY
-
-          grep -n "ksu_handle_newfstat_ret" fs/stat.c
-          grep -n "ksu_handle_fstat64_ret" fs/stat.c || true
-
-      # ============================================================
-      # 11. Download JackA1ltman 4.19 SuSFS patch
-      # ============================================================
-      - name: Prepare SuSFS 4.19 patch
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euxo pipefail
-
-          cp ../nongki/Patches/Patch/susfs_patch_to_4.19.patch .
-
-          test -s susfs_patch_to_4.19.patch
-
-          echo "SuSFS patch:"
-          wc -l susfs_patch_to_4.19.patch
-
-      # ============================================================
-      # 12. Apply SuSFS patch
-      # ============================================================
-      - name: Apply SuSFS 4.19 patch
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euxo pipefail
-
-          find . -type f -name "*.rej" -delete
-          find . -type f -name "*.orig" -delete
-
-          patch -p1 < susfs_patch_to_4.19.patch || true
-
-          echo
-          echo "Checking SuSFS rejected hunks..."
-
-          find . -type f -name "*.rej" -print || true
-
-      # ============================================================
-      # 13. Manually resolve the two known 4.19 rejects
-      #
-      # fs/namespace.c
-      # fs/proc/task_mmu.c
-      # ============================================================
-      - name: Resolve known SuSFS 4.19 rejects
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euxo pipefail
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          # ========================================================
-          # fs/namespace.c
-          # ========================================================
-          path = Path("fs/namespace.c")
-          text = path.read_text()
-
-          # Header
-          if (
-              "CONFIG_KSU_SUSFS_SUS_MOUNT"
-              not in text
-              or "#include <linux/susfs_def.h>" not in text
-          ):
-              anchor = "#include <linux/sched/task.h>"
-
-              if anchor not in text:
-                  raise SystemExit(
-                      "ERROR: namespace.c: include anchor not found"
-                  )
-
-              block = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          #include <linux/susfs_def.h>
-          #endif
-          """
-
-              text = text.replace(
-                  anchor,
-                  anchor + "\n" + block.rstrip(),
-                  1
-              )
-
-          # Declarations
-          if "susfs_is_current_ksu_domain" not in text:
-              anchor = '#include "internal.h"'
-
-              block = """
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          extern bool susfs_is_current_ksu_domain(void);
-          extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
-
-          #define CL_COPY_MNT_NS BIT(25)
-          #endif
-          """
-
-              text = text.replace(
-                  anchor,
-                  anchor + block,
-                  1
-              )
-
-          # --------------------------------------------------------
-          # Current LineageOS 4.19 uses vfs_create_mount().
-          #
-          # JackA1ltman's wiki explicitly gives this form for
-          # kernels where alloc_vfsmnt() receives fc->source.
-          # --------------------------------------------------------
-          if (
-              "susfs_alloc_non_unshare_ksu_vfsmnt("
-              not in text
-          ):
-
-              old = """\tsb = fc->root->d_sb;
-          \tmnt = alloc_vfsmnt(fc->source ?: "none");
-          \tif (!mnt)
-          \t\treturn ERR_PTR(-ENOMEM);
-          """
-
-              new = """\tsb = fc->root->d_sb;
-
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          \tif (static_branch_unlikely(
-          \t\t&susfs_is_sdcard_android_data_not_decrypted)) {
-          \t\tif (susfs_is_current_ksu_domain()) {
-          \t\t\tmnt = susfs_alloc_non_unshare_ksu_vfsmnt(
-          \t\t\t\tfc->source ?: "none");
-          \t\t\tgoto bypass_orig_flow;
-          \t\t}
-          \t}
-          #endif
-
-          \tmnt = alloc_vfsmnt(fc->source ?: "none");
-
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          bypass_orig_flow:
-          #endif
-
-          \tif (!mnt)
-          \t\treturn ERR_PTR(-ENOMEM);
-          """
-
-              if old in text:
-                  text = text.replace(old, new, 1)
-              else:
-                  # Less strict fallback.
-                  marker = '\tmnt = alloc_vfsmnt(fc->source ?: "none");'
-
-                  if marker not in text:
-                      raise SystemExit(
-                          "ERROR: namespace.c: vfs_create_mount alloc_vfsmnt anchor not found"
-                      )
-
-                  replacement = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          \tif (static_branch_unlikely(
-          \t\t&susfs_is_sdcard_android_data_not_decrypted)) {
-          \t\tif (susfs_is_current_ksu_domain()) {
-          \t\t\tmnt = susfs_alloc_non_unshare_ksu_vfsmnt(
-          \t\t\t\tfc->source ?: "none");
-          \t\t\tgoto bypass_orig_flow;
-          \t\t}
-          \t}
-          #endif
-
-          \tmnt = alloc_vfsmnt(fc->source ?: "none");
-
-          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-          bypass_orig_flow:
-          #endif
-          """
-
-                  text = text.replace(
-                      marker,
-                      replacement.rstrip(),
-                      1
-                  )
-
-          path.write_text(text)
-
-          # ========================================================
-          # fs/proc/task_mmu.c
-          # ========================================================
-          path = Path("fs/proc/task_mmu.c")
-          text = path.read_text()
-
-          # Ensure vma declaration exists in pagemap_read.
-          if "static ssize_t pagemap_read" not in text:
-              raise SystemExit(
-                  "ERROR: task_mmu.c: pagemap_read not found"
-              )
-
-          # Locate function region.
-          start = text.index("static ssize_t pagemap_read")
-          end = text.index(
-              "\nstatic int pagemap_open",
-              start
-          )
-
-          func = text[start:end]
-
-          if "struct vm_area_struct *vma;" not in func:
-              anchor = "struct mm_walk pagemap_walk = {};"
-
-              if anchor not in func:
-                  raise SystemExit(
-                      "ERROR: task_mmu.c: pagemap_walk anchor not found"
-                  )
-
-              func = func.replace(
-                  anchor,
-                  anchor + "\n\tstruct vm_area_struct *vma;",
-                  1
-              )
-
-          # Add SUS_MAP bypass immediately before walk_page_range.
-          if "SUSFS_IS_INODE_SUS_MAP" not in func:
-
-              anchor = "\t\tret = walk_page_range(start_vaddr, end, &pagemap_walk);"
-
-              if anchor not in func:
-                  raise SystemExit(
-                      "ERROR: task_mmu.c: walk_page_range anchor not found"
-                  )
-
-              replacement = """#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-          \t\tvma = find_vma(mm, start_vaddr);
-          \t\tif (vma && vma->vm_file &&
-          \t\t    SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
-          \t\t\tgoto bypass_orig_flow;
-          #endif
-
-          \t\tret = walk_page_range(start_vaddr, end, &pagemap_walk);
-
-          #ifdef CONFIG_KSU_SUSFS_SUS_MAP
-          bypass_orig_flow:
-          #endif"""
-
-              func = func.replace(
-                  anchor,
-                  replacement,
-                  1
-              )
-
-          text = text[:start] + func + text[end:]
-
-          path.write_text(text)
-
+          print("Manual source adaptations completed successfully.")
           PY
 
       # ============================================================
-      # 14. Remove .rej files only after successful manual fixes
+      # REJECT VERIFICATION
       # ============================================================
-      - name: Verify SuSFS integration
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Verify no unexpected SuSFS rejects remain
         run: |
           set -euxo pipefail
 
-          echo "Checking rejected hunks..."
+          cd "${KERNEL_PATH}"
 
-          REJECTS="$(find . -type f -name "*.rej" | wc -l)"
+          echo "Current reject files:"
 
-          echo "Rejected hunks: ${REJECTS}"
+          find . \
+            -type f \
+            -name '*.rej' \
+            -print || true
 
-          if [ "${REJECTS}" -gt 0 ]; then
+          if find . -type f -name '*.rej' | grep -q .; then
+
             echo
-            echo "Remaining rejects:"
-            find . -type f -name "*.rej" -print
+            echo "=========================================="
+            echo "ERROR: Unexpected SuSFS rejects remain"
+            echo "=========================================="
 
-            echo
-            for rej in $(find . -type f -name "*.rej"); do
-              echo "========== ${rej} =========="
-              cat "${rej}"
+            while IFS= read -r file; do
               echo
-            done
+              echo "========== ${file} =========="
+              cat "${file}"
+            done < <(
+              find . \
+                -type f \
+                -name '*.rej' \
+                -print
+            )
 
             exit 1
           fi
 
-          rm -f \
-            fs/namespace.c.rej \
-            fs/proc/task_mmu.c.rej
-
-          echo "SuSFS source integration has no rejected hunks."
+          echo
+          echo "SuSFS patch tree is clean: no .rej files."
 
       # ============================================================
-      # 15. Prepare kernel configuration
+      # BUILD CONFIGURATION
       # ============================================================
+
       - name: Prepare kernel configuration
-        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euxo pipefail
 
-          mkdir -p "../${BUILD_DIR}"
+          rm -rf "${BUILD_DIR}"
+
+          mkdir -p "${BUILD_DIR}"
 
           make \
-            O="../${BUILD_DIR}" \
+            -C "${KERNEL_PATH}" \
+            O="${GITHUB_WORKSPACE}/${BUILD_DIR}" \
             ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             "${DEFCONFIG}"
 
-      # ============================================================
-      # 16. Force required options
-      # ============================================================
-      - name: Enable required kernel options
-        working-directory: ${{ env.KERNEL_PATH }}
-        run: |
-          set -euxo pipefail
-
-          scripts/config \
-            --file "../${BUILD_DIR}/.config" \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_MANUAL_HOOK \
-            --enable CONFIG_KALLSYMS \
-            --enable CONFIG_KALLSYMS_ALL \
-            --enable CONFIG_KSU_SUSFS \
-            --enable CONFIG_KSU_SUSFS_SUS_PATH \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
-            --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
-            --enable CONFIG_KSU_SUSFS_SPOOF_UNAME \
-            --enable CONFIG_KSU_SUSFS_ENABLE_LOG \
-            --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
-            --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
-            --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT \
-            --enable CONFIG_KSU_SUSFS_SUS_MAP
-
           make \
-            O="../${BUILD_DIR}" \
+            -C "${KERNEL_PATH}" \
+            O="${GITHUB_WORKSPACE}/${BUILD_DIR}" \
             ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             olddefconfig
 
       # ============================================================
-      # 17. Verify hooks before compilation
+      # CONFIG VERIFICATION
       # ============================================================
-      - name: Verify ReSukiSU hooks
-        working-directory: ${{ env.KERNEL_PATH }}
+
+      - name: Verify ReSukiSU and SuSFS configuration
         run: |
           set -euxo pipefail
 
-          CONFIG="../${BUILD_DIR}/.config"
+          test -f "${BUILD_DIR}/.config"
 
-          required_configs=(
+          REQUIRED_CONFIGS=(
             CONFIG_KSU
             CONFIG_KSU_MANUAL_HOOK
             CONFIG_KALLSYMS
@@ -716,162 +803,192 @@ jobs:
             CONFIG_KSU_SUSFS_SUS_MAP
           )
 
-          for CONFIG in "${required_configs[@]}"; do
-            grep -q "^${CONFIG}=y$" "${CONFIG_FILE:-$CONFIG}" 2>/dev/null || true
+          for CONFIG in "${REQUIRED_CONFIGS[@]}"; do
+
+            if ! grep -q "^${CONFIG}=y$" "${BUILD_DIR}/.config"; then
+              echo "::error::${CONFIG} is not enabled"
+              exit 1
+            fi
+
           done
 
-          grep -q '^CONFIG_KSU=y$' "${CONFIG}"
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' "${CONFIG}"
-          grep -q '^CONFIG_KALLSYMS=y$' "${CONFIG}"
-          grep -q '^CONFIG_KALLSYMS_ALL=y$' "${CONFIG}"
+          if grep -q '^CONFIG_KSU_KPROBES_HOOK=y$' \
+             "${BUILD_DIR}/.config"; then
 
-          grep -q 'ksu_handle_newfstat_ret' fs/stat.c
-          grep -q 'ksu_handle_fstat64_ret' fs/stat.c || true
+            echo "::error::KPROBES hook is enabled."
+            echo "::error::This build requires ReSukiSU Manual Hook."
 
-          grep -q 'ksu_handle_execveat' fs/exec.c
-          grep -q 'ksu_handle_faccessat' fs/open.c
-          grep -q 'ksu_handle_stat' fs/stat.c
+            exit 1
+          fi
 
-          echo "All mandatory ReSukiSU hooks detected."
+          echo
+          echo "=========================================="
+          echo "KernelSU / ReSukiSU / SuSFS configuration"
+          echo "=========================================="
+
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_KSU_SUSFS)' \
+            "${BUILD_DIR}/.config"
 
       # ============================================================
-      # 18. Configure ccache
+      # MANUAL HOOK VERIFICATION
       # ============================================================
-      - name: Configure ccache
+
+      - name: Verify ReSukiSU manual hooks
         run: |
           set -euxo pipefail
 
-          mkdir -p ~/.cache/ccache
+          cd "${KERNEL_PATH}"
 
-          ccache --max-size="${CCACHE_SIZE}"
-          ccache --zero-stats
+          grep -q 'ksu_handle_execveat' \
+            fs/exec.c
 
-          echo "CCACHE_DIR=${HOME}/.cache/ccache" >> "${GITHUB_ENV}"
+          grep -q 'ksu_handle_faccessat' \
+            fs/open.c
 
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-kernel-4.19-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-kernel-4.19-
+          grep -q 'ksu_handle_stat' \
+            fs/stat.c
+
+          grep -q 'ksu_handle_newfstat_ret' \
+            fs/stat.c
+
+          grep -q 'ksu_handle_sys_reboot' \
+            kernel/reboot.c
+
+          grep -q 'ksu_handle_setresuid' \
+            kernel/sys.c
+
+          grep -q 'ksu_handle_input_handle_event' \
+            drivers/input/input.c
+
+          echo
+          echo "=========================================="
+          echo "All required ReSukiSU manual hooks present"
+          echo "=========================================="
 
       # ============================================================
-      # 19. Build kernel
+      # BUILD
       # ============================================================
+
       - name: Build kernel
-        working-directory: ${{ env.KERNEL_PATH }}
         run: |
           set -euxo pipefail
-
-          export ARCH="${ARCH}"
-          export LLVM=1
-          export LLVM_IAS=1
 
           make \
-            -C . \
-            O="../${BUILD_DIR}" \
+            -C "${KERNEL_PATH}" \
+            O="${GITHUB_WORKSPACE}/${BUILD_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
-            CC="ccache clang" \
-            HOSTCC=clang \
-            HOSTCXX=clang++ \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            -j"$(nproc --all)"
+            -j"$(nproc)"
 
       # ============================================================
-      # 20. Verify final kernel image
+      # BUILD OUTPUT
       # ============================================================
-      - name: Verify build output
+
+      - name: Show kernel output
         run: |
           set -euxo pipefail
-
-          echo "Build directory:"
-          ls -lah "${BUILD_DIR}"
 
           echo
-          echo "Searching kernel images..."
+          echo "=========================================="
+          echo "Kernel output"
+          echo "=========================================="
 
-          find "${BUILD_DIR}" \
-            -maxdepth 4 \
+          find \
+            "${BUILD_DIR}/arch/${ARCH}/boot" \
+            -maxdepth 2 \
             -type f \
-            \( \
-              -name "Image" \
-              -o -name "Image.gz" \
-              -o -name "Image.gz-dtb" \
-              -o -name "*.dtb" \
-            \) \
             -print
 
-          test -f "${BUILD_DIR}/arch/arm64/boot/Image"
+          ls -lh \
+            "${BUILD_DIR}/arch/${ARCH}/boot/" || true
+
+          echo
+          ccache -s
 
       # ============================================================
-      # 21. Download stock boot.img
+      # STOCK BOOT
       # ============================================================
-      - name: Download stock boot image
-        run: |
-          set -euxo pipefail
 
-          mkdir -p boot
-
-          curl -L \
-            --fail \
-            --retry 5 \
-            --retry-delay 5 \
-            "${BOOT_URL}" \
-            -o boot/boot.img
-
-          test -s boot/boot.img
-
-          ls -lh boot/boot.img
-
-      # ============================================================
-      # 22. Package build artifacts
-      # ============================================================
-      - name: Prepare artifacts
+      - name: Download matching Kiev boot image
         run: |
           set -euxo pipefail
 
           mkdir -p artifacts
 
-          cp "${BUILD_DIR}/arch/arm64/boot/Image" \
-             artifacts/Image
+          curl \
+            -fL \
+            --retry 3 \
+            --retry-delay 5 \
+            "${BOOT_URL}" \
+            -o artifacts/stock-kiev-boot-20260809.img
 
-          if [ -f "${BUILD_DIR}/arch/arm64/boot/Image.gz" ]; then
-            cp "${BUILD_DIR}/arch/arm64/boot/Image.gz" \
-               artifacts/Image.gz
-          fi
-
-          if [ -f "${BUILD_DIR}/arch/arm64/boot/Image.gz-dtb" ]; then
-            cp "${BUILD_DIR}/arch/arm64/boot/Image.gz-dtb" \
-               artifacts/Image.gz-dtb
-          fi
-
-          cp boot/boot.img artifacts/boot-stock.img
-
-          cp "${BUILD_DIR}/.config" \
-             artifacts/kernel.config
-
-          tar -czf \
-            artifacts/kernel-source-modifications.tar.gz \
-            "${KERNEL_PATH}/KernelSU" \
-            "${KERNEL_PATH}/fs/susfs.c" \
-            "${KERNEL_PATH}/include/linux/susfs.h" \
-            "${KERNEL_PATH}/include/linux/susfs_def.h"
-
-          echo
-          echo "Artifacts:"
-          ls -lah artifacts
+          sha256sum \
+            artifacts/stock-kiev-boot-20260809.img
 
       # ============================================================
-      # 23. Upload artifacts
+      # PACKAGE
       # ============================================================
-      - name: Upload kernel artifacts
+
+      - name: Package kernel artifacts
+        run: |
+          set -euxo pipefail
+
+          mkdir -p artifacts/kernel
+
+          cp \
+            "${BUILD_DIR}/.config" \
+            artifacts/kernel/
+
+          cp -a \
+            "${BUILD_DIR}/arch/${ARCH}/boot/" \
+            artifacts/kernel/boot
+
+          if [ -f "${BUILD_DIR}/arch/${ARCH}/boot/Image.gz-dtb" ]; then
+
+            cp \
+              "${BUILD_DIR}/arch/${ARCH}/boot/Image.gz-dtb" \
+              artifacts/kernel/
+
+          elif [ -f "${BUILD_DIR}/arch/${ARCH}/boot/Image.gz" ]; then
+
+            cp \
+              "${BUILD_DIR}/arch/${ARCH}/boot/Image.gz" \
+              artifacts/kernel/
+
+          elif [ -f "${BUILD_DIR}/arch/${ARCH}/boot/Image" ]; then
+
+            cp \
+              "${BUILD_DIR}/arch/${ARCH}/boot/Image" \
+              artifacts/kernel/
+
+          else
+
+            echo "::error::No ARM64 kernel image found."
+
+            exit 1
+
+          fi
+
+          tar \
+            -czf \
+            artifacts/Kernel-ReSukiSU-SuSFS-kiev.tar.gz \
+            -C artifacts/kernel .
+
+          sha256sum \
+            artifacts/Kernel-ReSukiSU-SuSFS-kiev.tar.gz
+
+      # ============================================================
+      # ARTIFACT
+      # ============================================================
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-resukisu-susfs-4.19
+          name: Kernel-ReSukiSU-SuSFS-kiev
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
