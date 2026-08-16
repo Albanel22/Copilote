@@ -1,78 +1,47 @@
-name: Copilote - ReSukiSU Root Test
+name: Kernel CI - kiev 4.19.325 - ReSukiSU + SuSFS
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 env:
   ARCH: arm64
   SUBARCH: arm64
 
-  # ------------------------------------------------------------------
-  # KERNEL
-  # Ces valeurs seront adaptées à Copilote après validation du ZIP.
-  # ------------------------------------------------------------------
   KERNEL_DIR: kernel_src
   OUT_DIR: out
 
-  # ------------------------------------------------------------------
-  # ReSukiSU
-  #
-  # IMPORTANT :
-  # Aucun tag/version/commit n'est imposé.
-  # setup.sh est toujours récupéré depuis main.
-  # ------------------------------------------------------------------
-  RESUKISU_REPO: https://github.com/ReSukiSU/ReSukiSU.git
-  RESUKISU_BRANCH: main
+  DEFCONFIG: kiev_perfect_defconfig
 
-  # ------------------------------------------------------------------
-  # ROOT
-  # ------------------------------------------------------------------
-  KSU_MANUAL_HOOK: y
+  DEVICE: kiev
+  KERNEL_VERSION_EXPECTED: "4.19.325"
 
-  # SUSFS volontairement désactivé pour cette phase.
-  ENABLE_SUSFS: false
-
-  # ------------------------------------------------------------------
-  # BOOT IMAGE DE TEST
-  #
-  # Le résultat est destiné à :
-  #
-  #     fastboot boot boot.img
-  #
-  # et non à un flash permanent.
-  # ------------------------------------------------------------------
-  BUILD_TEST_BOOT: true
-
-  # ------------------------------------------------------------------
-  # ReSukiSU Manager
-  # ------------------------------------------------------------------
-  RESUKISU_MANAGER_REPO: ReSukiSU/ReSukiSU
+  CCACHE_SIZE: 5G
 
 jobs:
   build:
-    name: Build ReSukiSU Root Test
+    name: kiev 4.19.325 + ReSukiSU + SuSFS
     runs-on: ubuntu-latest
 
     steps:
 
-      # ================================================================
+      # ============================================================
       # CHECKOUT
-      # ================================================================
+      # ============================================================
 
-      - name: Checkout Copilote
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
+          ref: ResuKisu+SusFS
           fetch-depth: 1
 
-      # ================================================================
+      # ============================================================
       # DEPENDENCIES
-      # ================================================================
+      # ============================================================
 
-      - name: Install build dependencies
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -88,187 +57,428 @@ jobs:
             curl \
             flex \
             gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
             git \
             libelf-dev \
             libncurses-dev \
             libssl-dev \
             lld \
             llvm \
+            make \
+            patch \
+            perl \
             python3 \
+            rsync \
             unzip \
             zip \
             device-tree-compiler \
-            jq \
-            rsync
-
-      # ================================================================
-      # KERNEL SOURCE
-      #
-      # Cette partie sera alignée exactement sur Copilote après audit.
-      # ================================================================
-
-      - name: Prepare kernel source
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -d "${KERNEL_DIR}" || {
-            echo "::error::Kernel source directory '${KERNEL_DIR}' not found."
-            exit 1
-          }
-
-          cd "${KERNEL_DIR}"
-
-          echo "Kernel source:"
-          git remote -v || true
-          git branch --show-current || true
-          git log -1 --oneline || true
-
-      # ================================================================
-      # RESUKISU
-      #
-      # Aucun numéro de version.
-      # Aucun SHA imposé.
-      #
-      # On utilise toujours le setup.sh du main actuel.
-      # ================================================================
-
-      - name: Integrate latest ReSukiSU
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "${KERNEL_DIR}"
-
-          echo "=============================================="
-          echo " Integrating ReSukiSU"
-          echo " Repository: ${RESUKISU_REPO}"
-          echo " Branch:     ${RESUKISU_BRANCH}"
-          echo "=============================================="
-
-          curl -LSsf \
-            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/${RESUKISU_BRANCH}/kernel/setup.sh" \
-            -o /tmp/resukisu-setup.sh
-
-          chmod +x /tmp/resukisu-setup.sh
-
-          bash /tmp/resukisu-setup.sh
+            dwarves
 
           echo
-          echo "ReSukiSU integration completed."
+          echo "=============================="
+          echo "Toolchain"
+          echo "=============================="
 
-          test -d drivers/kernelsu || \
-            test -d drivers/ksu || \
-            test -d KernelSU || \
-            test -d kernel/ || {
-              echo "::warning::ReSukiSU directory could not be identified automatically."
-              echo "Inspecting possible KernelSU paths:"
-              find . -maxdepth 4 \
-                \( -iname '*ksu*' -o -iname '*resuki*' \) \
-                -print | head -100
-            }
+          clang --version
+          ld.lld --version
+          aarch64-linux-gnu-gcc --version
 
-      # ================================================================
-      # ROOT CONFIGURATION
-      #
-      # Aucun SUSFS.
-      # Manual Hook pour les kernels anciens/non-GKI.
-      #
-      # Les symboles exacts seront validés contre le kernel Copilote
-      # avant d'être figés.
-      # ================================================================
+      # ============================================================
+      # CCACHE
+      # ============================================================
 
-      - name: Configure ReSukiSU root
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-kiev-4.19.325-${{ github.ref_name }}-ccache
+          restore-keys: |
+            ${{ runner.os }}-kiev-4.19.325-${{ github.ref_name }}-
+            ${{ runner.os }}-kiev-4.19.325-
+            ${{ runner.os }}-ccache-
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${HOME}/.cache/ccache"
+
+          ccache --set-config=max_size="${CCACHE_SIZE}"
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+
+          ccache --zero-stats
+
+          echo
+          echo "ccache configuration:"
+          ccache --show-config
+
+      # ============================================================
+      # VERIFY SOURCE
+      # ============================================================
+
+      - name: Verify kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d "${KERNEL_DIR}" ]; then
+            echo "::error::${KERNEL_DIR} does not exist."
+            exit 1
+          fi
+
+          if [ ! -f "${KERNEL_DIR}/Makefile" ]; then
+            echo "::error::${KERNEL_DIR}/Makefile does not exist."
+            exit 1
+          fi
+
+          echo "Kernel source:"
+          realpath "${KERNEL_DIR}"
+
+          echo
+          echo "Git commit:"
+          git log -1 --oneline
+
+          echo
+          echo "Kernel Makefile:"
+          sed -n '1,15p' "${KERNEL_DIR}/Makefile"
+
+      # ============================================================
+      # VERIFY KERNEL VERSION
+      # ============================================================
+
+      - name: Verify kernel 4.19.325
         shell: bash
         run: |
           set -euo pipefail
 
           cd "${KERNEL_DIR}"
 
-          echo "Searching kernel configuration..."
+          VERSION="$(awk -F'= ' '/^VERSION =/ {print $2}' Makefile)"
+          PATCHLEVEL="$(awk -F'= ' '/^PATCHLEVEL =/ {print $2}' Makefile)"
+          SUBLEVEL="$(awk -F'= ' '/^SUBLEVEL =/ {print $2}' Makefile)"
 
-          CONFIG_FILE=""
+          DETECTED="${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
-          for candidate in \
-            "arch/arm64/configs/defconfig" \
-            "arch/arm64/configs/vendor/defconfig" \
-            "arch/arm64/configs/${DEFCONFIG:-}" \
-            ".config"
+          echo "Detected kernel: ${DETECTED}"
+          echo "Expected kernel: ${KERNEL_VERSION_EXPECTED}"
+
+          if [ "${DETECTED}" != "${KERNEL_VERSION_EXPECTED}" ]; then
+            echo "::error::Wrong kernel version."
+            exit 1
+          fi
+
+          echo "Kernel version OK."
+
+      # ============================================================
+      # VERIFY KIEV DEFCONFIG
+      # ============================================================
+
+      - name: Verify kiev defconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEFCONFIG_PATH="${KERNEL_DIR}/arch/${ARCH}/configs/${DEFCONFIG}"
+
+          if [ ! -f "${DEFCONFIG_PATH}" ]; then
+            echo "::error::Missing ${DEFCONFIG_PATH}"
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "${DEFCONFIG_PATH}"
+
+          echo
+          echo "Kernel configuration header:"
+          head -n 8 "${DEFCONFIG_PATH}"
+
+      # ============================================================
+      # VERIFY RESUKISU
+      # ============================================================
+
+      - name: Verify ReSukiSU
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          FOUND=false
+
+          for dir in \
+            drivers/kernelsu \
+            drivers/ksu \
+            KernelSU
           do
-            if [ -n "$candidate" ] && [ -f "$candidate" ]; then
-              CONFIG_FILE="$candidate"
-              break
+            if [ -d "${dir}" ]; then
+              echo "Found KernelSU/ReSukiSU tree: ${dir}"
+              FOUND=true
             fi
           done
 
-          if [ -z "$CONFIG_FILE" ]; then
-            echo "::error::Unable to identify kernel configuration file."
+          if [ "${FOUND}" != "true" ]; then
+            echo "::error::ReSukiSU/KernelSU source tree not found."
             exit 1
           fi
 
-          echo "Configuration candidate: $CONFIG_FILE"
-
-          # ------------------------------------------------------------
-          # ReSukiSU root
-          # ------------------------------------------------------------
-
-          if grep -q '^CONFIG_KSU=' "$CONFIG_FILE"; then
-            sed -i 's/^CONFIG_KSU=.*/CONFIG_KSU=y/' "$CONFIG_FILE"
-          else
-            printf '\nCONFIG_KSU=y\n' >> "$CONFIG_FILE"
-          fi
-
-          if grep -q '^CONFIG_KSU_MANUAL_HOOK=' "$CONFIG_FILE"; then
-            sed -i 's/^CONFIG_KSU_MANUAL_HOOK=.*/CONFIG_KSU_MANUAL_HOOK=y/' "$CONFIG_FILE"
-          else
-            printf 'CONFIG_KSU_MANUAL_HOOK=y\n' >> "$CONFIG_FILE"
-          fi
-
-          # ------------------------------------------------------------
-          # SUSFS volontairement absent.
-          # ------------------------------------------------------------
-
           echo
-          echo "ReSukiSU root configuration:"
-          grep -E '^CONFIG_KSU' "$CONFIG_FILE" || true
+          echo "ReSukiSU source detected."
 
-          echo
-          echo "SUSFS:"
-          echo "DISABLED"
+      # ============================================================
+      # VERIFY SUSFS SOURCE
+      # ============================================================
 
-      # ================================================================
-      # PREPARE CONFIG
-      # ================================================================
-
-      - name: Prepare kernel config
+      - name: Verify SuSFS
         shell: bash
         run: |
           set -euo pipefail
 
           cd "${KERNEL_DIR}"
 
-          make O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            olddefconfig
+          echo "Searching for SuSFS source..."
 
-          echo
-          echo "Final ReSukiSU configuration:"
-          grep -E '^CONFIG_KSU' \
-            "${GITHUB_WORKSPACE}/${OUT_DIR}/.config" || true
+          SUSFS_FOUND=false
 
-          if grep -q '^CONFIG_KSU=y' \
-              "${GITHUB_WORKSPACE}/${OUT_DIR}/.config"; then
-            echo "CONFIG_KSU=y"
-          else
-            echo "::error::CONFIG_KSU was not enabled."
+          if find . -type f \
+              \( \
+                -name 'susfs.c' \
+                -o -name 'susfs.h' \
+              \) \
+              | grep -q .; then
+
+            SUSFS_FOUND=true
+
+          fi
+
+          if [ "${SUSFS_FOUND}" != "true" ]; then
+            echo "::error::SuSFS source files not found."
             exit 1
           fi
 
-      # ================================================================
+          echo "SuSFS source detected."
+
+      # ============================================================
+      # VERIFY MANUAL HOOK
+      # ============================================================
+
+      - name: Verify Manual Hook
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          echo "Searching Manual Hook implementation..."
+
+          if grep -Rqs \
+            "CONFIG_KSU_MANUAL_HOOK" \
+            drivers/kernelsu \
+            drivers/ksu \
+            KernelSU \
+            2>/dev/null; then
+
+            echo "CONFIG_KSU_MANUAL_HOOK support detected."
+
+          else
+
+            echo "::warning::CONFIG_KSU_MANUAL_HOOK was not found in source tree."
+
+          fi
+
+          if [ -f "../kernelsu_manual_hooks.patch" ]; then
+            echo
+            echo "Manual Hook patch exists:"
+            echo "../kernelsu_manual_hooks.patch"
+            echo
+            echo "It will NOT be applied automatically."
+          fi
+
+      # ============================================================
+      # VERIFY DEFCONFIG OPTIONS
+      # ============================================================
+
+      - name: Verify ReSukiSU and SuSFS configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${KERNEL_DIR}/arch/${ARCH}/configs/${DEFCONFIG}"
+
+          echo
+          echo "=========================================="
+          echo "ReSukiSU / SuSFS configuration"
+          echo "=========================================="
+
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_SUKISU|CONFIG_KSU_SUSFS)' \
+            "${CONFIG}" || true
+
+          echo
+          echo "Checking mandatory options..."
+
+          REQUIRED="
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          "
+
+          while IFS= read -r option; do
+
+            [ -z "${option}" ] && continue
+
+            if ! grep -q "^${option}$" "${CONFIG}"; then
+              echo "::error::Missing configuration: ${option}"
+              exit 1
+            fi
+
+            echo "OK: ${option}"
+
+          done <<< "${REQUIRED}"
+
+          echo
+          echo "ReSukiSU + SuSFS configuration validated."
+
+      # ============================================================
+      # PREPARE OUTPUT
+      # ============================================================
+
+      - name: Prepare build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${OUT_DIR}"
+
+          mkdir -p "${OUT_DIR}"
+
+          echo "Output directory:"
+          realpath "${OUT_DIR}"
+
+      # ============================================================
+      # GENERATE .CONFIG
+      # ============================================================
+
+      - name: Generate kernel configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          make \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            "${DEFCONFIG}"
+
+          make \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            olddefconfig
+
+      # ============================================================
+      # VERIFY FINAL .CONFIG
+      # ============================================================
+
+      - name: Verify final .config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${OUT_DIR}/.config"
+
+          if [ ! -f "${CONFIG}" ]; then
+            echo "::error::Generated .config not found."
+            exit 1
+          fi
+
+          echo
+          echo "=========================================="
+          echo "FINAL CONFIGURATION"
+          echo "=========================================="
+
+          grep -E \
+            '^(CONFIG_KSU|CONFIG_SUKISU|CONFIG_KSU_SUSFS)' \
+            "${CONFIG}" || true
+
+          echo
+          echo "Checking required options..."
+
+          REQUIRED="
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          "
+
+          while IFS= read -r option; do
+
+            [ -z "${option}" ] && continue
+
+            if ! grep -q "^${option}$" "${CONFIG}"; then
+              echo "::error::Final .config is missing: ${option}"
+              exit 1
+            fi
+
+            echo "OK: ${option}"
+
+          done <<< "${REQUIRED}"
+
+      # ============================================================
       # BUILD KERNEL
-      # ================================================================
+      # ============================================================
 
       - name: Build kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${KERNEL_DIR}"
+
+          export PATH="/usr/lib/ccache:${PATH}"
+
+          echo
+          echo "=========================================="
+          echo "BUILD"
+          echo "=========================================="
+
+          echo "CPU threads: $(nproc)"
+          echo "Architecture: ${ARCH}"
+          echo "Device: ${DEVICE}"
+          echo "Kernel: ${KERNEL_VERSION_EXPECTED}"
+          echo "Compiler: Clang 18"
+          echo "Root: ReSukiSU"
+          echo "Hook: Manual Hook"
+          echo "SuSFS: enabled"
+
+          make \
+            -j"$(nproc)" \
+            O="${GITHUB_WORKSPACE}/${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="ccache clang" \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+      # ============================================================
+      # DTBS
+      # ============================================================
+
+      - name: Build DTBs
         shell: bash
         run: |
           set -euo pipefail
@@ -281,317 +491,147 @@ jobs:
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+            dtbs
 
-      # ================================================================
-      # FIND KERNEL IMAGE
-      # ================================================================
+      # ============================================================
+      # FIND IMAGE
+      # ============================================================
 
       - name: Locate kernel image
         shell: bash
         run: |
           set -euo pipefail
 
-          BOOT_DIR="${GITHUB_WORKSPACE}/${OUT_DIR}/arch/${ARCH}/boot"
+          BOOT_DIR="${OUT_DIR}/arch/${ARCH}/boot"
 
           echo "Boot directory:"
-          ls -lah "$BOOT_DIR"
+          ls -lah "${BOOT_DIR}"
 
-          KERNEL_IMAGE=""
+          IMAGE=""
 
-          for candidate in \
-            Image \
+          for file in \
+            Image.gz-dtb \
+            Image.lz4-dtb \
             Image.gz \
             Image.lz4 \
-            Image.gz-dtb \
-            Image.lz4-dtb
+            Image
           do
-            if [ -f "${BOOT_DIR}/${candidate}" ]; then
-              KERNEL_IMAGE="${BOOT_DIR}/${candidate}"
+            if [ -f "${BOOT_DIR}/${file}" ]; then
+              IMAGE="${BOOT_DIR}/${file}"
               break
             fi
           done
 
-          if [ -z "$KERNEL_IMAGE" ]; then
-            echo "::error::No supported ARM64 kernel image found."
-            find "${GITHUB_WORKSPACE}/${OUT_DIR}" \
+          if [ -z "${IMAGE}" ]; then
+            echo "::error::No kernel Image found."
+
+            find "${OUT_DIR}/arch/${ARCH}/boot" \
               -type f \
-              \( -name 'Image*' -o -name '*.dtb' \) \
-              -print | head -100
+              -maxdepth 3 \
+              -print
+
             exit 1
           fi
 
-          echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> "$GITHUB_ENV"
+          echo "KERNEL_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
+          echo
           echo "Selected kernel image:"
-          ls -lh "$KERNEL_IMAGE"
+          ls -lh "${IMAGE}"
 
-      # ================================================================
-      # DOWNLOAD LATEST RESUKISU MANAGER
-      #
-      # ReSukiSU ne publie actuellement pas son Manager comme une
-      # release classique. Il est distribué via GitHub Actions/nightly.
-      #
-      # On interroge donc automatiquement l'API GitHub pour trouver
-      # le dernier workflow réussi et ses artefacts.
-      # ================================================================
+      # ============================================================
+      # VERIFY VMLINUX
+      # ============================================================
 
-      - name: Download latest ReSukiSU Manager
+      - name: Verify vmlinux
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p "${GITHUB_WORKSPACE}/resukisu-manager"
-
-          API="https://api.github.com/repos/${RESUKISU_MANAGER_REPO}"
-
-          echo "Searching latest successful ReSukiSU workflow..."
-
-          RUNS_JSON="$(
-            curl -LSsf \
-              -H "Accept: application/vnd.github+json" \
-              "${API}/actions/runs?branch=main&status=success&per_page=20"
-          )"
-
-          RUN_ID="$(
-            echo "$RUNS_JSON" |
-              jq -r '.workflow_runs[0].id // empty'
-          )"
-
-          if [ -z "$RUN_ID" ]; then
-            echo "::warning::No successful ReSukiSU workflow found."
-            echo "Manager will not be packaged in this run."
+          if [ ! -f "${OUT_DIR}/vmlinux" ]; then
+            echo "::warning::vmlinux was not generated."
             exit 0
           fi
 
-          echo "Selected ReSukiSU workflow run: ${RUN_ID}"
+          echo "vmlinux:"
+          ls -lh "${OUT_DIR}/vmlinux"
 
-          ARTIFACTS_JSON="$(
-            curl -LSsf \
-              -H "Accept: application/vnd.github+json" \
-              "${API}/actions/runs/${RUN_ID}/artifacts"
-          )"
+          echo
+          echo "ReSukiSU/SuSFS symbols:"
 
-          echo "$ARTIFACTS_JSON" |
-            jq -r '.artifacts[] | "\(.id) \(.name) \(.size_in_bytes)"'
+          nm "${OUT_DIR}/vmlinux" 2>/dev/null \
+            | grep -E 'ksu_|susfs_' \
+            | head -100 \
+            || true
 
-          ARTIFACT_ID="$(
-            echo "$ARTIFACTS_JSON" |
-              jq -r '
-                .artifacts[]
-                | select(.expired == false)
-                | select(
-                    (.name | ascii_downcase | contains("manager"))
-                    or
-                    (.name | ascii_downcase | contains("app"))
-                  )
-                | .id
-              ' |
-              head -n 1
-          )"
+      # ============================================================
+      # CCACHE STATS
+      # ============================================================
 
-          if [ -z "$ARTIFACT_ID" ]; then
-            echo "::warning::No Manager artifact identified automatically."
-            exit 0
+      - name: ccache statistics
+        shell: bash
+        run: |
+          ccache --show-stats || true
+
+      # ============================================================
+      # PACKAGE
+      # ============================================================
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          cp "${KERNEL_IMAGE}" \
+            artifacts/
+
+          cp "${OUT_DIR}/.config" \
+            artifacts/kernel.config
+
+          if [ -f "${OUT_DIR}/vmlinux" ]; then
+            cp "${OUT_DIR}/vmlinux" \
+              artifacts/
           fi
 
-          echo "Downloading Manager artifact ${ARTIFACT_ID}..."
+          if [ -d "${OUT_DIR}/arch/${ARCH}/boot/dts" ]; then
+            tar -C "${OUT_DIR}/arch/${ARCH}/boot" \
+              -czf artifacts/dtb.tar.gz \
+              dts
+          fi
 
-          curl -LSsfL \
-            -H "Accept: application/vnd.github+json" \
-            "${API}/actions/artifacts/${ARTIFACT_ID}/zip" \
-            -o "${GITHUB_WORKSPACE}/resukisu-manager/manager.zip"
+          cat > artifacts/build-info.txt <<EOF
+          Device: Motorola One 5G Ace
+          Codename: kiev
+          Kernel: 4.19.325
+          Android: 16
+          LineageOS: 23.2
+          Architecture: arm64
+          Root: ReSukiSU
+          Hook: Manual Hook
+          SuSFS: enabled
+          Compiler: Clang 18
+          Repository: Albanel22/Copilote
+          Branch: ResuKisu+SusFS
+          Commit: ${GITHUB_SHA}
+          Run: ${GITHUB_RUN_NUMBER}
+          EOF
 
-          unzip -o \
-            "${GITHUB_WORKSPACE}/resukisu-manager/manager.zip" \
-            -d "${GITHUB_WORKSPACE}/resukisu-manager/extracted"
+          zip -r \
+            "kiev-4.19.325-ReSukiSU-SuSFS-${GITHUB_RUN_NUMBER}.zip" \
+            artifacts
 
-          find "${GITHUB_WORKSPACE}/resukisu-manager" \
-            -type f \
-            -print
+      # ============================================================
+      # UPLOAD
+      # ============================================================
 
-      # ================================================================
-      # BOOT IMAGE TEST
-      #
-      # Le workflow doit utiliser une image boot de référence du projet.
-      #
-      # Elle sera reconstruite avec le nouveau kernel.
-      #
-      # Le résultat est destiné à :
-      #
-      #     fastboot boot boot.img
-      #
-      # donc aucun flash permanent dans cette phase.
-      # ================================================================
-
-      - name: Prepare test boot image
-        if: env.BUILD_TEST_BOOT == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -n "${SOURCE_BOOT_IMAGE_URL:-}" || {
-            echo "::error::SOURCE_BOOT_IMAGE_URL must be defined for test boot generation."
-            exit 1
-          }
-
-          mkdir -p "${GITHUB_WORKSPACE}/boot-work"
-
-          echo "Downloading reference boot image..."
-
-          curl -LSsfL \
-            "${SOURCE_BOOT_IMAGE_URL}" \
-            -o "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
-
-          test -s "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
-
-          echo "Reference boot image:"
-          ls -lh "${GITHUB_WORKSPACE}/boot-work/source-boot.img"
-
-      # ================================================================
-      # MAGISKBOOT
-      #
-      # Le binaire sera récupéré automatiquement.
-      # Il servira uniquement à remplacer le kernel dans le boot.img.
-      # ================================================================
-
-      - name: Prepare magiskboot
-        if: env.BUILD_TEST_BOOT == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p "${GITHUB_WORKSPACE}/magiskboot"
-
-          # Recherche automatique du dernier artefact public Magisk
-          # contenant magiskboot.
-          RELEASE_JSON="$(
-            curl -LSsf \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/topjohnwu/Magisk/releases/latest
-          )"
-
-          APK_URL="$(
-            echo "$RELEASE_JSON" |
-              jq -r '
-                .assets[]
-                | select(.name | endswith(".apk"))
-                | .browser_download_url
-              ' |
-              head -n 1
-          )"
-
-          test -n "$APK_URL"
-
-          curl -LSsfL \
-            "$APK_URL" \
-            -o "${GITHUB_WORKSPACE}/magiskboot/magisk.apk"
-
-          unzip -j \
-            "${GITHUB_WORKSPACE}/magiskboot/magisk.apk" \
-            'lib/arm64-v8a/libmagiskboot.so' \
-            -d "${GITHUB_WORKSPACE}/magiskboot"
-
-          mv \
-            "${GITHUB_WORKSPACE}/magiskboot/libmagiskboot.so" \
-            "${GITHUB_WORKSPACE}/magiskboot/magiskboot"
-
-          chmod +x \
-            "${GITHUB_WORKSPACE}/magiskboot/magiskboot"
-
-          "${GITHUB_WORKSPACE}/magiskboot/magiskboot" --help >/dev/null 2>&1 || true
-
-      # ================================================================
-      # REPACK TEST BOOT
-      # ================================================================
-
-      - name: Repack test boot image
-        if: env.BUILD_TEST_BOOT == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          WORK="${GITHUB_WORKSPACE}/boot-work"
-          MAGISKBOOT="${GITHUB_WORKSPACE}/magiskboot/magiskboot"
-
-          cd "$WORK"
-
-          rm -rf unpacked
-          mkdir -p unpacked
-
-          cp source-boot.img unpacked/boot.img
-
-          cd unpacked
-
-          echo "Unpacking boot image..."
-
-          "$MAGISKBOOT" unpack boot.img
-
-          test -f kernel || {
-            echo "::error::magiskboot did not produce a kernel file."
-            find . -maxdepth 2 -type f -print
-            exit 1
-          }
-
-          echo "Replacing boot kernel..."
-
-          cp "${KERNEL_IMAGE}" kernel
-
-          echo "Repacking boot image..."
-
-          "$MAGISKBOOT" repack boot.img
-
-          test -f new-boot.img
-
-          cp new-boot.img "${GITHUB_WORKSPACE}/boot.img"
-
-          echo
-          echo "TEST boot image generated:"
-          ls -lh "${GITHUB_WORKSPACE}/boot.img"
-
-      # ================================================================
-      # VERIFY ROOT CONFIGURATION
-      # ================================================================
-
-      - name: Verify ReSukiSU kernel integration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${GITHUB_WORKSPACE}/${OUT_DIR}/.config"
-
-          echo "=============================================="
-          echo " ReSukiSU verification"
-          echo "=============================================="
-
-          grep -E '^CONFIG_KSU' "$CONFIG" || true
-
-          grep -q '^CONFIG_KSU=y' "$CONFIG" || {
-            echo "::error::ReSukiSU/KernelSU is not enabled."
-            exit 1
-          }
-
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG" || {
-            echo "::error::Manual Hook is not enabled."
-            exit 1
-          }
-
-          echo
-          echo "SUSFS must remain disabled in Phase 1."
-
-      # ================================================================
-      # ARTIFACTS
-      # ================================================================
-
-      - name: Upload test artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Copilote-ReSukiSU-root-test
-          if-no-files-found: error
+          name: kiev-4.19.325-ReSukiSU-SuSFS
           path: |
-            ${{ env.OUT_DIR }}/arch/arm64/boot/Image*
-            boot.img
-            resukisu-manager/**
-
+            artifacts/
+            kiev-4.19.325-ReSukiSU-SuSFS-${{ github.run_number }}.zip
+          if-no-files-found: error
+          retention-days: 14
