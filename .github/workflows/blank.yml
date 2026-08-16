@@ -1075,13 +1075,16 @@ jobs:
         with:
           name: kiev-integration-diagnostics-${{ github.run_number }}
           path: |
-            ${{ env.KERNEL_PATH }}/**/*.rej
-            ${{ env.KERNEL_PATH }}/**/*.orig
+            ${{ env.KERNEL_PATH }}/fs/namespace.c
+            ${{ env.KERNEL_PATH }}/fs/proc/task_mmu.c
             ${{ env.KERNEL_PATH }}/.config
             ${{ env.KERNEL_PATH }}/Makefile
+            ${{ env.KERNEL_PATH }}/fs/namespace.c.rej
+            ${{ env.KERNEL_PATH }}/fs/proc/task_mmu.c.rej
+            ${{ env.KERNEL_PATH }}/**/*.rej
+            ${{ env.KERNEL_PATH }}/**/*.orig
           if-no-files-found: ignore
           compression-level: 0
-
 
       # ============================================================
       # SUMMARY
