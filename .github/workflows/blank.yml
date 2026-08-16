@@ -1,266 +1,393 @@
-#ifdef __aarch64__
+name: Kernel CI — build & package (SukiSU-Ultra)
 
-#include "../syscall_hook.h"
+on:
+  workflow_dispatch:
 
-#include <linux/kallsyms.h>
-#include <linux/mutex.h>
-#include <asm/cacheflush.h>
-#include "infra/symbol_resolver.h"
-#include "../patch_memory.h"
-#include "arch.h"
-#include "klog.h" // IWYU pragma: keep
+env:
+  KERNEL_PATH: kernel_src
+  BUILD_DIR: out
+  ARCH: arm64
+  DEFCONFIG: lito-perf_defconfig
+  CCACHE_SIZE: 5G
+  # Fork personnel avec les correctifs de compatibilité 4.19 déjà appliqués
+  # (file_wrapper.c, su_mount_ns.c, pkg_observer.c, allowlist.c, app_profile.c, Kbuild)
+  SUKISU_REPO: 'https://github.com/Albanel22/SukiSU-Ultra.git'
+  SUKISU_BRANCH: 'main'
+  SUSFS_REPO: 'https://gitlab.com/simonpunk/susfs4ksu.git'
+  SUSFS_BRANCH: 'kernel-4.19'
+  # Boot.img de référence LineageOS pour générer boot_test.img (fastboot boot).
+  # Change juste la date dans l'URL à chaque mise à jour LineageOS.
+  BOOT_URL: 'https://mirrorbits.lineageos.org/full/kiev/20260809/boot.img'
+  # Désactive temporairement le packaging AnyKernel3 : on veut juste boot_test.img
+  # pour l'instant. Repasse à 'true' pour réactiver le zip flashable.
+  BUILD_ANYKERNEL: 'trie⁴'
 
-syscall_fn_t *ksu_syscall_table = NULL;
-int ksu_dispatcher_nr = -1;
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-// Hook registration table — read with READ_ONCE from tracepoint/dispatcher
-// context, written with WRITE_ONCE from init/exit context.
-static ksu_syscall_hook_fn syscall_hooks[__NR_syscalls];
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex \
+            glibc-source libelf-dev libssl-dev libncurses-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang llvm lld device-tree-compiler zip unzip curl git python3
+      - name: Clone Motorola Kernel Source
+        run: |
+          set -euo pipefail
+          echo "📥 Récupération des sources du noyau..."
+          git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git \
+            -b lineage-23.2 --depth=1 ${{ env.KERNEL_PATH }}
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-ccache-kernel-${{ github.run_number }}
+          restore-keys: ${{ runner.os }}-ccache-
 
-// Track all hooked syscall entries for restoration.
-// Protected by hooked_entries_lock.
-struct syscall_hook_entry {
-    int nr;
-    syscall_fn_t orig;
-};
-
-static DEFINE_MUTEX(hooked_entries_lock);
-static struct syscall_hook_entry hooked_entries[16];
-static int hooked_count = 0;
-
-static int patch_syscall_table(int nr, syscall_fn_t fn)
-{
-    if (ksu_syscall_table == NULL)
-        return -ENOENT;
-    if (nr < 0 || nr >= __NR_syscalls)
-        return -EINVAL;
-
-    pr_info("patch syscall %d, 0x%lx -> 0x%lx\n", nr, (unsigned long)READ_ONCE(ksu_syscall_table[nr]),
-            (unsigned long)fn);
-
-    if (ksu_patch_text(&ksu_syscall_table[nr], &fn, sizeof(fn), KSU_PATCH_TEXT_FLUSH_DCACHE)) {
-        pr_err("patch syscall %d failed\n", nr);
-        return -EIO;
-    }
-
-    return 0;
-}
-
-// Direct syscall table patching: overwrite syscall_table[nr] with fn,
-// save original to *old, and record for restoration at module exit.
-void ksu_syscall_table_hook(int nr, syscall_fn_t fn, syscall_fn_t *old)
-{
-    if (ksu_syscall_table == NULL)
-        return;
-    if (nr < 0 || nr >= __NR_syscalls) {
-        pr_info("invalid nr: %d\n", nr);
-        return;
-    }
-
-    mutex_lock(&hooked_entries_lock);
-
-    syscall_fn_t orig = READ_ONCE(ksu_syscall_table[nr]);
-    if (old)
-        *old = orig;
-
-    // Record for later restoration
-    int i;
-    bool found = false;
-    for (i = 0; i < hooked_count; i++) {
-        if (hooked_entries[i].nr == nr) {
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
-        if (hooked_count < ARRAY_SIZE(hooked_entries)) {
-            hooked_entries[hooked_count].nr = nr;
-            hooked_entries[hooked_count].orig = orig;
-            hooked_count++;
-        } else {
-            pr_warn("hooked_entries full, cannot track syscall %d for restoration\n", nr);
-        }
-    }
-
-    patch_syscall_table(nr, fn);
-
-    mutex_unlock(&hooked_entries_lock);
-}
-
-// Restore syscall_table[nr] to its original value and remove from tracking list.
-void ksu_syscall_table_unhook(int nr)
-{
-    int i;
-
-    if (ksu_syscall_table == NULL)
-        return;
-    if (nr < 0 || nr >= __NR_syscalls)
-        return;
-
-    mutex_lock(&hooked_entries_lock);
-
-    for (i = 0; i < hooked_count; i++) {
-        if (hooked_entries[i].nr == nr) {
-            patch_syscall_table(nr, hooked_entries[i].orig);
-            // Remove entry by swapping with last
-            hooked_entries[i] = hooked_entries[--hooked_count];
-            mutex_unlock(&hooked_entries_lock);
-            pr_info("unhooked syscall %d\n", nr);
-            return;
-        }
-    }
-
-    mutex_unlock(&hooked_entries_lock);
-    pr_warn("syscall %d not found in hooked entries\n", nr);
-}
-
-static int __init ksu_find_ni_syscall_slots(int *out_slots, int max_slots)
-{
-    unsigned long ni_syscall;
-    int i, count = 0;
-
-    if (!ksu_syscall_table || max_slots <= 0)
-        return 0;
-
-    ni_syscall = (unsigned long)ksu_resolve_symbol_for_functable_hook("__arm64_sys_ni_syscall");
-
-    pr_info("sys_ni_syscall: 0x%lx\n", ni_syscall);
-
-    if (!ni_syscall)
-        return 0;
-
-    for (i = 0; i < __NR_syscalls && count < max_slots; i++) {
-        if ((unsigned long)ksu_syscall_table[i] == ni_syscall) {
-            out_slots[count++] = i;
-            pr_info("ni_syscall %d: %d\n", count, i);
-        }
-    }
-
-    return count;
-}
-
-// Unified dispatcher: reads original NR from x8, dispatches to handler.
-// Validates that syscallno matches our dispatcher slot (i.e. we redirected it),
-// otherwise it's a spurious call — return -ENOSYS.
-static long __nocfi ksu_syscall_dispatcher(const struct pt_regs *regs)
-{
-    if (regs->syscallno != ksu_dispatcher_nr)
-        return -ENOSYS;
-
-    int orig_nr = (int)PT_REGS_ORIG_SYSCALL(regs);
-
-    if (regs->syscallno == orig_nr)
-        return -ENOSYS;
-
-    // Restore registers to original state before dispatching
-    ((struct pt_regs *)regs)->syscallno = orig_nr;
-    PT_REGS_ORIG_SYSCALL((struct pt_regs *)regs) = orig_nr;
-
-    if (likely(orig_nr >= 0 && orig_nr < __NR_syscalls)) {
-        ksu_syscall_hook_fn fn = READ_ONCE(syscall_hooks[orig_nr]);
-        if (likely(fn))
-            return fn(orig_nr, regs);
-    }
-
-    return -ENOSYS;
-}
-
-// Register a handler into the dispatcher's routing table.
-// Does not modify the syscall table — the dispatcher slot is shared by all hooks.
-int ksu_register_syscall_hook(int nr, ksu_syscall_hook_fn fn)
-{
-    if (nr < 0 || nr >= __NR_syscalls)
-        return -EINVAL;
-    if (READ_ONCE(syscall_hooks[nr])) {
-        pr_warn("syscall hook for nr=%d already registered, skip\n", nr);
-        return -EEXIST;
-    }
-    WRITE_ONCE(syscall_hooks[nr], fn);
-    pr_info("registered syscall hook for nr=%d\n", nr);
-    return 0;
-}
-
-// Remove a handler from the dispatcher's routing table.
-// The syscall table is not touched — only the dispatcher stops routing this nr.
-void ksu_unregister_syscall_hook(int nr)
-{
-    if (nr < 0 || nr >= __NR_syscalls)
-        return;
-    WRITE_ONCE(syscall_hooks[nr], NULL);
-    pr_info("unregistered syscall hook for nr=%d\n", nr);
-}
-
-bool ksu_has_syscall_hook(int nr)
-{
-    if (nr < 0 || nr >= __NR_syscalls)
-        return false;
-    return READ_ONCE(syscall_hooks[nr]) != NULL;
-}
-
-void __init ksu_syscall_hook_init(void)
-{
-    int ni_slot;
-
-    memset(syscall_hooks, 0, sizeof(syscall_hooks));
-
-    ksu_syscall_table = (syscall_fn_t *)ksu_resolve_symbol_for_functable_hook("sys_call_table");
-    pr_info("sys_call_table=0x%lx", (unsigned long)ksu_syscall_table);
-
-    if (!ksu_syscall_table)
-        return;
-
-    /* 🔬 DIAGNOSTIC BOOTLOOP (round 2) : on s'arrête ICI, avant toute écriture
-     * mémoire réelle. ksu_syscall_table est renseigné (débloque les hooks de
-     * ksu_ksud_init pour __NR_read/__NR_fstat), mais on n'installe PAS le
-     * dispatcher (pas d'appel à ksu_patch_text ici). Objectif : savoir si le
-     * simple fait de résoudre le symbole suffit à faire planter, ou si c'est
-     * bien l'écriture mémoire elle-même (ksu_patch_text / patch_memory.c) le
-     * vrai coupable. */
-    pr_alert("KSU DIAG: dispatcher install SKIPPED, only symbol resolution done\n");
-    return;
-
-    // Find one ni_syscall slot for the dispatcher
-    if (ksu_find_ni_syscall_slots(&ni_slot, 1) < 1) {
-        pr_err("failed to find ni_syscall slot for dispatcher\n");
-        return;
-    }
-
-    ksu_dispatcher_nr = ni_slot;
-    ksu_syscall_table_hook(ksu_dispatcher_nr, (syscall_fn_t)ksu_syscall_dispatcher, NULL);
-    pr_info("dispatcher installed at slot %d\n", ksu_dispatcher_nr);
-}
-
-void __exit ksu_syscall_hook_exit(void)
-{
-    int i;
-
-    if (!ksu_syscall_table)
-        goto clear_state;
-
-    // First, restore all patched syscall table entries while the dispatcher
-    // and hook table are still intact, so in-flight syscalls see valid state.
-    mutex_lock(&hooked_entries_lock);
-    for (i = 0; i < hooked_count; i++) {
-        int nr = hooked_entries[i].nr;
-        syscall_fn_t orig = hooked_entries[i].orig;
-
-        pr_info("restore syscall %d to 0x%lx\n", nr, (unsigned long)orig);
-        if (ksu_patch_text(&ksu_syscall_table[nr], &orig, sizeof(orig), KSU_PATCH_TEXT_FLUSH_DCACHE)) {
-            pr_err("restore syscall %d failed\n", nr);
-        }
-    }
-    hooked_count = 0;
-    mutex_unlock(&hooked_entries_lock);
-
-clear_state:
-    // Now that the syscall table is restored, clear internal state.
-    // At this point the tracepoint is already unregistered and synchronized
-    // (done by ksu_syscall_hook_manager_exit before calling us), so no new
-    // dispatches will occur.
-    memset(syscall_hooks, 0, sizeof(syscall_hooks));
-    ksu_dispatcher_nr = -1;
-
-    pr_info("all syscall hooks restored\n");
-}
-
-#endif /* __aarch64__ */
+      - name: 📂 Intégration SukiSU-Ultra & SUSFS & Vérification
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          echo "=================================================="
+          echo "📥 [1/3] Nettoyage et clonage de SukiSU-Ultra (monorepo)..."
+          echo "=================================================="
+          rm -rf drivers/kernelsu SukiSU-Ultra-src susfs4ksu || true
+          # Clone à part, PAS directement dans drivers/kernelsu : SukiSU-Ultra
+          # mélange app manager + driver + docs à sa racine.
+          git clone --depth=1 -b "${{ env.SUKISU_BRANCH }}" "${{ env.SUKISU_REPO }}" SukiSU-Ultra-src
+          if [ ! -d "SukiSU-Ultra-src/kernel" ]; then
+            echo "❌ ERREUR CRITIQUE : SukiSU-Ultra-src/kernel introuvable — structure du dépôt inattendue"
+            echo "ℹ️  Contenu de la racine clonée :"
+            ls -la SukiSU-Ultra-src
+            exit 1
+          fi
+          echo "📦 Copie du sous-dossier kernel/ (le vrai driver) vers drivers/kernelsu..."
+          cp -r SukiSU-Ultra-src/kernel drivers/kernelsu
+          echo "📦 Copie du dossier uapi/ racine du monorepo (header ABI partagé noyau↔manager)..."
+          # Le Kbuild ajoute déjà -I$(KSU_KERNEL_DIR) (= drivers/kernelsu) au chemin de recherche.
+          # Les includes "uapi/xxx.h" dans tout le code se résolvent donc automatiquement
+          # une fois ce dossier copié ici, sans avoir à dupliquer quoi que ce soit ailleurs.
+          if [ -d "SukiSU-Ultra-src/uapi" ]; then
+            cp -r SukiSU-Ultra-src/uapi drivers/kernelsu/uapi
+            echo "✅ drivers/kernelsu/uapi/ créé :"
+            ls -la drivers/kernelsu/uapi
+          else
+            echo "❌ ERREUR CRITIQUE : SukiSU-Ultra-src/uapi introuvable à la racine du monorepo !"
+            exit 1
+          fi
+          rm -rf SukiSU-Ultra-src
+          if [ ! -f drivers/kernelsu/Kbuild ] && [ ! -f drivers/kernelsu/Makefile ]; then
+            echo "❌ ERREUR CRITIQUE : drivers/kernelsu ne contient ni Kbuild ni Makefile après copie !"
+            ls -la drivers/kernelsu
+            exit 1
+          fi
+          echo "✅ SukiSU-Ultra (driver, fork corrigé pour 4.19) copié avec succès dans drivers/kernelsu."
+          echo "=================================================="
+          echo "🔗 [1b/3] Enregistrement du driver dans le système de build du noyau..."
+          echo "=================================================="
+          # setup.sh officiel fait ça automatiquement ('[+] Modified Makefile.' / '[+] Modified Kconfig.')
+          # On le reproduit ici puisqu'on clone le driver directement au lieu d'utiliser setup.sh.
+          if ! grep -q 'kernelsu' drivers/Makefile 2>/dev/null; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            echo "✅ drivers/Makefile mis à jour"
+          else
+            echo "ℹ️  drivers/Makefile référence déjà kernelsu"
+          fi
+          if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
+            # Insère juste avant le dernier "endmenu" du fichier
+            sed -i '0,/^endmenu/{/^endmenu/i\
+          source "drivers/kernelsu/Kconfig"
+          }' drivers/Kconfig
+            echo "✅ drivers/Kconfig mis à jour"
+          else
+            echo "ℹ️  drivers/Kconfig référence déjà kernelsu/Kconfig"
+          fi
+          echo "🔍 Vérification :"
+          grep -n 'kernelsu' drivers/Makefile
+          grep -n 'kernelsu' drivers/Kconfig
+          echo "🔍 Vérification finale : les includes uapi/ sont-ils bien résolubles ?"
+          if [ -f drivers/kernelsu/uapi/app_profile.h ]; then
+            echo "✅ drivers/kernelsu/uapi/app_profile.h présent — le -I du Kbuild devrait le résoudre partout."
+          else
+            echo "❌ drivers/kernelsu/uapi/app_profile.h toujours absent après copie !"
+            exit 1
+          fi
+          echo "🔧 Neutralisation de MODULE_IMPORT_NS (absente sur noyau 4.19, introduite en 5.x)..."
+          # Seul correctif runtime restant : jamais transféré dans un fichier corrigé du fork.
+          if [ -f drivers/kernelsu/core/init.c ]; then
+            sed -i 's/^MODULE_IMPORT_NS(.*/\/\/ &  \/\/ 4.19 compat : MODULE_IMPORT_NS absente avant 5.x/' drivers/kernelsu/core/init.c
+            if grep -q '^// MODULE_IMPORT_NS' drivers/kernelsu/core/init.c; then
+              echo "✅ MODULE_IMPORT_NS neutralisée dans init.c"
+            else
+              echo "ℹ️  Aucune occurrence de MODULE_IMPORT_NS trouvée dans init.c (peut-être déjà absente)"
+            fi
+          fi
+          # Filet de sécurité : au cas où MODULE_IMPORT_NS apparaîtrait aussi ailleurs dans le driver
+          # (le "|| true" évite que pipefail fasse échouer le script quand grep ne trouve rien à corriger)
+          grep -rl '^MODULE_IMPORT_NS(' drivers/kernelsu --include="*.c" 2>/dev/null | while read -r f; do
+            sed -i 's/^MODULE_IMPORT_NS(.*/\/\/ &  \/\/ 4.19 compat/' "$f"
+            echo "✅ MODULE_IMPORT_NS neutralisée dans $f"
+          done || true
+          echo "=================================================="
+          echo "📥 [2/3] Récupération et application des patchs SUSFS..."
+          echo "=================================================="
+          if git clone "${{ env.SUSFS_REPO }}" -b "${{ env.SUSFS_BRANCH }}" --depth=1; then
+            if [ -d "susfs4ksu/kernel_patches" ]; then
+              cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+              cp -r susfs4ksu/kernel_patches/fs/* fs/
+              echo "✅ Patchs SUSFS (include/linux et fs) copiés avec succès."
+            else
+              echo "❌ ERREUR CRITIQUE : Dossier kernel_patches absent dans susfs4ksu !"
+              exit 1
+            fi
+            rm -rf susfs4ksu
+          else
+            echo "❌ ERREUR CRITIQUE : Échec du clonage de SUSFS (${{ env.SUSFS_BRANCH }}) !"
+            exit 1
+          fi
+          echo "=================================================="
+          echo "🔍 [3/3] Audit de sécurité et traçabilité..."
+          echo "=================================================="
+          # Vérification de la structure SukiSU-Ultra (Kbuild + au moins un fichier core)
+          if [ -f drivers/kernelsu/Kbuild ] && find drivers/kernelsu -name "init.c" | grep -q .; then
+            echo "🟢 Statut SukiSU-Ultra : PRÉSENT et structuré."
+          else
+            echo "⚠️ ALERTE : La structure de SukiSU-Ultra semble anormale !"
+          fi
+          # Vérification de SUSFS dans le noyau
+          if [ -f "fs/susfs.c" ] || [ -f "include/linux/susfs.h" ]; then
+            echo "🟢 Statut SUSFS : INTÉGRÉ avec succès dans le noyau."
+          else
+            echo "❌ ERREUR : SUSFS n'a pas été trouvé dans les sources du noyau après la copie !"
+            exit 1
+          fi
+          echo "=================================================="
+          echo "✅ Tous les voyants sont verts, lancement du build."
+          echo "=================================================="
+      - name: Prepare defconfig
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p arch/arm64/configs/vendor
+          if [ -f "../kiev_perfect_defconfig" ]; then
+            cp ../kiev_perfect_defconfig arch/arm64/configs/vendor/${{ env.DEFCONFIG }}
+          fi
+      - name: Multi-stage Kernel Compilation
+        working-directory: ${{ env.KERNEL_PATH }}
+        run: |
+          set -euo pipefail
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=${{ env.ARCH }}
+          export USE_CCACHE=1
+          export CC="ccache clang"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KCFLAGS="-Wno-error"
+          ccache -M ${{ env.CCACHE_SIZE }}
+          ccache -z
+          mkdir -p ${{ env.BUILD_DIR }}
+          cp arch/arm64/configs/vendor/${{ env.DEFCONFIG }} arch/arm64/configs/${{ env.DEFCONFIG }} || true
+          echo "🔧 Patchs modules & Tactile Motorola..."
+          # Bypass check_version() restauré : confirmé non-responsable du bootloop
+          # (deux boots réussis sans lui), et le tactile reste cassé même sans —
+          # signe qu'il est probablement nécessaire au chargement du module tactile.
+          sed -i 's/if (!check_version(/if (0 \&\& !check_version(/g' kernel/module.c
+          printf "\n#include <linux/notifier.h>\n#include <linux/module.h>\nstatic BLOCKING_NOTIFIER_HEAD(motorola_panel_notifier_list);\nint panel_register_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_register(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_register_notifier);\nint panel_unregister_notifier(struct notifier_block *nb) {\n    return blocking_notifier_chain_unregister(&motorola_panel_notifier_list, nb);\n}\nEXPORT_SYMBOL(panel_unregister_notifier);\nvoid touch_set_state(int state) { return; }\nEXPORT_SYMBOL(touch_set_state);\n" >> techpack/display/msm/msm_drv.c
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 ${{ env.DEFCONFIG }}
+          cat >> ${{ env.BUILD_DIR }}/.config << 'CONFIG_EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_CALLBACK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT_UNMOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_EXT4_FS=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_OVERLAY_FS_REDIRECT_DIR=y
+          CONFIG_KALLSYMS=y
+          CONFIG_KALLSYMS_ALL=y
+          CONFIG_SECURITY_SELINUX=y
+          CONFIG_SECURITY_SELINUX_BOOTPARAM=y
+          CONFIG_SECURITY_SELINUX_DISABLE=y
+          CONFIG_EOF
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 oldconfig
+          echo "🔍 Vérification immédiate : CONFIG_KSU a-t-il survécu à oldconfig ?"
+          if grep -q '^CONFIG_KSU=y' ${{ env.BUILD_DIR }}/.config; then
+            echo "✅ CONFIG_KSU=y confirmé dans le .config final"
+          else
+            echo "❌ CONFIG_KSU absent ou désactivé après oldconfig !"
+            grep -n 'CONFIG_KSU' ${{ env.BUILD_DIR }}/.config || echo "  (aucune ligne trouvée)"
+            exit 1
+          fi
+          make O=${{ env.BUILD_DIR }} LLVM=1 CC="$CC" CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 KCFLAGS="$KCFLAGS" -j$(nproc) Image 2>&1 | tee build.log
+          if [ ! -f "${{ env.BUILD_DIR }}/arch/arm64/boot/Image" ]; then
+            echo "❌ Erreur : Image du noyau non trouvée"
+            tail -80 build.log
+            exit 1
+          fi
+          echo "✅ Compilation du noyau réussie"
+          echo "🔍 Vérification que le driver KSU a bien été LIÉ (pas juste présent en source)..."
+          if grep -q "drivers/kernelsu/" build.log; then
+            echo "✅ Le compilateur a bien traité des fichiers dans drivers/kernelsu/"
+          else
+            echo "❌ ALERTE : aucune trace de compilation dans drivers/kernelsu/ dans les logs de build !"
+            echo "💡 Le driver est probablement resté non lié — vérifie drivers/Makefile et drivers/Kconfig"
+          fi
+          if [ -f "${{ env.BUILD_DIR }}/vmlinux" ]; then
+            SYM_COUNT=$(nm "${{ env.BUILD_DIR }}/vmlinux" 2>/dev/null | grep -c 'ksu_' || true)
+            echo "ℹ️  $SYM_COUNT symboles 'ksu_' trouvés dans vmlinux"
+            if [ "$SYM_COUNT" -eq 0 ]; then
+              echo "❌ ALERTE : aucun symbole ksu_ dans vmlinux — le driver n'est pas dans le binaire final !"
+            fi
+          fi
+      - name: Repack & Finalize (AnyKernel3)
+        if: ${{ env.BUILD_ANYKERNEL == 'true' }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/anykernel.sh AnyKernel3/README.md AnyKernel3/.gitignore
+          mkdir -p AnyKernel3/patch/system/bin
+          echo "📂 Copie de ksud depuis le dépôt local..."
+          if [ ! -f ksud ]; then
+            echo "❌ ksud introuvable à la racine de ${{ github.workspace }}"
+            echo "💡 Vérifie que le workflow a bien été lancé sur la branche 'test-sukisu' (sélecteur 'Use workflow from')"
+            ls -la .
+            exit 1
+          fi
+          cp ksud AnyKernel3/patch/system/bin/ksud
+          chmod +x AnyKernel3/patch/system/bin/ksud
+          echo "✍️ Création du script anykernel.sh avec intégration native d'OverlayFS..."
+          cat << 'EOF' > AnyKernel3/anykernel.sh
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+          ### AnyKernel setup
+          properties() { '
+          kernel.string=Custom Kernel avec SukiSU-Ultra pour Motorola One 5G Ace
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=1
+          device.name1=kiev
+          device.name2=XT2113-2
+          device.name3=kiev_retde
+          device.name4=kiev_t
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+          ### AnyKernel install
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+          if [ -f patch/system/bin/ksud ]; then
+            mkdir -p /data/adb/ksu/bin
+            cp patch/system/bin/ksud /data/adb/ksu/bin/ksud
+            chmod 755 /data/adb/ksu/bin/ksud
+          fi
+          flash_boot;
+          EOF
+          sed -i 's/\r$//' AnyKernel3/anykernel.sh
+          IMG="${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image"
+          cp "$IMG" AnyKernel3/Image
+          mkdir -p final_output
+          cd AnyKernel3
+          zip -r9 ../final_output/AnyKernel3_SukiSUUltra_kiev.zip .
+          cd ..
+          echo "✅ Packaging terminé avec succès"
+      - name: 🥾 Génération d'un boot.img autonome pour "fastboot boot"
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [ -f boot_stock.img ]; then
+            echo "ℹ️  boot_stock.img déjà présent localement, on l'utilise tel quel."
+          else
+            echo "📥 Téléchargement du boot.img de référence LineageOS..."
+            if ! curl -fLo boot_stock.img "${{ env.BOOT_URL }}"; then
+              echo "⚠️  Échec du téléchargement depuis ${{ env.BOOT_URL }} — étape sautée."
+              echo "💡 Vérifie que la date dans BOOT_URL correspond à une build LineageOS existante."
+              exit 0
+            fi
+          fi
+          echo "📥 Récupération de magiskboot (extrait de l'APK Magisk officiel)..."
+          RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/topjohnwu/Magisk/releases/latest)
+          APK_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":[[:space:]]*"[^"]*\.apk"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')
+          if [ -z "$APK_URL" ]; then
+            echo "❌ Impossible de trouver l'APK Magisk dans la dernière release"
+            exit 1
+          fi
+          curl -fLo magisk.apk "$APK_URL"
+          unzip -o -q magisk.apk -d magisk_extract
+          MAGISKBOOT_SO=$(find magisk_extract -name "libmagiskboot.so" -path "*x86_64*" | head -1)
+          if [ -z "$MAGISKBOOT_SO" ]; then
+            echo "❌ libmagiskboot.so (x86_64) introuvable dans l'APK"
+            exit 1
+          fi
+          cp "$MAGISKBOOT_SO" magiskboot
+          chmod +x magiskboot
+          echo "✅ magiskboot prêt : $(ls -lh magiskboot)"
+          echo "📦 Déballage du boot.img d'origine..."
+          mkdir -p boot_work
+          cp boot_stock.img boot_work/boot_stock.img
+          cd boot_work
+          ../magiskboot unpack boot_stock.img
+          ls -la
+          echo "🔁 Remplacement du noyau par notre build..."
+          cp "../${{ env.KERNEL_PATH }}/${{ env.BUILD_DIR }}/arch/arm64/boot/Image" kernel
+          echo "🔧 Repackaging en boot_test.img..."
+          ../magiskboot repack boot_stock.img boot_test.img
+          if [ ! -f boot_test.img ]; then
+            echo "❌ Échec de la génération de boot_test.img"
+            exit 1
+          fi
+          cd ..
+          mkdir -p final_output
+          cp boot_work/boot_test.img final_output/boot_test.img
+          echo "🔍 Vérification de taille : boot_test.img vs boot_stock.img..."
+          STOCK_SIZE=$(stat -c%s boot_stock.img)
+          TEST_SIZE=$(stat -c%s final_output/boot_test.img)
+          echo "ℹ️  boot_stock.img : $STOCK_SIZE octets ($(numfmt --to=iec $STOCK_SIZE 2>/dev/null || echo "$STOCK_SIZE"))"
+          echo "ℹ️  boot_test.img  : $TEST_SIZE octets ($(numfmt --to=iec $TEST_SIZE 2>/dev/null || echo "$TEST_SIZE"))"
+          # Tolérance de 15% : le nouveau noyau peut légèrement différer en taille,
+          # mais un écart plus important signale probablement un composant manquant
+          # (ramdisk, dtb...) lors du repack.
+          DIFF_PCT=$(awk -v a="$STOCK_SIZE" -v b="$TEST_SIZE" 'BEGIN { d = (a-b); if (d<0) d=-d; printf "%.1f", (d/a)*100 }')
+          echo "ℹ️  Écart : ${DIFF_PCT}%"
+          if awk -v d="$DIFF_PCT" 'BEGIN { exit !(d > 15) }'; then
+            echo "⚠️  ALERTE : écart de taille supérieur à 15% — un composant (ramdisk/dtb) a peut-être été perdu au repack !"
+            echo "💡 Inspecte le contenu de boot_work/ (kernel, ramdisk.cpio, dtb, extra...) pour comparer."
+          else
+            echo "✅ Taille cohérente avec le boot.img d'origine"
+          fi
+          echo "✅ boot_test.img généré — utilisable directement avec :"
+          echo "   fastboot boot boot_test.img"
+          ls -lh final_output/boot_test.img
+      - name: Upload Finished Packaged Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-motorola_anykernel3
+          path: |
+            final_output/AnyKernel3_SukiSUUltra_kiev.zip
+            final_output/boot_test.img
+          retention-days: 30
+          if-no-files-found: warn
